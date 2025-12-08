@@ -31,7 +31,16 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+Reference: `.specify/memory/constitution.md`
+
+| Principle | Status | Evidence/Notes |
+|-----------|--------|----------------|
+| I. Type-Driven Design | ⬜ | Types designed before implementation? Illegal states unrepresentable? |
+| II. Deep Module Architecture | ⬜ | Minimal public interfaces? Smart constructors for validation? |
+| III. Denotational Semantics | ⬜ | Laws documented? Properties testable? |
+| IV. Total Functions | ⬜ | No partial functions? Errors in return types? |
+| V. Pure Core, Impure Shell | ⬜ | Domain logic pure? Effects at boundaries? |
+| VI. Property-Based Testing | ⬜ | Property tests planned? Golden tests for contracts? |
 
 ## Project Structure
 
