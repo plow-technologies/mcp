@@ -26,6 +26,7 @@ module MCP.Server.HTTP (
 
     -- * Demo Configuration Helpers
     defaultDemoOAuthConfig,
+    defaultProtectedResourceMetadata,
 ) where
 
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO, writeTVar)
@@ -51,12 +52,12 @@ import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant (Context (..), Handler, Proxy (..), Server, serve, serveWithContext, throwError)
 import Servant.API (FormUrlEncoded, Get, JSON, PlainText, Post, QueryParam, QueryParam', ReqBody, Required, (:<|>) (..), (:>))
 import Servant.Auth.Server (Auth, AuthResult (..), FromJWT, JWT, JWTSettings, ToJWT, defaultCookieSettings, defaultJWTSettings, generateKey, makeJWT)
-import Servant.Server (err400, err401, err500, errBody)
+import Servant.Server (err400, err401, err500, errBody, errHeaders)
 
 import Control.Monad (unless, when)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
-import MCP.Server.Auth (OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), validateCodeVerifier)
+import MCP.Server.Auth (OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), validateCodeVerifier)
 import MCP.Types
 
 -- | Configuration for running an MCP HTTP server
@@ -69,6 +70,9 @@ data HTTPServerConfig = HTTPServerConfig
     , httpOAuthConfig :: Maybe OAuthConfig
     , httpJWK :: Maybe JWK -- JWT signing key
     , httpProtocolVersion :: Text -- MCP protocol version
+    , httpProtectedResourceMetadata :: Maybe ProtectedResourceMetadata
+    -- ^ Custom protected resource metadata.
+    -- When Nothing, auto-generated from httpBaseUrl.
     }
     deriving (Show)
 
@@ -185,9 +189,13 @@ type MCPAPI auths = Auth auths AuthUser :> "mcp" :> ReqBody '[JSON] Aeson.Value 
 -- | Unprotected MCP API (for backward compatibility)
 type UnprotectedMCPAPI = "mcp" :> ReqBody '[JSON] Aeson.Value :> Post '[JSON] Aeson.Value
 
+-- | Protected Resource Metadata API (RFC 9728)
+type ProtectedResourceAPI = ".well-known" :> "oauth-protected-resource" :> Get '[JSON] ProtectedResourceMetadata
+
 -- | OAuth endpoints
 type OAuthAPI =
-    ".well-known" :> "oauth-authorization-server" :> Get '[JSON] OAuthMetadata
+    ProtectedResourceAPI
+        :<|> ".well-known" :> "oauth-authorization-server" :> Get '[JSON] OAuthMetadata
         :<|> "register"
             :> ReqBody '[JSON] ClientRegistrationRequest
             :> Post '[JSON] ClientRegistrationResponse
@@ -199,6 +207,7 @@ type OAuthAPI =
             :> QueryParam' '[Required] "code_challenge_method" Text
             :> QueryParam "scope" Text
             :> QueryParam "state" Text
+            :> QueryParam "resource" Text
             :> Get '[PlainText] Text
         :<|> "token"
             :> ReqBody '[FormUrlEncoded] [(Text, Text)]
@@ -227,7 +236,8 @@ mcpApp config stateVar oauthStateVar jwtSettings =
   where
     oauthServer :: HTTPServerConfig -> TVar OAuthState -> Server OAuthAPI
     oauthServer cfg oauthState =
-        handleMetadata cfg
+        handleProtectedResourceMetadata cfg
+            :<|> handleMetadata cfg
             :<|> handleRegister cfg oauthState
             :<|> handleAuthorize cfg oauthState
             :<|> handleToken jwtSettings cfg oauthState
@@ -236,9 +246,13 @@ mcpApp config stateVar oauthStateVar jwtSettings =
     mcpServerAuth httpConfig stateTVar authResult requestValue =
         case authResult of
             Authenticated user -> handleHTTPRequest httpConfig stateTVar (Just user) requestValue
-            NoSuchUser -> throwError err401{errBody = encode $ object ["error" .= ("Invalid token" :: Text)]}
-            BadPassword -> throwError err401{errBody = encode $ object ["error" .= ("Invalid token" :: Text)]}
-            Indefinite -> throwError err401{errBody = encode $ object ["error" .= ("Authentication required" :: Text)]}
+            _ -> throwError $ err401
+                { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
+                , errBody = encode $ object ["error" .= ("Authentication required" :: Text)]
+                }
+      where
+        metadataUrl = httpBaseUrl httpConfig <> "/.well-known/oauth-protected-resource"
+        wwwAuthenticateValue = TE.encodeUtf8 $ "Bearer resource_metadata=\"" <> metadataUrl <> "\""
 
     mcpServerNoAuth :: HTTPServerConfig -> TVar ServerState -> Aeson.Value -> Handler Aeson.Value
     mcpServerNoAuth httpConfig stateTVar = handleHTTPRequest httpConfig stateTVar Nothing
@@ -506,6 +520,14 @@ handleInitializeHTTP _ params = do
             , serverInfo = Just (configServerInfo config)
             }
 
+-- | Handler for /.well-known/oauth-protected-resource endpoint
+handleProtectedResourceMetadata :: HTTPServerConfig -> Handler ProtectedResourceMetadata
+handleProtectedResourceMetadata config = do
+    let metadata = case httpProtectedResourceMetadata config of
+            Just m -> m
+            Nothing -> defaultProtectedResourceMetadata (httpBaseUrl config)
+    return metadata
+
 -- | Handle OAuth metadata discovery endpoint
 handleMetadata :: HTTPServerConfig -> Handler OAuthMetadata
 handleMetadata config = do
@@ -558,8 +580,11 @@ handleRegister config oauthStateVar (ClientRegistrationRequest reqName reqRedire
             }
 
 -- | Handle OAuth authorize endpoint
-handleAuthorize :: HTTPServerConfig -> TVar OAuthState -> Text -> Text -> Text -> Text -> Text -> Maybe Text -> Maybe Text -> Handler Text
-handleAuthorize config oauthStateVar responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState = do
+handleAuthorize :: HTTPServerConfig -> TVar OAuthState -> Text -> Text -> Text -> Text -> Text -> Maybe Text -> Maybe Text -> Maybe Text -> Handler Text
+handleAuthorize config oauthStateVar responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
+    -- Log resource parameter for RFC8707 support
+    liftIO $ putStrLn $ "Resource parameter: " <> maybe "not provided" T.unpack mResource
+
     -- Validate parameters according to MCP spec
     when (responseType /= "code") $
         throwError err400{errBody = encode $ object ["error" .= ("unsupported_response_type" :: Text), "error_description" .= ("Only 'code' response type is supported" :: Text)]}
@@ -626,6 +651,10 @@ handleToken jwtSettings config oauthStateVar params = do
 -- | Handle authorization code grant
 handleAuthCodeGrant :: JWTSettings -> HTTPServerConfig -> TVar OAuthState -> Map Text Text -> Handler TokenResponse
 handleAuthCodeGrant jwtSettings config oauthStateVar params = do
+    -- Extract and log resource parameter (RFC8707)
+    let mResource = Map.lookup "resource" params
+    liftIO $ putStrLn $ "Resource parameter in token request: " <> maybe "not provided" T.unpack mResource
+
     code <- case Map.lookup "code" params of
         Just c -> return c
         Nothing -> throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
@@ -684,6 +713,10 @@ handleAuthCodeGrant jwtSettings config oauthStateVar params = do
 -- | Handle refresh token grant
 handleRefreshTokenGrant :: JWTSettings -> HTTPServerConfig -> TVar OAuthState -> Map Text Text -> Handler TokenResponse
 handleRefreshTokenGrant jwtSettings config oauthStateVar params = do
+    -- Extract and log resource parameter (RFC8707)
+    let mResource = Map.lookup "resource" params
+    liftIO $ putStrLn $ "Resource parameter in token request: " <> maybe "not provided" T.unpack mResource
+
     refreshToken <- case Map.lookup "refresh_token" params of
         Just t -> return t
         Nothing -> throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
@@ -770,6 +803,18 @@ defaultDemoOAuthConfig =
         , clientIdPrefix = "client_"
         , -- Default response template
           authorizationSuccessTemplate = Nothing
+        }
+
+-- | Default protected resource metadata for a given base URL
+defaultProtectedResourceMetadata :: Text -> ProtectedResourceMetadata
+defaultProtectedResourceMetadata baseUrl =
+    ProtectedResourceMetadata
+        { resource = baseUrl
+        , authorizationServers = [baseUrl]
+        , scopesSupported = Just ["mcp:read", "mcp:write"]
+        , bearerMethodsSupported = Just ["header"]
+        , resourceName = Nothing
+        , resourceDocumentation = Nothing
         }
 
 -- | Run the MCP server as an HTTP server

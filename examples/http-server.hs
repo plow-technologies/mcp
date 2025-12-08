@@ -209,6 +209,7 @@ main = do
                 , httpOAuthConfig = oauthConfig
                 , httpJWK = Nothing -- Will be auto-generated
                 , httpProtocolVersion = mcpProtocolVersion -- Current MCP protocol version
+                , httpProtectedResourceMetadata = Nothing -- Will be auto-generated from baseUrl
                 }
 
     putStrLn $ "HTTP server configured, starting on port " ++ show optPort ++ "..."

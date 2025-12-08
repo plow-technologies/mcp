@@ -35,6 +35,11 @@ module MCP.Server.Auth (
     -- * Metadata Discovery
     OAuthMetadata (..),
     discoverOAuthMetadata,
+
+    -- * Protected Resource Metadata (RFC 9728)
+    ProtectedResourceMetadata (..),
+    ProtectedResourceAuth,
+    ProtectedResourceAuthConfig (..),
 ) where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -130,6 +135,29 @@ data OAuthMetadata = OAuthMetadata
     }
     deriving (Show, Generic)
 
+-- | Protected Resource Metadata (RFC 9728)
+data ProtectedResourceMetadata = ProtectedResourceMetadata
+    { resource :: Text
+    -- ^ The protected resource's identifier (MCP server URL)
+    -- Required. MUST be an absolute URI with https scheme.
+    , authorizationServers :: [Text]
+    -- ^ List of authorization server issuer identifiers
+    -- Required for MCP. At least one entry.
+    , scopesSupported :: Maybe [Text]
+    -- ^ Scope values the resource server understands
+    -- Optional. e.g., ["mcp:read", "mcp:write"]
+    , bearerMethodsSupported :: Maybe [Text]
+    -- ^ Token presentation methods supported
+    -- Optional. Default: ["header"] per RFC9728
+    , resourceName :: Maybe Text
+    -- ^ Human-readable name for end-user display
+    -- Optional. e.g., "My MCP Server"
+    , resourceDocumentation :: Maybe Text
+    -- ^ URL of developer documentation
+    -- Optional.
+    }
+    deriving (Show, Generic)
+
 instance FromJSON OAuthMetadata where
     parseJSON = Aeson.withObject "OAuthMetadata" $ \v ->
         OAuthMetadata
@@ -160,6 +188,27 @@ instance ToJSON OAuthMetadata where
                 ++ maybe [] (\x -> ["grant_types_supported" Aeson..= x]) grantTypesSupported
                 ++ maybe [] (\x -> ["token_endpoint_auth_methods_supported" Aeson..= x]) tokenEndpointAuthMethodsSupported
                 ++ maybe [] (\x -> ["code_challenge_methods_supported" Aeson..= x]) codeChallengeMethodsSupported
+
+instance FromJSON ProtectedResourceMetadata where
+    parseJSON = Aeson.withObject "ProtectedResourceMetadata" $ \v ->
+        ProtectedResourceMetadata
+            <$> v Aeson..: "resource"
+            <*> v Aeson..: "authorization_servers"
+            <*> v Aeson..:? "scopes_supported"
+            <*> v Aeson..:? "bearer_methods_supported"
+            <*> v Aeson..:? "resource_name"
+            <*> v Aeson..:? "resource_documentation"
+
+instance ToJSON ProtectedResourceMetadata where
+    toJSON ProtectedResourceMetadata{..} =
+        Aeson.object $
+            [ "resource" Aeson..= resource
+            , "authorization_servers" Aeson..= authorizationServers
+            ]
+                ++ maybe [] (\x -> ["scopes_supported" Aeson..= x]) scopesSupported
+                ++ maybe [] (\x -> ["bearer_methods_supported" Aeson..= x]) bearerMethodsSupported
+                ++ maybe [] (\x -> ["resource_name" Aeson..= x]) resourceName
+                ++ maybe [] (\x -> ["resource_documentation" Aeson..= x]) resourceDocumentation
 
 -- | Token introspection response
 data TokenInfo = TokenInfo
@@ -305,3 +354,14 @@ discoverOAuthMetadata issuerUrl = liftIO $ do
     request <- parseRequest wellKnownUrl
     response <- httpJSON request
     return $ Right (getResponseBody response)
+
+-- | Type-level tag for MCP protected resource authentication
+data ProtectedResourceAuth
+
+-- | Configuration for ProtectedResourceAuth
+data ProtectedResourceAuthConfig = ProtectedResourceAuthConfig
+    { resourceMetadataUrl :: Text
+    -- ^ URL to the protected resource metadata endpoint
+    -- e.g., "https://mcp.example.com/.well-known/oauth-protected-resource"
+    }
+    deriving (Show, Generic)
