@@ -24,8 +24,8 @@ echo ""
 
 # Test 3: Test 401 Unauthorized with WWW-Authenticate Header
 echo "3. Testing 401 Unauthorized Response with WWW-Authenticate Header"
-echo "   GET $BASE_URL/mcp (no token)"
-RESPONSE=$(curl -si "$BASE_URL/mcp" | head -n 20)
+echo "   POST $BASE_URL/mcp (no token)"
+RESPONSE=$(curl -si -X POST "$BASE_URL/mcp" -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"ping"}' | head -n 20)
 echo "$RESPONSE"
 echo ""
 WWW_AUTH=$(echo "$RESPONSE" | grep -i "WWW-Authenticate:" || echo "Missing WWW-Authenticate header")
@@ -41,6 +41,7 @@ CLIENT_REG=$(curl -s -X POST "$BASE_URL/register" \
     "client_name": "OAuth Demo Client",
     "redirect_uris": ["http://localhost:3000/callback"],
     "grant_types": ["authorization_code", "refresh_token"],
+    "response_types": ["code"],
     "token_endpoint_auth_method": "none"
   }')
 echo "$CLIENT_REG" | jq '.'
