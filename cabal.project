@@ -1,8 +1,8 @@
 index-state: 2024-07-18T00:00:00Z
 packages: mcp.cabal
-tests: true
-documentation: false
-optimization: false
+tests: True
+documentation: False
+optimization: False
 package mcp
   ghc-options: -Werror
 
