@@ -8,36 +8,38 @@ License     : MIT
 
 Server tracing types for structured logging of server lifecycle and state changes.
 -}
-module MCP.Trace.Server
-    ( ServerTrace(..)
-    , renderServerTrace
-    ) where
+module MCP.Trace.Server (
+    ServerTrace (..),
+    renderServerTrace,
+) where
 
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 
 -- | Server lifecycle and state change events.
 data ServerTrace
-    = ServerInit
+    = -- | Server initialization event
+      ServerInit
         { serverName :: Text
         , serverVersion :: Text
         }
-    -- ^ Server initialization event
-    | ServerShutdown
-    -- ^ Server shutdown event
+    | -- | Server shutdown event
+      ServerShutdown
     | ServerInitialized
-        { clientInfo :: Maybe Text  -- ^ Client name if provided
+        { clientInfo :: Maybe Text
+        -- ^ Client name if provided
         }
-    -- ^ Server initialized with client connection
-    | ServerCapabilityNegotiation
+    | -- \^ Server initialized with client connection
+
+      -- | Capability negotiation completed
+      ServerCapabilityNegotiation
         { negotiatedCapabilities :: [Text]
         }
-    -- ^ Capability negotiation completed
-    | ServerStateChange
+    | -- | Server state transition
+      ServerStateChange
         { fromState :: Text
         , toState :: Text
         }
-    -- ^ Server state transition
     deriving (Show, Eq)
 
 -- | Render a ServerTrace to human-readable text.

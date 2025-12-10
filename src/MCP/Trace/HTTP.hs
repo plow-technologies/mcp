@@ -8,61 +8,66 @@ License     : MIT
 
 HTTP transport tracing types for structured logging of HTTP-specific events.
 -}
-module MCP.Trace.HTTP
-    ( HTTPTrace(..)
-    , renderHTTPTrace
-    ) where
+module MCP.Trace.HTTP (
+    HTTPTrace (..),
+    renderHTTPTrace,
+) where
 
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import MCP.Trace.OAuth (OAuthTrace, renderOAuthTrace)
 import MCP.Trace.Protocol (ProtocolTrace, renderProtocolTrace)
 import MCP.Trace.Server (ServerTrace, renderServerTrace)
 
--- | HTTP transport-specific events.
---
--- Current implementation is a skeleton with composite constructors.
--- Full implementation with leaf constructors will be added in Phase 3.
+{- | HTTP transport-specific events.
+
+Current implementation is a skeleton with composite constructors.
+Full implementation with leaf constructors will be added in Phase 3.
+-}
 data HTTPTrace
-    = HTTPPlaceholder
-    -- ^ Placeholder constructor for Phase 2 skeleton.
-    -- Will be replaced with leaf constructors (HTTPServerStarting, etc.) in Phase 3.
-    | HTTPServerStarting
+    = {- | Placeholder constructor for Phase 2 skeleton.
+      Will be replaced with leaf constructors (HTTPServerStarting, etc.) in Phase 3.
+      -}
+      HTTPPlaceholder
+    | -- | HTTP server starting up
+      HTTPServerStarting
         { tracePort :: Int
         , traceBaseUrl :: Text
         }
-    -- ^ HTTP server starting up
-    | HTTPOAuthEnabled
+    | -- | OAuth authentication enabled
+      HTTPOAuthEnabled
         { traceAuthEndpoint :: Text
         , traceTokenEndpoint :: Text
         }
-    -- ^ OAuth authentication enabled
-    | HTTPOAuthProviders
+    | -- | OAuth providers configured
+      HTTPOAuthProviders
         { traceProviderNames :: [Text]
         }
-    -- ^ OAuth providers configured
-    | HTTPPKCEEnabled
-    -- ^ PKCE required by MCP spec
-    | HTTPResourceParameterDebug
+    | -- | PKCE required by MCP spec
+      HTTPPKCEEnabled
+    | -- | RFC8707 resource parameter debug log
+      HTTPResourceParameterDebug
         { traceResourceParam :: Maybe Text
         , traceContext :: Text
         }
-    -- ^ RFC8707 resource parameter debug log
-    | HTTPProtocol ProtocolTrace
-    -- ^ Nested protocol events in HTTP context.
-    -- This composite constructor is part of the skeleton structure.
-    | HTTPOAuth OAuthTrace
-    -- ^ Nested OAuth events in HTTP context.
-    -- This composite constructor is part of the skeleton structure.
-    | HTTPServer ServerTrace
-    -- ^ Nested server lifecycle events in HTTP context.
+    | {- | Nested protocol events in HTTP context.
+      This composite constructor is part of the skeleton structure.
+      -}
+      HTTPProtocol ProtocolTrace
+    | {- | Nested OAuth events in HTTP context.
+      This composite constructor is part of the skeleton structure.
+      -}
+      HTTPOAuth OAuthTrace
+    | -- | Nested server lifecycle events in HTTP context.
+      HTTPServer ServerTrace
     deriving (Show, Eq)
 
--- | Render an HTTPTrace to human-readable text.
---
--- Current implementation is a stub for Phase 2 skeleton.
--- Delegates to sub-renders for nested events.
+{- | Render an HTTPTrace to human-readable text.
+
+Current implementation is a stub for Phase 2 skeleton.
+Delegates to sub-renders for nested events.
+-}
 renderHTTPTrace :: HTTPTrace -> Text
 renderHTTPTrace HTTPPlaceholder = "[HTTP] (skeleton)"
 renderHTTPTrace (HTTPServerStarting port baseUrl) =

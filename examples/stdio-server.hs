@@ -25,7 +25,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
 import Options.Applicative
-import Plow.Logging (IOTracer(..), Tracer(..))
+import Plow.Logging (IOTracer (..), Tracer (..))
 
 import System.IO (stdin, stdout)
 

@@ -74,13 +74,13 @@ import Servant.Server (err400, err401, err500, errBody, errHeaders)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
 
 import Control.Monad (unless, when)
-import Plow.Logging (IOTracer (..), traceWith)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
 import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
 import MCP.Types
+import Plow.Logging (IOTracer (..), traceWith)
 
 -- | HTML content type for Servant
 data HTML

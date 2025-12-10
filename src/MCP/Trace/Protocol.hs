@@ -8,18 +8,19 @@ License     : MIT
 
 Protocol tracing types for structured logging of JSON-RPC message handling.
 -}
-module MCP.Trace.Protocol
-    ( ProtocolTrace(..)
-    , renderProtocolTrace
-    ) where
+module MCP.Trace.Protocol (
+    ProtocolTrace (..),
+    renderProtocolTrace,
+) where
 
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 
--- | JSON-RPC protocol handling events.
---
--- Leaf constructors representing specific protocol-level events during
--- JSON-RPC message handling (request/response/notification flow).
+{- | JSON-RPC protocol handling events.
+
+Leaf constructors representing specific protocol-level events during
+JSON-RPC message handling (request/response/notification flow).
+-}
 data ProtocolTrace
     = ProtocolRequestReceived
         { requestId :: Text
@@ -34,7 +35,7 @@ data ProtocolTrace
         }
     | ProtocolParseError
         { errorMessage :: Text
-        , rawInput :: Maybe Text  -- Truncated for safety
+        , rawInput :: Maybe Text -- Truncated for safety
         }
     | ProtocolMethodNotFound
         { requestId :: Text
@@ -47,9 +48,10 @@ data ProtocolTrace
         }
     deriving (Show, Eq)
 
--- | Render a ProtocolTrace to human-readable text.
---
--- Produces structured log messages for protocol-level events.
+{- | Render a ProtocolTrace to human-readable text.
+
+Produces structured log messages for protocol-level events.
+-}
 renderProtocolTrace :: ProtocolTrace -> Text
 renderProtocolTrace (ProtocolRequestReceived reqId meth) =
     "[Protocol] Request received: method='" <> meth <> "', id='" <> reqId <> "'"
