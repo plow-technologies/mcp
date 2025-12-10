@@ -14,19 +14,43 @@ module MCP.Trace.Server
     ) where
 
 import Data.Text (Text)
+import qualified Data.Text as Text
 
 -- | Server lifecycle and state change events.
---
--- Current implementation is a skeleton placeholder.
--- Full implementation with leaf constructors will be added in Phase 3.
 data ServerTrace
-    = ServerPlaceholder
-    -- ^ Placeholder constructor for Phase 2 skeleton.
-    -- Will be replaced with leaf constructors (ServerInit, ServerShutdown, etc.) in Phase 3.
+    = ServerInit
+        { serverName :: Text
+        , serverVersion :: Text
+        }
+    -- ^ Server initialization event
+    | ServerShutdown
+    -- ^ Server shutdown event
+    | ServerInitialized
+        { clientInfo :: Maybe Text  -- ^ Client name if provided
+        }
+    -- ^ Server initialized with client connection
+    | ServerCapabilityNegotiation
+        { negotiatedCapabilities :: [Text]
+        }
+    -- ^ Capability negotiation completed
+    | ServerStateChange
+        { fromState :: Text
+        , toState :: Text
+        }
+    -- ^ Server state transition
     deriving (Show, Eq)
 
 -- | Render a ServerTrace to human-readable text.
---
--- Current implementation is a stub for Phase 2 skeleton.
 renderServerTrace :: ServerTrace -> Text
-renderServerTrace ServerPlaceholder = "[Server] (skeleton)"
+renderServerTrace (ServerInit name version) =
+    "[Server] Init: " <> name <> " v" <> version
+renderServerTrace ServerShutdown =
+    "[Server] Shutdown"
+renderServerTrace (ServerInitialized maybeClient) =
+    case maybeClient of
+        Just client -> "[Server] Initialized with client: " <> client
+        Nothing -> "[Server] Initialized (no client info)"
+renderServerTrace (ServerCapabilityNegotiation caps) =
+    "[Server] Capabilities negotiated: [" <> Text.intercalate ", " caps <> "]"
+renderServerTrace (ServerStateChange from to) =
+    "[Server] State change: " <> from <> " -> " <> to
