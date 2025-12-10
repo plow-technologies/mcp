@@ -30,7 +30,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
 import Options.Applicative
-import Plow.Logging (IOTracer(..), Tracer(..))
+import Plow.Logging (IOTracer (..), Tracer (..))
 import Plow.Logging.Async (withAsyncHandleTracer)
 import System.IO (stdout)
 
@@ -38,7 +38,7 @@ import MCP.Protocol
 import MCP.Server
 import MCP.Server.Auth
 import MCP.Server.HTTP
-import MCP.Trace.Types (renderMCPTrace, MCPTrace(..))
+import MCP.Trace.Types (MCPTrace (..), renderMCPTrace)
 import MCP.Types
 
 -- | A no-op tracer that discards all trace events
@@ -148,8 +148,6 @@ main :: IO ()
 main = do
     Options{..} <- execParser opts
 
-    putStrLn "Starting MCP Haskell HTTP Server..."
-    putStrLn $ "Port: " ++ show optPort
     when optEnableLogging $ putStrLn "Request/Response logging: enabled"
 
     let serverInfo =
@@ -230,7 +228,6 @@ main = do
                 , httpProtectedResourceMetadata = Nothing -- Will be auto-generated from baseUrl
                 }
 
-    putStrLn $ "HTTP server configured, starting on port " ++ show optPort ++ "..."
     putStrLn $ "MCP endpoint available at: POST " ++ T.unpack baseUrl ++ "/mcp"
     putStrLn $ "Protected Resource Metadata: GET " ++ T.unpack baseUrl ++ "/.well-known/oauth-protected-resource"
 

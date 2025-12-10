@@ -11,14 +11,14 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Functor.Contravariant (contramap)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
-import Plow.Logging (IOTracer(..), Tracer(..))
+import Plow.Logging (IOTracer (..), Tracer (..))
 import Plow.Logging.Async (withAsyncHandleTracer)
-import System.IO (stdin, stdout, stderr)
+import System.IO (stderr, stdin, stdout)
 
 import MCP.Protocol
 import MCP.Server
 import MCP.Server.StdIO
-import MCP.Trace.Types (renderMCPTrace, MCPTrace(..))
+import MCP.Trace.Types (MCPTrace (..), renderMCPTrace)
 import MCP.Types
 
 -- | A no-op tracer that discards all trace events
@@ -77,8 +77,6 @@ instance MCPServer MCPServerM where
 
 main :: IO ()
 main = do
-    putStrLn "Starting MCP Haskell Server..."
-
     let serverInfo =
             Implementation
                 { name = "mcp-haskell-example"
@@ -117,8 +115,6 @@ main = do
                 , configServerInfo = serverInfo
                 , configCapabilities = capabilities
                 }
-
-    putStrLn "Server configured, starting message loop..."
 
     -- Setup async tracing to stderr (stdout used for JSON-RPC) with 1000-message buffer
     withAsyncHandleTracer stderr 1000 $ \textTracer -> do
