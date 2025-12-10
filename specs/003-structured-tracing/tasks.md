@@ -39,7 +39,7 @@
 
 ### Phase 2A: Trace Types (Skeleton)
 
-- [ ] T004 [P] Create `src/MCP/Trace/OAuth.hs` with OAuthTrace type (composite placeholder only), renderOAuthTrace stub
+- [X] T004 [P] Create `src/MCP/Trace/OAuth.hs` with OAuthTrace type (composite placeholder only), renderOAuthTrace stub
 - [ ] T005 [P] Create `src/MCP/Trace/Protocol.hs` with ProtocolTrace type (composite placeholder only), renderProtocolTrace stub
 - [ ] T006 [P] Create `src/MCP/Trace/Server.hs` with ServerTrace type (composite placeholder only), renderServerTrace stub
 - [ ] T007 Create `src/MCP/Trace/StdIO.hs` with StdIOTrace type (includes StdIOProtocol composite), renderStdIOTrace stub (depends on T005)
