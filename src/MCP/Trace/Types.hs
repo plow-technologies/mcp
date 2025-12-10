@@ -14,6 +14,14 @@ module MCP.Trace.Types (
     MCPTrace (..),
     renderMCPTrace,
 
+    -- * Filter Predicates
+    isServerTrace,
+    isProtocolTrace,
+    isStdIOTrace,
+    isHTTPTrace,
+    isOAuthTrace,
+    isErrorTrace,
+
     -- * Subsystem Types (re-exports)
     ServerTrace (..),
     renderServerTrace,
@@ -60,3 +68,51 @@ renderMCPTrace = \case
     MCPProtocol t -> renderProtocolTrace t
     MCPStdIO t -> renderStdIOTrace t
     MCPHttp t -> renderHTTPTrace t
+
+-- -----------------------------------------------------------------------------
+-- Filter Predicates
+-- -----------------------------------------------------------------------------
+
+-- | Check if trace is from the Server subsystem.
+isServerTrace :: MCPTrace -> Bool
+isServerTrace (MCPServer _) = True
+isServerTrace _ = False
+
+-- | Check if trace is from the Protocol subsystem.
+isProtocolTrace :: MCPTrace -> Bool
+isProtocolTrace (MCPProtocol _) = True
+isProtocolTrace _ = False
+
+-- | Check if trace is from the StdIO subsystem.
+isStdIOTrace :: MCPTrace -> Bool
+isStdIOTrace (MCPStdIO _) = True
+isStdIOTrace _ = False
+
+-- | Check if trace is from the HTTP subsystem.
+isHTTPTrace :: MCPTrace -> Bool
+isHTTPTrace (MCPHttp _) = True
+isHTTPTrace _ = False
+
+-- | Check if trace is from the OAuth subsystem (nested in HTTP).
+isOAuthTrace :: MCPTrace -> Bool
+isOAuthTrace (MCPHttp (HTTPOAuth _)) = True
+isOAuthTrace _ = False
+
+{- | Check if trace represents an error condition.
+
+Matches all error constructors across subsystem types:
+
+* Protocol errors: ProtocolParseError, ProtocolMethodNotFound, ProtocolInvalidParams
+* StdIO errors: StdIOReadError
+* HTTP errors: HTTPAuthFailure
+* OAuth errors: OAuthAuthorizationDenied, OAuthValidationError
+-}
+isErrorTrace :: MCPTrace -> Bool
+isErrorTrace (MCPProtocol (ProtocolParseError{})) = True
+isErrorTrace (MCPProtocol (ProtocolMethodNotFound{})) = True
+isErrorTrace (MCPProtocol (ProtocolInvalidParams{})) = True
+isErrorTrace (MCPStdIO (StdIOReadError{})) = True
+isErrorTrace (MCPHttp (HTTPAuthFailure{})) = True
+isErrorTrace (MCPHttp (HTTPOAuth (OAuthAuthorizationDenied{}))) = True
+isErrorTrace (MCPHttp (HTTPOAuth (OAuthValidationError{}))) = True
+isErrorTrace _ = False
