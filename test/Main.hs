@@ -4,13 +4,7 @@ module Main (main) where
 
 import Data.Text (Text)
 import MCP.Server.Auth (HashedPassword (..), defaultDemoCredentialStore, mkHashedPassword, validateCredential)
-import MCP.Trace.OAuth (OAuthTrace)
-import Plow.Logging (IOTracer (..), Tracer (..))
 import Test.Hspec
-
--- | A no-op tracer that discards all trace events
-nullIOTracer :: IOTracer a
-nullIOTracer = IOTracer (Tracer (\_ -> pure ()))
 
 main :: IO ()
 main = hspec spec
@@ -20,24 +14,19 @@ spec = do
     describe "MCP.Server.Auth" $ do
         describe "validateCredential" $ do
             it "validates correct demo credentials" $ do
-                result <- validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "demo" "demo123"
-                result `shouldBe` True
+                validateCredential defaultDemoCredentialStore "demo" "demo123" `shouldBe` True
 
             it "validates correct admin credentials" $ do
-                result <- validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "admin" "admin456"
-                result `shouldBe` True
+                validateCredential defaultDemoCredentialStore "admin" "admin456" `shouldBe` True
 
             it "rejects invalid password for demo user" $ do
-                result <- validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "demo" "wrongpassword"
-                result `shouldBe` False
+                validateCredential defaultDemoCredentialStore "demo" "wrongpassword" `shouldBe` False
 
             it "rejects invalid password for admin user" $ do
-                result <- validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "admin" "wrongpass"
-                result `shouldBe` False
+                validateCredential defaultDemoCredentialStore "admin" "wrongpass" `shouldBe` False
 
             it "rejects invalid username" $ do
-                result <- validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "nonexistent" "demo123"
-                result `shouldBe` False
+                validateCredential defaultDemoCredentialStore "nonexistent" "demo123" `shouldBe` False
 
         describe "mkHashedPassword" $ do
             it "produces consistent hashes for same inputs" $ do

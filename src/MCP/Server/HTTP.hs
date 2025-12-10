@@ -849,7 +849,8 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
                 username = formUsername loginForm
                 password = formPassword loginForm
 
-            credentialsValid <- validateCredential oauthTracer store username password
+            let credentialsValid = validateCredential store username password
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt username credentialsValid
             if credentialsValid
                 then do
                     -- Emit authorization granted trace
@@ -937,8 +938,9 @@ handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Authorization code expired" :: Text)]}
 
-    -- Verify PKCE (validateCodeVerifier emits its own trace)
-    pkceValid <- validateCodeVerifier oauthTracer codeVerifier (authCodeChallenge authCode)
+    -- Verify PKCE
+    let pkceValid = validateCodeVerifier codeVerifier (authCodeChallenge authCode)
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthPKCEValidation codeVerifier (authCodeChallenge authCode) pkceValid
     unless pkceValid $ do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Invalid code verifier" :: Text)]}
