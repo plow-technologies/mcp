@@ -68,10 +68,11 @@ import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import GHC.Generics (Generic)
 import Network.HTTP.Simple (addRequestHeader, getResponseBody, httpJSON, parseRequest, setRequestBodyJSON, setRequestMethod)
-import Plow.Logging (IOTracer)
+import Plow.Logging (IOTracer, traceWith)
+import System.IO.Unsafe (unsafePerformIO)
 import System.Random (newStdGen, randomRs)
 
-import MCP.Trace.OAuth (OAuthTrace)
+import MCP.Trace.OAuth (OAuthTrace (..))
 
 -- | OAuth grant types supported by MCP
 data OAuthGrantType
@@ -377,8 +378,11 @@ generateCodeChallenge verifier =
 
 -- | Validate PKCE code verifier against challenge
 validateCodeVerifier :: IOTracer OAuthTrace -> Text -> Text -> Bool
-validateCodeVerifier _tracer verifier challenge =
-    generateCodeChallenge verifier == challenge
+validateCodeVerifier tracer verifier challenge =
+    let isValid = generateCodeChallenge verifier == challenge
+        validationResult = if isValid then "SUCCESS" else "FAILED"
+        trace = unsafePerformIO $ traceWith tracer $ OAuthValidationError "pkce" ("PKCE validation: " <> validationResult)
+     in seq trace isValid
 
 -- | Discover OAuth metadata from a well-known endpoint
 discoverOAuthMetadata :: (MonadIO m) => IOTracer OAuthTrace -> Text -> m (Either String OAuthMetadata)
@@ -411,12 +415,16 @@ mkHashedPassword salt password =
 
 -- | Validate a credential against the store using constant-time comparison
 validateCredential :: IOTracer OAuthTrace -> CredentialStore -> Text -> Text -> Bool
-validateCredential _tracer store username password =
+validateCredential tracer store username password =
     case Map.lookup username (storeCredentials store) of
-        Nothing -> False
+        Nothing ->
+            let trace = unsafePerformIO $ traceWith tracer $ OAuthLoginAttempt username False
+             in seq trace False
         Just storedHash ->
             let candidateHash = mkHashedPassword (storeSalt store) password
-             in constantTimeCompare (unHashedPassword storedHash) (unHashedPassword candidateHash)
+                isValid = constantTimeCompare (unHashedPassword storedHash) (unHashedPassword candidateHash)
+                trace = unsafePerformIO $ traceWith tracer $ OAuthLoginAttempt username isValid
+             in seq trace isValid
 
 -- | Constant-time string comparison to prevent timing attacks
 constantTimeCompare :: Text -> Text -> Bool
