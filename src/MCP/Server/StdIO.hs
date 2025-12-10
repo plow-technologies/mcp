@@ -31,29 +31,46 @@ import Data.ByteString.Char8 qualified as BSC
 import Data.ByteString.Lazy qualified as LBS
 import Data.Functor.Contravariant (contramap)
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
+import Data.Text.Encoding.Error qualified as TEE
 import Plow.Logging (IOTracer, traceWith)
 import System.IO.Error (isEOFError)
 
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer, sendError, sendResponse)
+import MCP.Trace.Protocol (ProtocolTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
 import MCP.Trace.StdIO (StdIOTrace (..))
 import MCP.Types
 
+-- | Convert a RequestId to Text for tracing
+requestIdToText :: RequestId -> T.Text
+requestIdToText (RequestId val) = T.pack (show val)
+
 -- | Handle an incoming JSON-RPC message
-handleMessage :: (MCPServer MCPServerM) => BSC.ByteString -> MCPServerM (Maybe ())
-handleMessage input = do
+handleMessage :: (MCPServer MCPServerM) => IOTracer StdIOTrace -> BSC.ByteString -> MCPServerM (Maybe ())
+handleMessage tracer input = do
+    let protoTracer = contramap StdIOProtocol tracer
     case decode (LBS.fromStrict input) :: Maybe JSONRPCMessage of
         Nothing -> do
+            -- Trace parse error
+            let inputText = TE.decodeUtf8With TEE.lenientDecode (LBS.toStrict $ LBS.take 100 $ LBS.fromStrict input)
+            liftIO $ traceWith protoTracer $ ProtocolParseError "Failed to decode JSON-RPC message" (Just inputText)
             config <- ask
             sendError (configOutput config) (RequestId (toJSON ("unknown" :: T.Text))) $
                 JSONRPCErrorInfo (-32700) "Parse error" Nothing
             return Nothing
         Just msg -> case msg of
             RequestMessage req -> do
-                handleRequest req
+                -- Trace request received
+                let JSONRPCRequest _ reqId method _ = req
+                liftIO $ traceWith protoTracer $ ProtocolRequestReceived (requestIdToText reqId) method
+                handleRequest protoTracer req
                 return (Just ())
             NotificationMessage notif -> do
+                -- Trace notification received
+                let JSONRPCNotification _ method _ = notif
+                liftIO $ traceWith protoTracer $ ProtocolNotificationReceived method
                 handleNotification notif
                 return (Just ())
             _ -> do
@@ -63,8 +80,8 @@ handleMessage input = do
                 return Nothing
 
 -- | Handle a JSON-RPC request
-handleRequest :: (MCPServer MCPServerM) => JSONRPCRequest -> MCPServerM ()
-handleRequest (JSONRPCRequest _ reqId method params) = do
+handleRequest :: (MCPServer MCPServerM) => IOTracer ProtocolTrace -> JSONRPCRequest -> MCPServerM ()
+handleRequest tracer (JSONRPCRequest _ reqId method params) = do
     config <- ask
     state <- get
 
@@ -219,7 +236,9 @@ handleRequest (JSONRPCRequest _ reqId method params) = do
             Nothing ->
                 sendError (configOutput config) reqId $
                     JSONRPCErrorInfo (-32602) "Missing params" Nothing
-        _ ->
+        _ -> do
+            -- Trace method not found
+            liftIO $ traceWith tracer $ ProtocolMethodNotFound (requestIdToText reqId) method
             sendError (configOutput config) reqId $
                 JSONRPCErrorInfo (-32601) "Method not found" Nothing
 
@@ -296,7 +315,7 @@ runServer config tracer = do
             case eofOrLine of
                 Left () -> return () -- EOF reached, exit gracefully
                 Right line -> do
-                    result <- handleMessage line
+                    result <- handleMessage tracer line
                     case result of
                         Just () -> loop
                         Nothing -> return ()
