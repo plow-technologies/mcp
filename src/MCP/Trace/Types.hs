@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 
 {- |
 Module      : MCP.Trace.Types
@@ -48,7 +48,8 @@ data MCPTrace
 --
 -- Delegates to subsystem render functions.
 renderMCPTrace :: MCPTrace -> Text
-renderMCPTrace (MCPServer st) = "[MCP:Server] " <> renderServerTrace st
-renderMCPTrace (MCPProtocol pt) = "[MCP:Protocol] " <> renderProtocolTrace pt
-renderMCPTrace (MCPStdIO sio) = "[MCP:StdIO] " <> renderStdIOTrace sio
-renderMCPTrace (MCPHttp ht) = "[MCP:HTTP] " <> renderHTTPTrace ht
+renderMCPTrace = \case
+    MCPServer t   -> renderServerTrace t
+    MCPProtocol t -> renderProtocolTrace t
+    MCPStdIO t    -> renderStdIOTrace t
+    MCPHttp t     -> renderHTTPTrace t
