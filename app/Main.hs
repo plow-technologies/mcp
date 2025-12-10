@@ -73,7 +73,9 @@ instance MCPServer MCPServerM where
     -- handleComplete inherits the default implementation
 
     handleSetLevel _params = do
-        liftIO $ putStrLn "Log level set"
+        -- handleSetLevel is a no-op in this minimal example
+        -- In a real implementation, this would configure the tracer's log level
+        return ()
 
 main :: IO ()
 main = do

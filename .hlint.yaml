@@ -85,8 +85,10 @@
   - {name: nubOn, within: [], message: "Has quadtratic complexity. Use Data.List.Extra.nubOrdOn instead (from extra package)"}
   - {name: foldl, within: [], message: "Leaks space. Use Data.List.foldl' instead with a strict (BangPattern'd) accumulator"}
 
-  - {name: putStrLn, within: [], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
-  - {name: hPutStrLn, within: [], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
+  # putStrLn allowed in executables for user-facing startup messages, not in library code
+  - {name: putStrLn, within: [Main], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
+  # hPutStrLn allowed in MCP.Server for protocol I/O (JSON-RPC responses must go to specific handles)
+  - {name: hPutStrLn, within: [MCP.Server], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
   - {name: print, within: [], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
   - {name: hPrint, within: [], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
   - {name: putStr, within: [], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
@@ -98,7 +100,8 @@
   - {name: forkIOWithUnmask, within: [], message: "Use Control.Concurrent.Async.withAsyncWithUnmask (or asyncWithUnmask if withAsyncWithUnmask not possible) from async package instead"}
   - {name: forkOnWithUnmask, within: [], message: "Use Control.Concurrent.Async.withAsyncOnWithUnmask (or asyncOnWithUnmask if withAsyncOnWithUnmask not possible) from async package instead"}
 
-  - {name: decodeUtf8, within: [], message: "Use decodeUtf8' and handle the error case"}
+  # decodeUtf8 allowed in MCP.Server.Auth and MCP.Server.HTTP for base64url/JWT output (always valid UTF-8)
+  - {name: decodeUtf8, within: [MCP.Server.Auth, MCP.Server.HTTP], message: "Use decodeUtf8' and handle the error case"}
 
   - {name: threadDelay, within: [], message: "May easily overflow in 32 bit systems. Use Control.Concurrent.Thread.Delay.delay from unbounded-delays package instead"}
 

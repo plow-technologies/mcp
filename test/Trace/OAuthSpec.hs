@@ -161,9 +161,12 @@ spec = do
                 -- Verify traces were captured (reverse to get chronological order)
                 traces <- reverse <$> readIORef tracesRef
                 length traces `shouldBe` 3
-                head traces `shouldBe` OAuthClientRegistration{clientId = "test-client", clientName = "Test"}
-                traces !! 1 `shouldBe` OAuthLoginAttempt{username = "testuser", success = True}
-                traces !! 2 `shouldBe` OAuthTokenExchange{grantType = "authorization_code", success = True}
+                case traces of
+                    [t1, t2, t3] -> do
+                        t1 `shouldBe` OAuthClientRegistration{clientId = "test-client", clientName = "Test"}
+                        t2 `shouldBe` OAuthLoginAttempt{username = "testuser", success = True}
+                        t3 `shouldBe` OAuthTokenExchange{grantType = "authorization_code", success = True}
+                    _ -> expectationFailure "Expected exactly 3 traces"
 
             it "captures multiple authorization flow traces" $ do
                 -- Create a test tracer
@@ -186,18 +189,21 @@ spec = do
                 length traces `shouldBe` 4
 
                 -- Check types (chronological order)
-                case head traces of
-                    OAuthAuthorizationRequest{} -> return ()
-                    _ -> expectationFailure "Expected OAuthAuthorizationRequest"
+                case traces of
+                    [t1, t2, t3, t4] -> do
+                        case t1 of
+                            OAuthAuthorizationRequest{} -> return ()
+                            _ -> expectationFailure "Expected OAuthAuthorizationRequest"
 
-                case traces !! 1 of
-                    OAuthLoginPageServed{} -> return ()
-                    _ -> expectationFailure "Expected OAuthLoginPageServed"
+                        case t2 of
+                            OAuthLoginPageServed{} -> return ()
+                            _ -> expectationFailure "Expected OAuthLoginPageServed"
 
-                case traces !! 2 of
-                    OAuthLoginAttempt{} -> return ()
-                    _ -> expectationFailure "Expected OAuthLoginAttempt"
+                        case t3 of
+                            OAuthLoginAttempt{} -> return ()
+                            _ -> expectationFailure "Expected OAuthLoginAttempt"
 
-                case traces !! 3 of
-                    OAuthAuthorizationGranted{} -> return ()
-                    _ -> expectationFailure "Expected OAuthAuthorizationGranted"
+                        case t4 of
+                            OAuthAuthorizationGranted{} -> return ()
+                            _ -> expectationFailure "Expected OAuthAuthorizationGranted"
+                    _ -> expectationFailure "Expected exactly 4 traces"
