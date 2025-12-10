@@ -52,6 +52,7 @@ import Crypto.JOSE (JWK)
 import Data.Aeson (encode, fromJSON, object, toJSON, (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as LBS
+import Data.Functor.Contravariant (contramap)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
@@ -73,18 +74,13 @@ import Servant.Server (err400, err401, err500, errBody, errHeaders)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
 
 import Control.Monad (unless, when)
-import Plow.Logging (IOTracer (..), Tracer (..), traceWith)
+import Plow.Logging (IOTracer (..), traceWith)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
 import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
-import MCP.Trace.HTTP (HTTPTrace)
-import MCP.Trace.OAuth (OAuthTrace)
+import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
 import MCP.Types
-
--- | A no-op tracer that discards all trace events
-nullIOTracer :: IOTracer a
-nullIOTracer = IOTracer (Tracer (\_ -> pure ()))
 
 -- | HTML content type for Servant
 data HTML
@@ -109,8 +105,8 @@ data HTTPServerConfig = HTTPServerConfig
     {- ^ Custom protected resource metadata.
     When Nothing, auto-generated from httpBaseUrl.
     -}
+    , httpTracer :: IOTracer HTTPTrace
     }
-    deriving (Show)
 
 -- | User information from OAuth
 data AuthUser = AuthUser
@@ -399,7 +395,7 @@ processHTTPRequest httpConfig stateVar req = do
                 , configOutput = undefined -- Not used in HTTP mode
                 , configServerInfo = httpServerInfo httpConfig
                 , configCapabilities = httpCapabilities httpConfig
-                , configTracer = nullIOTracer -- HTTP mode doesn't use server traces currently
+                , configTracer = contramap HTTPServer (httpTracer httpConfig)
                 }
 
     result <- runMCPServer dummyConfig currentState (handleHTTPRequestInner (httpProtocolVersion httpConfig) req)
@@ -826,8 +822,9 @@ handleLogin config oauthStateVar _jwtSettings mCookie loginForm = do
                 store = maybe (CredentialStore Map.empty "") credentialStore oauthCfg
                 username = formUsername loginForm
                 password = formPassword loginForm
+                oauthTracer = contramap HTTPOAuth (httpTracer config)
 
-            if validateCredential (nullIOTracer :: IOTracer OAuthTrace) store username password
+            if validateCredential oauthTracer store username password
                 then do
                     -- Generate authorization code
                     code <- liftIO $ generateAuthCodeWithConfig config
@@ -902,7 +899,8 @@ handleAuthCodeGrant jwtSettings config oauthStateVar params = do
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Authorization code expired" :: Text)]}
 
     -- Verify PKCE
-    unless (validateCodeVerifier (nullIOTracer :: IOTracer OAuthTrace) codeVerifier (authCodeChallenge authCode)) $
+    let oauthTracer = contramap HTTPOAuth (httpTracer config)
+    unless (validateCodeVerifier oauthTracer codeVerifier (authCodeChallenge authCode)) $
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Invalid code verifier" :: Text)]}
 
     -- Create user for JWT
@@ -1135,14 +1133,17 @@ escapeHtml = T.replace "&" "&amp;" . T.replace "<" "&lt;" . T.replace ">" "&gt;"
 
 -- | Run the MCP server as an HTTP server
 runServerHTTP :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> IO ()
-runServerHTTP config _tracer = do
+runServerHTTP config tracer = do
+    -- Add tracer to config
+    let configWithTracer = config{httpTracer = tracer}
+
     -- Initialize JWT settings if OAuth is enabled
-    jwtSettings <- case httpJWK config of
+    jwtSettings <- case httpJWK configWithTracer of
         Just jwk -> return $ defaultJWTSettings jwk
         Nothing -> defaultJWTSettings <$> generateKey
 
     -- Initialize the server state
-    stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
+    stateVar <- newTVarIO $ initialServerState (httpCapabilities configWithTracer)
 
     -- Initialize OAuth state
     oauthStateVar <-
@@ -1155,16 +1156,16 @@ runServerHTTP config _tracer = do
                 , pendingAuthorizations = Map.empty
                 }
 
-    putStrLn $ "Starting MCP HTTP Server on port " ++ show (httpPort config) ++ "..."
+    putStrLn $ "Starting MCP HTTP Server on port " ++ show (httpPort configWithTracer) ++ "..."
 
-    when (maybe False oauthEnabled (httpOAuthConfig config)) $ do
+    when (maybe False oauthEnabled (httpOAuthConfig configWithTracer)) $ do
         putStrLn "OAuth authentication enabled"
-        putStrLn $ "Authorization endpoint: " ++ T.unpack (httpBaseUrl config) ++ "/authorize"
-        putStrLn $ "Token endpoint: " ++ T.unpack (httpBaseUrl config) ++ "/token"
-        case httpOAuthConfig config >>= \cfg -> if null (oauthProviders cfg) then Nothing else Just (oauthProviders cfg) of
+        putStrLn $ "Authorization endpoint: " ++ T.unpack (httpBaseUrl configWithTracer) ++ "/authorize"
+        putStrLn $ "Token endpoint: " ++ T.unpack (httpBaseUrl configWithTracer) ++ "/token"
+        case httpOAuthConfig configWithTracer >>= \cfg -> if null (oauthProviders cfg) then Nothing else Just (oauthProviders cfg) of
             Just providers -> do
                 putStrLn $ "OAuth providers: " ++ T.unpack (T.intercalate ", " (map providerName providers))
                 when (any requiresPKCE providers) $ putStrLn "PKCE enabled (required by MCP spec)"
             Nothing -> return ()
 
-    run (httpPort config) (mcpApp config stateVar oauthStateVar jwtSettings)
+    run (httpPort configWithTracer) (mcpApp configWithTracer stateVar oauthStateVar jwtSettings)
