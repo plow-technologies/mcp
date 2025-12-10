@@ -343,8 +343,28 @@ mcpApp config tracer stateVar oauthStateVar jwtSettings =
     mcpServerAuth :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> AuthResult AuthUser -> Aeson.Value -> Handler Aeson.Value
     mcpServerAuth httpConfig httpTracer stateTVar authResult requestValue =
         case authResult of
-            Authenticated user -> handleHTTPRequest httpConfig httpTracer stateTVar (Just user) requestValue
-            _ ->
+            Authenticated user -> do
+                liftIO $ traceWith httpTracer $ HTTPAuthSuccess (userId user)
+                handleHTTPRequest httpConfig httpTracer stateTVar (Just user) requestValue
+            BadPassword -> do
+                liftIO $ traceWith httpTracer $ HTTPAuthFailure "Bad password"
+                liftIO $ traceWith httpTracer $ HTTPAuthRequired "/mcp"
+                throwError $
+                    err401
+                        { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
+                        , errBody = encode $ object ["error" .= ("Authentication required" :: Text)]
+                        }
+            NoSuchUser -> do
+                liftIO $ traceWith httpTracer $ HTTPAuthFailure "No such user"
+                liftIO $ traceWith httpTracer $ HTTPAuthRequired "/mcp"
+                throwError $
+                    err401
+                        { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
+                        , errBody = encode $ object ["error" .= ("Authentication required" :: Text)]
+                        }
+            Indefinite -> do
+                liftIO $ traceWith httpTracer $ HTTPAuthFailure "Authentication indefinite"
+                liftIO $ traceWith httpTracer $ HTTPAuthRequired "/mcp"
                 throwError $
                     err401
                         { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
@@ -359,7 +379,10 @@ mcpApp config tracer stateVar oauthStateVar jwtSettings =
 
 -- | Handle HTTP MCP requests following the MCP transport protocol
 handleHTTPRequest :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> Maybe AuthUser -> Aeson.Value -> Handler Aeson.Value
-handleHTTPRequest httpConfig tracer stateVar _mAuthUser requestValue = do
+handleHTTPRequest httpConfig tracer stateVar mAuthUser requestValue = do
+    -- Emit trace for received request
+    liftIO $ traceWith tracer $ HTTPRequestReceived "/mcp" "POST" (isJust mAuthUser)
+
     -- Parse the incoming JSON-RPC message
     case fromJSON requestValue of
         Aeson.Success (msg :: JSONRPCMessage) -> do
@@ -1219,4 +1242,5 @@ runServerHTTP config tracer = do
                 when (any requiresPKCE providers) $ traceWith tracer HTTPPKCEEnabled
             Nothing -> return ()
 
+    traceWith tracer HTTPServerStarted
     run (httpPort config) (mcpApp config tracer stateVar oauthStateVar jwtSettings)
