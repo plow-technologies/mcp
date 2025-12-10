@@ -73,12 +73,13 @@ import Servant.Server (err400, err401, err500, errBody, errHeaders)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
 
 import Control.Monad (unless, when)
-import Plow.Logging (IOTracer (..), Tracer (..))
+import Plow.Logging (IOTracer (..), Tracer (..), traceWith)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
 import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
 import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Trace.OAuth (OAuthTrace)
+import MCP.Trace.Server (ServerTrace (..))
 import MCP.Types
 
 -- | A no-op tracer that discards all trace events
@@ -398,6 +399,7 @@ processHTTPRequest httpConfig stateVar req = do
                 , configOutput = undefined -- Not used in HTTP mode
                 , configServerInfo = httpServerInfo httpConfig
                 , configCapabilities = httpCapabilities httpConfig
+                , configTracer = nullIOTracer -- HTTP mode doesn't use server traces currently
                 }
 
     result <- runMCPServer dummyConfig currentState (handleHTTPRequestInner (httpProtocolVersion httpConfig) req)
@@ -614,7 +616,7 @@ handleInitializeHTTP _ params = do
     config <- ask
     state <- get
 
-    let InitializeParams{capabilities = clientCaps} = params
+    let InitializeParams{capabilities = clientCaps, clientInfo = clientImpl} = params
 
     put
         state
@@ -622,6 +624,25 @@ handleInitializeHTTP _ params = do
             , clientCapabilities = Just clientCaps
             , serverInfo = Just (configServerInfo config)
             }
+
+    -- Emit ServerInitialized trace
+    let Implementation clientName _ _ = clientImpl
+    liftIO $ traceWith (configTracer config) (ServerInitialized (Just clientName))
+
+    -- Emit ServerCapabilityNegotiation trace
+    let caps = extractCapabilityNames (serverCapabilities state)
+    liftIO $ traceWith (configTracer config) (ServerCapabilityNegotiation caps)
+
+-- | Extract capability names from ServerCapabilities
+extractCapabilityNames :: ServerCapabilities -> [Text]
+extractCapabilityNames (ServerCapabilities res prpts tls comps logCap _exp) =
+    concat
+        [ maybe [] (const ["resources"]) res
+        , maybe [] (const ["prompts"]) prpts
+        , maybe [] (const ["tools"]) tls
+        , maybe [] (const ["completions"]) comps
+        , maybe [] (const ["logging"]) logCap
+        ]
 
 -- | Handler for /.well-known/oauth-protected-resource endpoint
 handleProtectedResourceMetadata :: HTTPServerConfig -> Handler ProtectedResourceMetadata

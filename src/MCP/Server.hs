@@ -40,9 +40,11 @@ import Data.Default
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
+import Plow.Logging (IOTracer)
 import System.IO (Handle, hFlush)
 
 import MCP.Protocol
+import MCP.Trace.Server (ServerTrace)
 import MCP.Types
 
 -- | Server state tracking initialization, capabilities, and subscriptions
@@ -61,8 +63,8 @@ data ServerConfig = ServerConfig
     , configOutput :: Handle
     , configServerInfo :: Implementation
     , configCapabilities :: ServerCapabilities
+    , configTracer :: IOTracer ServerTrace
     }
-    deriving (Show)
 
 -- | The monad stack for MCP server operations
 type MCPServerM = ReaderT ServerConfig (StateT ServerState (ExceptT Text IO))

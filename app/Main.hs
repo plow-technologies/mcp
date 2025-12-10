@@ -113,6 +113,7 @@ main = do
                 , configOutput = stdout
                 , configServerInfo = serverInfo
                 , configCapabilities = capabilities
+                , configTracer = nullIOTracer
                 }
 
     putStrLn "Server configured, starting message loop..."

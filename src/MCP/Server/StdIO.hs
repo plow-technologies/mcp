@@ -228,7 +228,7 @@ handleInitialize reqId params = do
     config <- ask
     state <- get
 
-    let InitializeParams{capabilities = clientCaps} = params
+    let InitializeParams{capabilities = clientCaps, clientInfo = clientImpl} = params
 
     put
         state
@@ -236,6 +236,14 @@ handleInitialize reqId params = do
             , clientCapabilities = Just clientCaps
             , serverInfo = Just (configServerInfo config)
             }
+
+    -- Emit ServerInitialized trace
+    let Implementation clientName _ _ = clientImpl
+    liftIO $ traceWith (configTracer config) (ServerInitialized (Just clientName))
+
+    -- Emit ServerCapabilityNegotiation trace
+    let caps = extractCapabilityNames (serverCapabilities state)
+    liftIO $ traceWith (configTracer config) (ServerCapabilityNegotiation caps)
 
     let result =
             InitializeResult
@@ -247,6 +255,17 @@ handleInitialize reqId params = do
                 }
 
     sendResponse (configOutput config) reqId result
+
+-- | Extract capability names from ServerCapabilities
+extractCapabilityNames :: ServerCapabilities -> [T.Text]
+extractCapabilityNames (ServerCapabilities res prpts tls comps logCap _exp) =
+    concat
+        [ maybe [] (const ["resources"]) res
+        , maybe [] (const ["prompts"]) prpts
+        , maybe [] (const ["tools"]) tls
+        , maybe [] (const ["completions"]) comps
+        , maybe [] (const ["logging"]) logCap
+        ]
 
 handlePing :: RequestId -> MCPServerM ()
 handlePing reqId = do
