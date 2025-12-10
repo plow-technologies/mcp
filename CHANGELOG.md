@@ -1,5 +1,31 @@
 # Revision history for mcp
 
+## 0.4.0.0 -- YYYY-MM-DD
+
+* **Structured Tracing Support**: Comprehensive richly-typed structured logging via plow-log
+  - Add MCP.Trace.Types module with hierarchical trace type system
+  - ServerTrace for server lifecycle (init, shutdown, capability negotiation)
+  - TransportTrace for StdIO and HTTP transport events
+  - ProtocolTrace for JSON-RPC requests, responses, and notifications
+  - OAuthTrace for OAuth flow events (client registration, authorization, token exchange)
+  - ErrorTrace for self-contained error context with full diagnostic information
+* **Trace Infrastructure**:
+  - IOTracer type for effectful trace emission (re-exported from plow-log)
+  - Contravariant functor composition via contramap for type-safe trace threading
+  - filterTracer for selective trace filtering by subsystem
+  - nullIOTracer for disabling traces without code changes
+* **Async Trace Output**:
+  - Integration with plow-log-async for non-blocking trace emission
+  - withAsyncHandleTracer for production-ready async file/stderr output
+  - Configurable render functions for human-readable trace formatting
+* **Human-Readable Output**:
+  - renderMCPTrace renders all trace types to human-readable Text
+  - Render functions are total (handle all constructors)
+  - Consistent formatting across all trace subsystems
+* **New Dependencies**:
+  - plow-log >= 0.1 (core tracing infrastructure)
+  - plow-log-async >= 0.1 (async output)
+
 ## 0.3.0.0 -- 2025-06-18
 
 * **Protocol Update**: Full support for MCP protocol version 2025-06-18 with complete schema compliance
