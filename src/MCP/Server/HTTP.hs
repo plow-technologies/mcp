@@ -67,7 +67,7 @@ import Network.Wai (Application)
 import Network.Wai.Handler.Warp (Port, run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant (Context (..), Handler, Proxy (..), Server, serve, serveWithContext, throwError)
-import Servant.API (Accept (..), FormUrlEncoded, Get, Header, Headers, JSON, MimeRender (..), NoContent (..), PlainText, Post, QueryParam, QueryParam', ReqBody, Required, StdMethod (POST), Verb, addHeader, (:<|>) (..), (:>))
+import Servant.API (Accept (..), FormUrlEncoded, Get, Header, Headers, JSON, MimeRender (..), NoContent (..), Post, QueryParam, QueryParam', ReqBody, Required, StdMethod (POST), Verb, addHeader, (:<|>) (..), (:>))
 import Servant.Auth.Server (Auth, AuthResult (..), FromJWT, JWT, JWTSettings, ToJWT, defaultCookieSettings, defaultJWTSettings, generateKey, makeJWT)
 import Servant.Server (err400, err401, err500, errBody, errHeaders)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
@@ -803,9 +803,9 @@ handleLogin config oauthStateVar _jwtSettings mCookie loginForm = do
                 then do
                     -- Generate authorization code
                     code <- liftIO $ generateAuthCodeWithConfig config
-                    currentTime <- liftIO getCurrentTime
+                    codeGenerationTime <- liftIO getCurrentTime
                     let expirySeconds = maybe 600 (fromIntegral . authCodeExpirySeconds) oauthCfg
-                        expiry = addUTCTime expirySeconds currentTime
+                        expiry = addUTCTime expirySeconds codeGenerationTime
                         authCode =
                             AuthorizationCode
                                 { authCode = code

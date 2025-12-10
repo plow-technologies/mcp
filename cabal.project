@@ -1,6 +1,10 @@
 index-state: 2024-07-18T00:00:00Z
 packages: mcp.cabal
-documentation: true
+tests: true
+documentation: false
+optimization: false
+package mcp
+  ghc-options: -Werror
 
 -- Allow plow-log libraries to work with base 4.18+ and time 1.12+
 allow-newer: plow-log:base, plow-log:time, plow-log-async:base, plow-log-async:time
