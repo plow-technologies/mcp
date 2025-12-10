@@ -22,7 +22,7 @@ module MCP.Server.StdIO (
 ) where
 
 import Control.Exception (catch, throwIO)
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (ask)
 import Control.Monad.State.Strict (get, put)
 import Data.Aeson (decode, fromJSON, object, toJSON)
@@ -34,6 +34,7 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Text.Encoding.Error qualified as TEE
 import Plow.Logging (IOTracer, traceWith)
+import System.IO (Handle)
 import System.IO.Error (isEOFError)
 
 import MCP.Protocol
@@ -47,6 +48,24 @@ import MCP.Types
 requestIdToText :: RequestId -> T.Text
 requestIdToText (RequestId val) = T.pack (show val)
 
+-- | Traced version of sendResponse that emits StdIOMessageSent
+tracedSendResponse :: (MonadIO m, Aeson.ToJSON a) => IOTracer StdIOTrace -> Handle -> RequestId -> a -> m ()
+tracedSendResponse tracer handle reqId result = do
+    let response = JSONRPCResponse "2.0" reqId (toJSON result)
+        encoded = Aeson.encode response
+        size = fromIntegral (LBS.length encoded)
+    liftIO $ traceWith tracer $ StdIOMessageSent{messageSize = size}
+    sendResponse handle reqId result
+
+-- | Traced version of sendError that emits StdIOMessageSent
+tracedSendError :: (MonadIO m) => IOTracer StdIOTrace -> Handle -> RequestId -> JSONRPCErrorInfo -> m ()
+tracedSendError tracer handle reqId errorInfo = do
+    let response = JSONRPCError "2.0" reqId errorInfo
+        encoded = Aeson.encode response
+        size = fromIntegral (LBS.length encoded)
+    liftIO $ traceWith tracer $ StdIOMessageSent{messageSize = size}
+    sendError handle reqId errorInfo
+
 -- | Handle an incoming JSON-RPC message
 handleMessage :: (MCPServer MCPServerM) => IOTracer StdIOTrace -> BSC.ByteString -> MCPServerM (Maybe ())
 handleMessage tracer input = do
@@ -58,7 +77,7 @@ handleMessage tracer input = do
             let inputText = TE.decodeUtf8With TEE.lenientDecode (LBS.toStrict $ LBS.take 100 $ LBS.fromStrict input)
             liftIO $ traceWith protoTracer $ ProtocolParseError "Failed to decode JSON-RPC message" (Just inputText)
             config <- ask
-            sendError (configOutput config) (RequestId (toJSON ("unknown" :: T.Text))) $
+            tracedSendError tracer (configOutput config) (RequestId (toJSON ("unknown" :: T.Text))) $
                 JSONRPCErrorInfo (-32700) "Parse error" Nothing
             return Nothing
         Just msg -> case msg of
@@ -66,7 +85,7 @@ handleMessage tracer input = do
                 -- Trace request received
                 let JSONRPCRequest _ reqId method _ = req
                 liftIO $ traceWith protoTracer $ ProtocolRequestReceived (requestIdToText reqId) method
-                handleRequest protoTracer serverTracer req
+                handleRequest tracer protoTracer serverTracer req
                 return (Just ())
             NotificationMessage notif -> do
                 -- Trace notification received
@@ -76,154 +95,154 @@ handleMessage tracer input = do
                 return (Just ())
             _ -> do
                 config <- ask
-                sendError (configOutput config) (RequestId (toJSON ("unknown" :: T.Text))) $
+                tracedSendError tracer (configOutput config) (RequestId (toJSON ("unknown" :: T.Text))) $
                     JSONRPCErrorInfo (-32600) "Invalid Request" Nothing
                 return Nothing
 
 -- | Handle a JSON-RPC request
-handleRequest :: (MCPServer MCPServerM) => IOTracer ProtocolTrace -> IOTracer ServerTrace -> JSONRPCRequest -> MCPServerM ()
-handleRequest protoTracer serverTracer (JSONRPCRequest _ reqId method params) = do
+handleRequest :: (MCPServer MCPServerM) => IOTracer StdIOTrace -> IOTracer ProtocolTrace -> IOTracer ServerTrace -> JSONRPCRequest -> MCPServerM ()
+handleRequest tracer protoTracer serverTracer (JSONRPCRequest _ reqId method params) = do
     config <- ask
     state <- get
 
     case method of
         "initialize" -> case params of
             Just p -> case fromJSON p of
-                Aeson.Success initParams -> handleInitialize serverTracer reqId initParams
+                Aeson.Success initParams -> handleInitialize tracer serverTracer reqId initParams
                 Aeson.Error e ->
-                    sendError (configOutput config) reqId $
+                    tracedSendError tracer (configOutput config) reqId $
                         JSONRPCErrorInfo (-32602) ("Invalid params: " <> T.pack e) Nothing
             Nothing ->
-                sendError (configOutput config) reqId $
+                tracedSendError tracer (configOutput config) reqId $
                     JSONRPCErrorInfo (-32602) "Missing params" Nothing
-        "ping" -> handlePing reqId
+        "ping" -> handlePing tracer reqId
         "resources/list" -> do
             if not (serverInitialized state)
                 then
-                    sendError (configOutput config) reqId $
+                    tracedSendError tracer (configOutput config) reqId $
                         JSONRPCErrorInfo (-32002) "Server not initialized" Nothing
                 else case params of
                     Just p -> case fromJSON p of
                         Aeson.Success listParams -> do
                             result <- handleListResources listParams
-                            sendResponse (configOutput config) reqId result
+                            tracedSendResponse tracer (configOutput config) reqId result
                         Aeson.Error e ->
-                            sendError (configOutput config) reqId $
+                            tracedSendError tracer (configOutput config) reqId $
                                 JSONRPCErrorInfo (-32602) ("Invalid params: " <> T.pack e) Nothing
                     Nothing -> do
                         result <- handleListResources (ListResourcesParams Nothing)
-                        sendResponse (configOutput config) reqId result
+                        tracedSendResponse tracer (configOutput config) reqId result
         "resources/read" -> do
             if not (serverInitialized state)
                 then
-                    sendError (configOutput config) reqId $
+                    tracedSendError tracer (configOutput config) reqId $
                         JSONRPCErrorInfo (-32002) "Server not initialized" Nothing
                 else case params of
                     Just p -> case fromJSON p of
                         Aeson.Success readParams -> do
                             result <- handleReadResource readParams
-                            sendResponse (configOutput config) reqId result
+                            tracedSendResponse tracer (configOutput config) reqId result
                         Aeson.Error e ->
-                            sendError (configOutput config) reqId $
+                            tracedSendError tracer (configOutput config) reqId $
                                 JSONRPCErrorInfo (-32602) ("Invalid params: " <> T.pack e) Nothing
                     Nothing ->
-                        sendError (configOutput config) reqId $
+                        tracedSendError tracer (configOutput config) reqId $
                             JSONRPCErrorInfo (-32602) "Missing params" Nothing
         "resources/templates/list" -> do
             if not (serverInitialized state)
                 then
-                    sendError (configOutput config) reqId $
+                    tracedSendError tracer (configOutput config) reqId $
                         JSONRPCErrorInfo (-32002) "Server not initialized" Nothing
                 else case params of
                     Just p -> case fromJSON p of
                         Aeson.Success listParams -> do
                             result <- handleListResourceTemplates listParams
-                            sendResponse (configOutput config) reqId result
+                            tracedSendResponse tracer (configOutput config) reqId result
                         Aeson.Error e ->
-                            sendError (configOutput config) reqId $
+                            tracedSendError tracer (configOutput config) reqId $
                                 JSONRPCErrorInfo (-32602) ("Invalid params: " <> T.pack e) Nothing
                     Nothing -> do
                         result <- handleListResourceTemplates (ListResourceTemplatesParams Nothing)
-                        sendResponse (configOutput config) reqId result
+                        tracedSendResponse tracer (configOutput config) reqId result
         "prompts/list" -> do
             if not (serverInitialized state)
                 then
-                    sendError (configOutput config) reqId $
+                    tracedSendError tracer (configOutput config) reqId $
                         JSONRPCErrorInfo (-32002) "Server not initialized" Nothing
                 else case params of
                     Just p -> case fromJSON p of
                         Aeson.Success listParams -> do
                             result <- handleListPrompts listParams
-                            sendResponse (configOutput config) reqId result
+                            tracedSendResponse tracer (configOutput config) reqId result
                         Aeson.Error e ->
-                            sendError (configOutput config) reqId $
+                            tracedSendError tracer (configOutput config) reqId $
                                 JSONRPCErrorInfo (-32602) ("Invalid params: " <> T.pack e) Nothing
                     Nothing -> do
                         result <- handleListPrompts (ListPromptsParams Nothing)
-                        sendResponse (configOutput config) reqId result
+                        tracedSendResponse tracer (configOutput config) reqId result
         "prompts/get" -> do
             if not (serverInitialized state)
                 then
-                    sendError (configOutput config) reqId $
+                    tracedSendError tracer (configOutput config) reqId $
                         JSONRPCErrorInfo (-32002) "Server not initialized" Nothing
                 else case params of
                     Just p -> case fromJSON p of
                         Aeson.Success getParams -> do
                             result <- handleGetPrompt getParams
-                            sendResponse (configOutput config) reqId result
+                            tracedSendResponse tracer (configOutput config) reqId result
                         Aeson.Error e ->
-                            sendError (configOutput config) reqId $
+                            tracedSendError tracer (configOutput config) reqId $
                                 JSONRPCErrorInfo (-32602) ("Invalid params: " <> T.pack e) Nothing
                     Nothing ->
-                        sendError (configOutput config) reqId $
+                        tracedSendError tracer (configOutput config) reqId $
                             JSONRPCErrorInfo (-32602) "Missing params" Nothing
         "tools/list" -> do
             if not (serverInitialized state)
                 then
-                    sendError (configOutput config) reqId $
+                    tracedSendError tracer (configOutput config) reqId $
                         JSONRPCErrorInfo (-32002) "Server not initialized" Nothing
                 else case params of
                     Just p -> case fromJSON p of
                         Aeson.Success listParams -> do
                             result <- handleListTools listParams
-                            sendResponse (configOutput config) reqId result
+                            tracedSendResponse tracer (configOutput config) reqId result
                         Aeson.Error e ->
-                            sendError (configOutput config) reqId $
+                            tracedSendError tracer (configOutput config) reqId $
                                 JSONRPCErrorInfo (-32602) ("Invalid params: " <> T.pack e) Nothing
                     Nothing -> do
                         result <- handleListTools (ListToolsParams Nothing)
-                        sendResponse (configOutput config) reqId result
+                        tracedSendResponse tracer (configOutput config) reqId result
         "tools/call" -> do
             if not (serverInitialized state)
                 then
-                    sendError (configOutput config) reqId $
+                    tracedSendError tracer (configOutput config) reqId $
                         JSONRPCErrorInfo (-32002) "Server not initialized" Nothing
                 else case params of
                     Just p -> case fromJSON p of
                         Aeson.Success callParams -> do
                             result <- handleCallTool callParams
-                            sendResponse (configOutput config) reqId result
+                            tracedSendResponse tracer (configOutput config) reqId result
                         Aeson.Error e ->
-                            sendError (configOutput config) reqId $
+                            tracedSendError tracer (configOutput config) reqId $
                                 JSONRPCErrorInfo (-32602) ("Invalid params: " <> T.pack e) Nothing
                     Nothing ->
-                        sendError (configOutput config) reqId $
+                        tracedSendError tracer (configOutput config) reqId $
                             JSONRPCErrorInfo (-32602) "Missing params" Nothing
         "completion/complete" -> do
             if not (serverInitialized state)
                 then
-                    sendError (configOutput config) reqId $
+                    tracedSendError tracer (configOutput config) reqId $
                         JSONRPCErrorInfo (-32002) "Server not initialized" Nothing
                 else case params of
                     Just p -> case fromJSON p of
                         Aeson.Success completeParams -> do
                             result <- handleComplete completeParams
-                            sendResponse (configOutput config) reqId result
+                            tracedSendResponse tracer (configOutput config) reqId result
                         Aeson.Error e ->
-                            sendError (configOutput config) reqId $
+                            tracedSendError tracer (configOutput config) reqId $
                                 JSONRPCErrorInfo (-32602) ("Invalid params: " <> T.pack e) Nothing
                     Nothing ->
-                        sendError (configOutput config) reqId $
+                        tracedSendError tracer (configOutput config) reqId $
                             JSONRPCErrorInfo (-32602) "Missing params" Nothing
         "logging/setLevel" -> case params of
             Just p -> case fromJSON p of
@@ -232,19 +251,19 @@ handleRequest protoTracer serverTracer (JSONRPCRequest _ reqId method params) = 
                     -- SetLevel response is just an empty object
                     sendResponse (configOutput config) reqId (object [])
                 Aeson.Error e ->
-                    sendError (configOutput config) reqId $
+                    tracedSendError tracer (configOutput config) reqId $
                         JSONRPCErrorInfo (-32602) ("Invalid params: " <> T.pack e) Nothing
             Nothing ->
-                sendError (configOutput config) reqId $
+                tracedSendError tracer (configOutput config) reqId $
                     JSONRPCErrorInfo (-32602) "Missing params" Nothing
         _ -> do
             -- Trace method not found
             liftIO $ traceWith protoTracer $ ProtocolMethodNotFound (requestIdToText reqId) method
-            sendError (configOutput config) reqId $
+            tracedSendError tracer (configOutput config) reqId $
                 JSONRPCErrorInfo (-32601) "Method not found" Nothing
 
-handleInitialize :: IOTracer ServerTrace -> RequestId -> InitializeParams -> MCPServerM ()
-handleInitialize tracer reqId params = do
+handleInitialize :: IOTracer StdIOTrace -> IOTracer ServerTrace -> RequestId -> InitializeParams -> MCPServerM ()
+handleInitialize stdioTracer serverTracer reqId params = do
     config <- ask
     state <- get
 
@@ -259,11 +278,11 @@ handleInitialize tracer reqId params = do
 
     -- Emit ServerInitialized trace
     let Implementation clientName _ _ = clientImpl
-    liftIO $ traceWith tracer (ServerInitialized (Just clientName))
+    liftIO $ traceWith serverTracer (ServerInitialized (Just clientName))
 
     -- Emit ServerCapabilityNegotiation trace
     let caps = extractCapabilityNames (serverCapabilities state)
-    liftIO $ traceWith tracer (ServerCapabilityNegotiation caps)
+    liftIO $ traceWith serverTracer (ServerCapabilityNegotiation caps)
 
     let result =
             InitializeResult
@@ -274,7 +293,7 @@ handleInitialize tracer reqId params = do
                 , _meta = Nothing
                 }
 
-    sendResponse (configOutput config) reqId result
+    tracedSendResponse stdioTracer (configOutput config) reqId result
 
 -- | Extract capability names from ServerCapabilities
 extractCapabilityNames :: ServerCapabilities -> [T.Text]
@@ -287,11 +306,11 @@ extractCapabilityNames (ServerCapabilities res prpts tls comps logCap _exp) =
         , maybe [] (const ["logging"]) logCap
         ]
 
-handlePing :: RequestId -> MCPServerM ()
-handlePing reqId = do
+handlePing :: IOTracer StdIOTrace -> RequestId -> MCPServerM ()
+handlePing tracer reqId = do
     config <- ask
     -- Ping response is just an empty object in MCP
-    sendResponse (configOutput config) reqId (object [])
+    tracedSendResponse tracer (configOutput config) reqId (object [])
 
 -- | Handle a JSON-RPC notification
 handleNotification :: JSONRPCNotification -> MCPServerM ()
@@ -316,6 +335,8 @@ runServer config tracer = do
             case eofOrLine of
                 Left () -> return () -- EOF reached, exit gracefully
                 Right line -> do
+                    -- Trace message received from stdin
+                    liftIO $ traceWith tracer $ StdIOMessageReceived{messageSize = BSC.length line}
                     result <- handleMessage tracer line
                     case result of
                         Just () -> loop
