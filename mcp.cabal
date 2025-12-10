@@ -85,13 +85,14 @@ library
     import:           warnings
 
     -- Modules exported by the library.
-    exposed-modules:  
+    exposed-modules:
         MCP.Types
-        MCP.Protocol  
+        MCP.Protocol
         MCP.Server
         MCP.Server.StdIO
         MCP.Server.HTTP
         MCP.Server.Auth
+        MCP.Trace.Types
         MCP.Trace.HTTP
         MCP.Trace.OAuth
         MCP.Trace.Protocol
