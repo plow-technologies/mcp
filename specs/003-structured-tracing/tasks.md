@@ -92,9 +92,9 @@
 
 ### Implementation for User Story 2
 
-- [ ] T024 [P] [US2] Add OAuthTrace leaf constructors (OAuthClientRegistration, OAuthAuthorizationRequest, etc.) in `src/MCP/Trace/OAuth.hs`
-- [ ] T025 [P] [US2] Add HTTPTrace leaf constructors (HTTPServerStarting, HTTPRequestReceived, etc.) in `src/MCP/Trace/HTTP.hs`
-- [ ] T026 [US2] Implement renderOAuthTrace for all constructors in `src/MCP/Trace/OAuth.hs`
+- [X] T024 [P] [US2] Add OAuthTrace leaf constructors (OAuthClientRegistration, OAuthAuthorizationRequest, etc.) in `src/MCP/Trace/OAuth.hs`
+- [X] T025 [P] [US2] Add HTTPTrace leaf constructors (HTTPServerStarting, HTTPRequestReceived, etc.) in `src/MCP/Trace/HTTP.hs`
+- [X] T026 [US2] Implement renderOAuthTrace for all constructors in `src/MCP/Trace/OAuth.hs`
 - [ ] T027 [US2] Implement renderHTTPTrace for all constructors (including delegation to OAuth) in `src/MCP/Trace/HTTP.hs`
 - [ ] T028 [US2] Add traceWith calls in OAuth handlers in `src/MCP/Server/Auth.hs`
 - [ ] T029 [US2] Add traceWith calls in HTTP server startup/request handling in `src/MCP/Server/HTTP.hs`
