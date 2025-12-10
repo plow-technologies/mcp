@@ -21,7 +21,7 @@ module MCP.Server.StdIO (
     ServerConfig (..),
 ) where
 
-import Control.Exception (catch, throwIO)
+import Control.Exception (catch)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (ask)
 import Control.Monad.State.Strict (get, put)
@@ -331,9 +331,18 @@ runServer config tracer = do
                 liftIO $
                     catch
                         (Right <$> BSC.hGetLine (configInput config))
-                        (\e -> if isEOFError e then return (Left ()) else throwIO e)
+                        ( \e ->
+                            if isEOFError e
+                                then return (Left Nothing)
+                                else return (Left (Just (T.pack (show e))))
+                        )
             case eofOrLine of
-                Left () -> return () -- EOF reached, exit gracefully
+                Left maybeErr -> do
+                    -- Trace EOF or read error
+                    case maybeErr of
+                        Nothing -> liftIO $ traceWith tracer StdIOEOF
+                        Just errMsg -> liftIO $ traceWith tracer $ StdIOReadError{stdioErrorMessage = errMsg}
+                    return ()
                 Right line -> do
                     -- Trace message received from stdin
                     liftIO $ traceWith tracer $ StdIOMessageReceived{messageSize = BSC.length line}
@@ -348,5 +357,5 @@ runServer config tracer = do
     traceWith (contramap StdIOServer tracer) ServerShutdown
 
     case result of
-        Left err -> traceWith tracer $ StdIOReadError{stdioErrorMessage = err}
-        Right _ -> return () -- Don't print "Server terminated" for clean EOF
+        Left err -> Prelude.error $ "MCPServer error: " <> show err
+        Right _ -> return ()
