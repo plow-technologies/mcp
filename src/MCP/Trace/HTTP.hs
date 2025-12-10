@@ -16,6 +16,7 @@ module MCP.Trace.HTTP
 import Data.Text (Text)
 import MCP.Trace.OAuth (OAuthTrace, renderOAuthTrace)
 import MCP.Trace.Protocol (ProtocolTrace, renderProtocolTrace)
+import MCP.Trace.Server (ServerTrace, renderServerTrace)
 
 -- | HTTP transport-specific events.
 --
@@ -31,6 +32,8 @@ data HTTPTrace
     | HTTPOAuth OAuthTrace
     -- ^ Nested OAuth events in HTTP context.
     -- This composite constructor is part of the skeleton structure.
+    | HTTPServer ServerTrace
+    -- ^ Nested server lifecycle events in HTTP context.
     deriving (Show, Eq)
 
 -- | Render an HTTPTrace to human-readable text.
@@ -41,3 +44,4 @@ renderHTTPTrace :: HTTPTrace -> Text
 renderHTTPTrace HTTPPlaceholder = "[HTTP] (skeleton)"
 renderHTTPTrace (HTTPProtocol pt) = "[HTTP:Protocol] " <> renderProtocolTrace pt
 renderHTTPTrace (HTTPOAuth ot) = "[HTTP:OAuth] " <> renderOAuthTrace ot
+renderHTTPTrace (HTTPServer st) = "[HTTP:Server] " <> renderServerTrace st
