@@ -14,14 +14,12 @@ module MCP.Trace.StdIO
     ) where
 
 import Data.Text (Text)
-import qualified Data.Text as T
 import MCP.Trace.Protocol (ProtocolTrace, renderProtocolTrace)
 
 -- | StdIO transport-specific events.
 --
 -- Current implementation is a skeleton with composite constructors.
 -- Full implementation with leaf constructors will be added in Phase 3.
-{-# HLINT ignore "Use newtype instead of data" #-}
 data StdIOTrace
     = StdIOPlaceholder
     -- ^ Placeholder constructor for Phase 2 skeleton.

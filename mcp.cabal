@@ -92,6 +92,11 @@ library
         MCP.Server.StdIO
         MCP.Server.HTTP
         MCP.Server.Auth
+        MCP.Trace.HTTP
+        MCP.Trace.OAuth
+        MCP.Trace.Protocol
+        MCP.Trace.Server
+        MCP.Trace.StdIO
 
     -- Modules included in this library but not exported.
     -- other-modules:

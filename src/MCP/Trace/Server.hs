@@ -14,13 +14,11 @@ module MCP.Trace.Server
     ) where
 
 import Data.Text (Text)
-import qualified Data.Text as T
 
 -- | Server lifecycle and state change events.
 --
 -- Current implementation is a skeleton placeholder.
 -- Full implementation with leaf constructors will be added in Phase 3.
-{-# HLINT ignore "Use newtype instead of data" #-}
 data ServerTrace
     = ServerPlaceholder
     -- ^ Placeholder constructor for Phase 2 skeleton.

@@ -17,13 +17,11 @@ module MCP.Trace.OAuth
     ) where
 
 import Data.Text (Text)
-import qualified Data.Text as T
 
 -- | OAuth 2.0 flow events.
 --
 -- This type is semantically independent of MCP for future package separation.
 -- Current implementation is a skeleton placeholder.
-{-# HLINT ignore "Use newtype instead of data" #-}
 data OAuthTrace
     = OAuthPlaceholder Text
     -- ^ Placeholder constructor for Phase 2 skeleton.

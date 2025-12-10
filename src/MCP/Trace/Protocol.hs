@@ -14,13 +14,11 @@ module MCP.Trace.Protocol
     ) where
 
 import Data.Text (Text)
-import qualified Data.Text as T
 
 -- | JSON-RPC protocol handling events.
 --
 -- Current implementation is a skeleton placeholder.
 -- Full implementation with leaf constructors will be added in Phase 3.
-{-# HLINT ignore "Use newtype instead of data" #-}
 data ProtocolTrace
     = ProtocolPlaceholder
     -- ^ Placeholder constructor for Phase 2 skeleton.
