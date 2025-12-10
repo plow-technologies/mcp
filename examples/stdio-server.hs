@@ -163,7 +163,6 @@ main = do
                 , configOutput = stdout
                 , configServerInfo = serverInfo
                 , configCapabilities = capabilities
-                , configTracer = nullIOTracer
                 }
 
     putStrLn "Stdio server configured, starting..."

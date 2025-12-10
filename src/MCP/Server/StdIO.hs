@@ -51,6 +51,7 @@ requestIdToText (RequestId val) = T.pack (show val)
 handleMessage :: (MCPServer MCPServerM) => IOTracer StdIOTrace -> BSC.ByteString -> MCPServerM (Maybe ())
 handleMessage tracer input = do
     let protoTracer = contramap StdIOProtocol tracer
+        serverTracer = contramap StdIOServer tracer
     case decode (LBS.fromStrict input) :: Maybe JSONRPCMessage of
         Nothing -> do
             -- Trace parse error
@@ -65,7 +66,7 @@ handleMessage tracer input = do
                 -- Trace request received
                 let JSONRPCRequest _ reqId method _ = req
                 liftIO $ traceWith protoTracer $ ProtocolRequestReceived (requestIdToText reqId) method
-                handleRequest protoTracer req
+                handleRequest protoTracer serverTracer req
                 return (Just ())
             NotificationMessage notif -> do
                 -- Trace notification received
@@ -80,15 +81,15 @@ handleMessage tracer input = do
                 return Nothing
 
 -- | Handle a JSON-RPC request
-handleRequest :: (MCPServer MCPServerM) => IOTracer ProtocolTrace -> JSONRPCRequest -> MCPServerM ()
-handleRequest tracer (JSONRPCRequest _ reqId method params) = do
+handleRequest :: (MCPServer MCPServerM) => IOTracer ProtocolTrace -> IOTracer ServerTrace -> JSONRPCRequest -> MCPServerM ()
+handleRequest protoTracer serverTracer (JSONRPCRequest _ reqId method params) = do
     config <- ask
     state <- get
 
     case method of
         "initialize" -> case params of
             Just p -> case fromJSON p of
-                Aeson.Success initParams -> handleInitialize reqId initParams
+                Aeson.Success initParams -> handleInitialize serverTracer reqId initParams
                 Aeson.Error e ->
                     sendError (configOutput config) reqId $
                         JSONRPCErrorInfo (-32602) ("Invalid params: " <> T.pack e) Nothing
@@ -238,12 +239,12 @@ handleRequest tracer (JSONRPCRequest _ reqId method params) = do
                     JSONRPCErrorInfo (-32602) "Missing params" Nothing
         _ -> do
             -- Trace method not found
-            liftIO $ traceWith tracer $ ProtocolMethodNotFound (requestIdToText reqId) method
+            liftIO $ traceWith protoTracer $ ProtocolMethodNotFound (requestIdToText reqId) method
             sendError (configOutput config) reqId $
                 JSONRPCErrorInfo (-32601) "Method not found" Nothing
 
-handleInitialize :: RequestId -> InitializeParams -> MCPServerM ()
-handleInitialize reqId params = do
+handleInitialize :: IOTracer ServerTrace -> RequestId -> InitializeParams -> MCPServerM ()
+handleInitialize tracer reqId params = do
     config <- ask
     state <- get
 
@@ -258,11 +259,11 @@ handleInitialize reqId params = do
 
     -- Emit ServerInitialized trace
     let Implementation clientName _ _ = clientImpl
-    liftIO $ traceWith (configTracer config) (ServerInitialized (Just clientName))
+    liftIO $ traceWith tracer (ServerInitialized (Just clientName))
 
     -- Emit ServerCapabilityNegotiation trace
     let caps = extractCapabilityNames (serverCapabilities state)
-    liftIO $ traceWith (configTracer config) (ServerCapabilityNegotiation caps)
+    liftIO $ traceWith tracer (ServerCapabilityNegotiation caps)
 
     let result =
             InitializeResult

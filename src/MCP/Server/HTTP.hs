@@ -394,10 +394,10 @@ processHTTPRequest httpConfig tracer stateVar req = do
                 , configOutput = undefined -- Not used in HTTP mode
                 , configServerInfo = httpServerInfo httpConfig
                 , configCapabilities = httpCapabilities httpConfig
-                , configTracer = contramap HTTPServer tracer
                 }
+        serverTracer = contramap HTTPServer tracer
 
-    result <- runMCPServer dummyConfig currentState (handleHTTPRequestInner (httpProtocolVersion httpConfig) req)
+    result <- runMCPServer dummyConfig currentState (handleHTTPRequestInner serverTracer (httpProtocolVersion httpConfig) req)
     case result of
         Left err -> return $ Left err
         Right (response, newState) -> do
@@ -406,8 +406,8 @@ processHTTPRequest httpConfig tracer stateVar req = do
             return $ Right response
 
 -- | Handle HTTP request within the MCP monad, returning proper JSON-RPC responses
-handleHTTPRequestInner :: (MCPServer MCPServerM) => Text -> JSONRPCRequest -> MCPServerM Aeson.Value
-handleHTTPRequestInner protocolVersion (JSONRPCRequest _ reqId method params) = do
+handleHTTPRequestInner :: (MCPServer MCPServerM) => IOTracer ServerTrace -> Text -> JSONRPCRequest -> MCPServerM Aeson.Value
+handleHTTPRequestInner serverTracer protocolVersion (JSONRPCRequest _ reqId method params) = do
     config <- ask
     state <- get
 
@@ -415,7 +415,7 @@ handleHTTPRequestInner protocolVersion (JSONRPCRequest _ reqId method params) = 
         "initialize" -> case params of
             Just p -> case fromJSON p of
                 Aeson.Success initParams -> do
-                    handleInitializeHTTP reqId initParams
+                    handleInitializeHTTP serverTracer reqId initParams
                     let result =
                             InitializeResult
                                 { protocolVersion = protocolVersion
@@ -606,8 +606,8 @@ handleHTTPRequestInner protocolVersion (JSONRPCRequest _ reqId method params) = 
                         JSONRPCErrorInfo (-32601) "Method not found" Nothing
 
 -- | Handle HTTP initialize request
-handleInitializeHTTP :: RequestId -> InitializeParams -> MCPServerM ()
-handleInitializeHTTP _ params = do
+handleInitializeHTTP :: IOTracer ServerTrace -> RequestId -> InitializeParams -> MCPServerM ()
+handleInitializeHTTP tracer _ params = do
     config <- ask
     state <- get
 
@@ -622,11 +622,11 @@ handleInitializeHTTP _ params = do
 
     -- Emit ServerInitialized trace
     let Implementation clientName _ _ = clientImpl
-    liftIO $ traceWith (configTracer config) (ServerInitialized (Just clientName))
+    liftIO $ traceWith tracer (ServerInitialized (Just clientName))
 
     -- Emit ServerCapabilityNegotiation trace
     let caps = extractCapabilityNames (serverCapabilities state)
-    liftIO $ traceWith (configTracer config) (ServerCapabilityNegotiation caps)
+    liftIO $ traceWith tracer (ServerCapabilityNegotiation caps)
 
 -- | Extract capability names from ServerCapabilities
 extractCapabilityNames :: ServerCapabilities -> [Text]
