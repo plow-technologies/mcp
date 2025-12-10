@@ -73,9 +73,11 @@ import Servant.Server (err400, err401, err500, errBody, errHeaders)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
 
 import Control.Monad (unless, when)
+import Plow.Logging (IOTracer)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
 import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
+import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types
 
 -- | HTML content type for Servant
@@ -1106,8 +1108,8 @@ escapeHtml :: Text -> Text
 escapeHtml = T.replace "&" "&amp;" . T.replace "<" "&lt;" . T.replace ">" "&gt;" . T.replace "\"" "&quot;" . T.replace "'" "&#39;"
 
 -- | Run the MCP server as an HTTP server
-runServerHTTP :: (MCPServer MCPServerM) => HTTPServerConfig -> IO ()
-runServerHTTP config = do
+runServerHTTP :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> IO ()
+runServerHTTP config _tracer = do
     -- Initialize JWT settings if OAuth is enabled
     jwtSettings <- case httpJWK config of
         Just jwk -> return $ defaultJWTSettings jwk

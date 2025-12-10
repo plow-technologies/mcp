@@ -29,12 +29,17 @@ import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
 import Options.Applicative
+import Plow.Logging (IOTracer(..), Tracer(..))
 
 import MCP.Protocol
 import MCP.Server
 import MCP.Server.Auth
 import MCP.Server.HTTP
 import MCP.Types
+
+-- | A no-op tracer that discards all trace events
+nullIOTracer :: IOTracer a
+nullIOTracer = IOTracer (Tracer (\_ -> pure ()))
 
 -- | Command line options
 data Options = Options
@@ -254,4 +259,4 @@ main = do
 
     putStrLn ""
 
-    runServerHTTP config
+    runServerHTTP config nullIOTracer
