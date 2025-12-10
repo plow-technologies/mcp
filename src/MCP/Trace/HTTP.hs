@@ -35,6 +35,26 @@ data HTTPTrace
         { tracePort :: Int
         , traceBaseUrl :: Text
         }
+    | -- | HTTP server successfully started
+      HTTPServerStarted
+    | -- | HTTP request received
+      HTTPRequestReceived
+        { tracePath :: Text
+        , traceMethod :: Text
+        , traceHasAuth :: Bool
+        }
+    | -- | Authentication required for this request
+      HTTPAuthRequired
+        { traceAuthPath :: Text
+        }
+    | -- | Authentication succeeded
+      HTTPAuthSuccess
+        { traceAuthUserId :: Text
+        }
+    | -- | Authentication failed
+      HTTPAuthFailure
+        { traceAuthReason :: Text
+        }
     | -- | OAuth authentication enabled
       HTTPOAuthEnabled
         { traceAuthEndpoint :: Text
@@ -70,8 +90,22 @@ Delegates to sub-renders for nested events.
 -}
 renderHTTPTrace :: HTTPTrace -> Text
 renderHTTPTrace HTTPPlaceholder = "[HTTP] (skeleton)"
-renderHTTPTrace (HTTPServerStarting port baseUrl) =
-    "[HTTP] Starting MCP HTTP Server on port " <> T.pack (show port) <> " at " <> baseUrl
+renderHTTPTrace (HTTPServerStarting p baseUrl) =
+    "[HTTP] Server starting on port " <> T.pack (show p) <> " (" <> baseUrl <> ")"
+renderHTTPTrace HTTPServerStarted =
+    "[HTTP] Server started"
+renderHTTPTrace (HTTPRequestReceived reqPath reqMethod hasAuthHeader) =
+    "[HTTP] Request received: "
+        <> reqMethod
+        <> " "
+        <> reqPath
+        <> (if hasAuthHeader then " (authenticated)" else " (no auth)")
+renderHTTPTrace (HTTPAuthRequired reqPath) =
+    "[HTTP] Authentication required for " <> reqPath
+renderHTTPTrace (HTTPAuthSuccess uid) =
+    "[HTTP] Authentication successful for user " <> uid
+renderHTTPTrace (HTTPAuthFailure rsn) =
+    "[HTTP] Authentication failed: " <> rsn
 renderHTTPTrace (HTTPOAuthEnabled authEp tokenEp) =
     "[HTTP] OAuth authentication enabled - Auth: " <> authEp <> ", Token: " <> tokenEp
 renderHTTPTrace (HTTPOAuthProviders providers) =
