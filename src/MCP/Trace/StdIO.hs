@@ -14,38 +14,49 @@ module MCP.Trace.StdIO (
 ) where
 
 import Data.Text (Text)
+import qualified Data.Text
 import MCP.Trace.Protocol (ProtocolTrace, renderProtocolTrace)
 import MCP.Trace.Server (ServerTrace, renderServerTrace)
 
 {- | StdIO transport-specific events.
 
-Current implementation is a skeleton with composite constructors.
-Full implementation with leaf constructors will be added in Phase 3.
+Embeds ServerTrace and ProtocolTrace for events occurring in StdIO context.
 -}
 data StdIOTrace
-    = {- | Placeholder constructor for Phase 2 skeleton.
-      Will be replaced with leaf constructors (StdIOMessageReceived, etc.) in Phase 3.
-      -}
-      StdIOPlaceholder
-    | -- | Server error during operation
-      StdIOServerError
-        { stdioErrorMessage :: Text
-        }
+    = -- | Nested server lifecycle events in StdIO context.
+      StdIOServer ServerTrace
     | {- | Nested protocol events in StdIO context.
       This composite constructor is part of the skeleton structure.
       -}
       StdIOProtocol ProtocolTrace
-    | -- | Nested server lifecycle events in StdIO context.
-      StdIOServer ServerTrace
+    | -- | Message received from stdin
+      StdIOMessageReceived
+        { messageSize :: Int -- ^ bytes
+        }
+    | -- | Message sent to stdout
+      StdIOMessageSent
+        { messageSize :: Int
+        }
+    | -- | Error reading from stdin
+      StdIOReadError
+        { stdioErrorMessage :: Text
+        }
+    | -- | End of file on stdin
+      StdIOEOF
     deriving (Show, Eq)
 
 {- | Render a StdIOTrace to human-readable text.
 
-Current implementation is a stub for Phase 2 skeleton.
-Delegates to renderProtocolTrace for nested protocol events.
+Delegates to renderServerTrace and renderProtocolTrace for nested events.
 -}
 renderStdIOTrace :: StdIOTrace -> Text
-renderStdIOTrace StdIOPlaceholder = "[StdIO] (skeleton)"
-renderStdIOTrace (StdIOServerError errMsg) = "[StdIO] Server error: " <> errMsg
-renderStdIOTrace (StdIOProtocol pt) = "[StdIO:Protocol] " <> renderProtocolTrace pt
 renderStdIOTrace (StdIOServer st) = "[StdIO:Server] " <> renderServerTrace st
+renderStdIOTrace (StdIOProtocol pt) = "[StdIO:Protocol] " <> renderProtocolTrace pt
+renderStdIOTrace (StdIOMessageReceived size) = "[StdIO] Message received (" <> showText size <> " bytes)"
+renderStdIOTrace (StdIOMessageSent size) = "[StdIO] Message sent (" <> showText size <> " bytes)"
+renderStdIOTrace (StdIOReadError errMsg) = "[StdIO] Read error: " <> errMsg
+renderStdIOTrace StdIOEOF = "[StdIO] End of file"
+
+-- | Helper to convert Int to Text
+showText :: Int -> Text
+showText = Data.Text.pack . show

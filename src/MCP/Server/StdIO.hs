@@ -327,5 +327,5 @@ runServer config tracer = do
     traceWith (contramap StdIOServer tracer) ServerShutdown
 
     case result of
-        Left err -> traceWith tracer $ StdIOServerError err
+        Left err -> traceWith tracer $ StdIOReadError{stdioErrorMessage = err}
         Right _ -> return () -- Don't print "Server terminated" for clean EOF
