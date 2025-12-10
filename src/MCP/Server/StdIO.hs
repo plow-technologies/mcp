@@ -29,13 +29,15 @@ import Data.Aeson (decode, fromJSON, object, toJSON)
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Char8 qualified as BSC
 import Data.ByteString.Lazy qualified as LBS
+import Data.Functor.Contravariant (contramap)
 import Data.Text qualified as T
-import Plow.Logging (IOTracer)
+import Plow.Logging (IOTracer, traceWith)
 import System.IO.Error (isEOFError)
 
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer, sendError, sendResponse)
-import MCP.Trace.StdIO (StdIOTrace)
+import MCP.Trace.Server (ServerTrace (..))
+import MCP.Trace.StdIO (StdIOTrace (..))
 import MCP.Types
 
 -- | Handle an incoming JSON-RPC message
@@ -259,8 +261,12 @@ handleNotification _ = do
 
 -- | Run the MCP server with the given configuration
 runServer :: (MCPServer MCPServerM) => ServerConfig -> IOTracer StdIOTrace -> IO ()
-runServer config _tracer = do
+runServer config tracer = do
     let initialState = initialServerState (configCapabilities config)
+
+    -- Emit ServerInit trace
+    let Implementation{name = serverName, version = serverVersion} = configServerInfo config
+    traceWith (contramap StdIOServer tracer) $ ServerInit serverName serverVersion
 
     let loop = do
             eofOrLine <-
@@ -277,6 +283,10 @@ runServer config _tracer = do
                         Nothing -> return ()
 
     result <- runMCPServer config initialState loop
+
+    -- Emit ServerShutdown trace
+    traceWith (contramap StdIOServer tracer) ServerShutdown
+
     case result of
         Left err -> putStrLn $ "Server error: " ++ T.unpack err
         Right _ -> return () -- Don't print "Server terminated" for clean EOF

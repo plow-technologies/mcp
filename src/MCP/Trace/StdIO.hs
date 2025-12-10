@@ -15,6 +15,7 @@ module MCP.Trace.StdIO
 
 import Data.Text (Text)
 import MCP.Trace.Protocol (ProtocolTrace, renderProtocolTrace)
+import MCP.Trace.Server (ServerTrace, renderServerTrace)
 
 -- | StdIO transport-specific events.
 --
@@ -27,6 +28,8 @@ data StdIOTrace
     | StdIOProtocol ProtocolTrace
     -- ^ Nested protocol events in StdIO context.
     -- This composite constructor is part of the skeleton structure.
+    | StdIOServer ServerTrace
+    -- ^ Nested server lifecycle events in StdIO context.
     deriving (Show, Eq)
 
 -- | Render a StdIOTrace to human-readable text.
@@ -36,3 +39,4 @@ data StdIOTrace
 renderStdIOTrace :: StdIOTrace -> Text
 renderStdIOTrace StdIOPlaceholder = "[StdIO] (skeleton)"
 renderStdIOTrace (StdIOProtocol pt) = "[StdIO:Protocol] " <> renderProtocolTrace pt
+renderStdIOTrace (StdIOServer st) = "[StdIO:Server] " <> renderServerTrace st
