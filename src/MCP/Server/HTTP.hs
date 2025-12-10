@@ -105,7 +105,6 @@ data HTTPServerConfig = HTTPServerConfig
     {- ^ Custom protected resource metadata.
     When Nothing, auto-generated from httpBaseUrl.
     -}
-    , httpTracer :: IOTracer HTTPTrace
     }
 
 -- | User information from OAuth
@@ -314,8 +313,8 @@ type OAuthAPI =
 type CompleteAPI auths = OAuthAPI :<|> MCPAPI auths
 
 -- | Create a WAI Application for the MCP HTTP server
-mcpApp :: (MCPServer MCPServerM) => HTTPServerConfig -> TVar ServerState -> TVar OAuthState -> JWTSettings -> Application
-mcpApp config stateVar oauthStateVar jwtSettings =
+mcpApp :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> TVar OAuthState -> JWTSettings -> Application
+mcpApp config tracer stateVar oauthStateVar jwtSettings =
     let cookieSettings = defaultCookieSettings
         authContext = cookieSettings :. jwtSettings :. EmptyContext
         baseApp = case httpOAuthConfig config of
@@ -324,26 +323,26 @@ mcpApp config stateVar oauthStateVar jwtSettings =
                     serveWithContext
                         (Proxy :: Proxy (CompleteAPI '[JWT]))
                         authContext
-                        (oauthServer config oauthStateVar :<|> mcpServerAuth config stateVar)
+                        (oauthServer config tracer oauthStateVar :<|> mcpServerAuth config tracer stateVar)
             _ ->
-                serve (Proxy :: Proxy UnprotectedMCPAPI) (mcpServerNoAuth config stateVar)
+                serve (Proxy :: Proxy UnprotectedMCPAPI) (mcpServerNoAuth config tracer stateVar)
      in if httpEnableLogging config
             then logStdoutDev baseApp
             else baseApp
   where
-    oauthServer :: HTTPServerConfig -> TVar OAuthState -> Server OAuthAPI
-    oauthServer cfg oauthState =
+    oauthServer :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> Server OAuthAPI
+    oauthServer cfg httpTracer oauthState =
         handleProtectedResourceMetadata cfg
             :<|> handleMetadata cfg
             :<|> handleRegister cfg oauthState
             :<|> handleAuthorize cfg oauthState
-            :<|> handleLogin cfg oauthState jwtSettings
-            :<|> handleToken jwtSettings cfg oauthState
+            :<|> handleLogin cfg httpTracer oauthState jwtSettings
+            :<|> handleToken jwtSettings cfg httpTracer oauthState
 
-    mcpServerAuth :: HTTPServerConfig -> TVar ServerState -> AuthResult AuthUser -> Aeson.Value -> Handler Aeson.Value
-    mcpServerAuth httpConfig stateTVar authResult requestValue =
+    mcpServerAuth :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> AuthResult AuthUser -> Aeson.Value -> Handler Aeson.Value
+    mcpServerAuth httpConfig httpTracer stateTVar authResult requestValue =
         case authResult of
-            Authenticated user -> handleHTTPRequest httpConfig stateTVar (Just user) requestValue
+            Authenticated user -> handleHTTPRequest httpConfig httpTracer stateTVar (Just user) requestValue
             _ ->
                 throwError $
                     err401
@@ -354,19 +353,19 @@ mcpApp config stateVar oauthStateVar jwtSettings =
         metadataUrl = httpBaseUrl httpConfig <> "/.well-known/oauth-protected-resource"
         wwwAuthenticateValue = TE.encodeUtf8 $ "Bearer resource_metadata=\"" <> metadataUrl <> "\""
 
-    mcpServerNoAuth :: HTTPServerConfig -> TVar ServerState -> Aeson.Value -> Handler Aeson.Value
-    mcpServerNoAuth httpConfig stateTVar = handleHTTPRequest httpConfig stateTVar Nothing
+    mcpServerNoAuth :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> Aeson.Value -> Handler Aeson.Value
+    mcpServerNoAuth httpConfig httpTracer stateTVar = handleHTTPRequest httpConfig httpTracer stateTVar Nothing
 
 -- | Handle HTTP MCP requests following the MCP transport protocol
-handleHTTPRequest :: (MCPServer MCPServerM) => HTTPServerConfig -> TVar ServerState -> Maybe AuthUser -> Aeson.Value -> Handler Aeson.Value
-handleHTTPRequest httpConfig stateVar _mAuthUser requestValue = do
+handleHTTPRequest :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> Maybe AuthUser -> Aeson.Value -> Handler Aeson.Value
+handleHTTPRequest httpConfig tracer stateVar _mAuthUser requestValue = do
     -- Parse the incoming JSON-RPC message
     case fromJSON requestValue of
         Aeson.Success (msg :: JSONRPCMessage) -> do
             case msg of
                 RequestMessage req -> do
                     -- Process the JSON-RPC request
-                    result <- liftIO $ processHTTPRequest httpConfig stateVar req
+                    result <- liftIO $ processHTTPRequest httpConfig tracer stateVar req
                     case result of
                         Left err -> throwError err500{errBody = encode $ object ["error" .= err]}
                         Right response -> return response
@@ -385,8 +384,8 @@ processHTTPNotification _ _ _ = do
     return ()
 
 -- | Process an HTTP MCP request
-processHTTPRequest :: (MCPServer MCPServerM) => HTTPServerConfig -> TVar ServerState -> JSONRPCRequest -> IO (Either Text Aeson.Value)
-processHTTPRequest httpConfig stateVar req = do
+processHTTPRequest :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> JSONRPCRequest -> IO (Either Text Aeson.Value)
+processHTTPRequest httpConfig tracer stateVar req = do
     -- Read the current state
     currentState <- readTVarIO stateVar
     let dummyConfig =
@@ -395,7 +394,7 @@ processHTTPRequest httpConfig stateVar req = do
                 , configOutput = undefined -- Not used in HTTP mode
                 , configServerInfo = httpServerInfo httpConfig
                 , configCapabilities = httpCapabilities httpConfig
-                , configTracer = contramap HTTPServer (httpTracer httpConfig)
+                , configTracer = contramap HTTPServer tracer
                 }
 
     result <- runMCPServer dummyConfig currentState (handleHTTPRequestInner (httpProtocolVersion httpConfig) req)
@@ -771,8 +770,8 @@ extractSessionFromCookie cookieHeader =
             [] -> Nothing
 
 -- | Handle login form submission
-handleLogin :: HTTPServerConfig -> TVar OAuthState -> JWTSettings -> Maybe Text -> LoginForm -> Handler (Headers '[Header "Location" Text, Header "Set-Cookie" Text] NoContent)
-handleLogin config oauthStateVar _jwtSettings mCookie loginForm = do
+handleLogin :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> JWTSettings -> Maybe Text -> LoginForm -> Handler (Headers '[Header "Location" Text, Header "Set-Cookie" Text] NoContent)
+handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
     -- Extract session ID from form
     let sessionId = formSessionId loginForm
 
@@ -822,7 +821,7 @@ handleLogin config oauthStateVar _jwtSettings mCookie loginForm = do
                 store = maybe (CredentialStore Map.empty "") credentialStore oauthCfg
                 username = formUsername loginForm
                 password = formPassword loginForm
-                oauthTracer = contramap HTTPOAuth (httpTracer config)
+                oauthTracer = contramap HTTPOAuth tracer
 
             if validateCredential oauthTracer store username password
                 then do
@@ -863,18 +862,18 @@ handleLogin config oauthStateVar _jwtSettings mCookie loginForm = do
                     throwError err401{errBody = encode $ object ["error" .= ("authentication_failed" :: Text), "error_description" .= ("Invalid username or password" :: Text)]}
 
 -- | Handle OAuth token endpoint
-handleToken :: JWTSettings -> HTTPServerConfig -> TVar OAuthState -> [(Text, Text)] -> Handler TokenResponse
-handleToken jwtSettings config oauthStateVar params = do
+handleToken :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> [(Text, Text)] -> Handler TokenResponse
+handleToken jwtSettings config tracer oauthStateVar params = do
     let paramMap = Map.fromList params
     case Map.lookup "grant_type" paramMap of
-        Just "authorization_code" -> handleAuthCodeGrant jwtSettings config oauthStateVar paramMap
+        Just "authorization_code" -> handleAuthCodeGrant jwtSettings config tracer oauthStateVar paramMap
         Just "refresh_token" -> handleRefreshTokenGrant jwtSettings config oauthStateVar paramMap
         Just _other -> throwError err400{errBody = encode $ object ["error" .= ("unsupported_grant_type" :: Text)]}
         Nothing -> throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text), "error_description" .= ("Missing grant_type" :: Text)]}
 
 -- | Handle authorization code grant
-handleAuthCodeGrant :: JWTSettings -> HTTPServerConfig -> TVar OAuthState -> Map Text Text -> Handler TokenResponse
-handleAuthCodeGrant jwtSettings config oauthStateVar params = do
+handleAuthCodeGrant :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> Map Text Text -> Handler TokenResponse
+handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
     -- Extract and log resource parameter (RFC8707)
     let mResource = Map.lookup "resource" params
     liftIO $ putStrLn $ "Resource parameter in token request: " <> maybe "not provided" T.unpack mResource
@@ -899,7 +898,7 @@ handleAuthCodeGrant jwtSettings config oauthStateVar params = do
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Authorization code expired" :: Text)]}
 
     -- Verify PKCE
-    let oauthTracer = contramap HTTPOAuth (httpTracer config)
+    let oauthTracer = contramap HTTPOAuth tracer
     unless (validateCodeVerifier oauthTracer codeVerifier (authCodeChallenge authCode)) $
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Invalid code verifier" :: Text)]}
 
@@ -1134,16 +1133,13 @@ escapeHtml = T.replace "&" "&amp;" . T.replace "<" "&lt;" . T.replace ">" "&gt;"
 -- | Run the MCP server as an HTTP server
 runServerHTTP :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> IO ()
 runServerHTTP config tracer = do
-    -- Add tracer to config
-    let configWithTracer = config{httpTracer = tracer}
-
     -- Initialize JWT settings if OAuth is enabled
-    jwtSettings <- case httpJWK configWithTracer of
+    jwtSettings <- case httpJWK config of
         Just jwk -> return $ defaultJWTSettings jwk
         Nothing -> defaultJWTSettings <$> generateKey
 
     -- Initialize the server state
-    stateVar <- newTVarIO $ initialServerState (httpCapabilities configWithTracer)
+    stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
 
     -- Initialize OAuth state
     oauthStateVar <-
@@ -1156,16 +1152,16 @@ runServerHTTP config tracer = do
                 , pendingAuthorizations = Map.empty
                 }
 
-    putStrLn $ "Starting MCP HTTP Server on port " ++ show (httpPort configWithTracer) ++ "..."
+    putStrLn $ "Starting MCP HTTP Server on port " ++ show (httpPort config) ++ "..."
 
-    when (maybe False oauthEnabled (httpOAuthConfig configWithTracer)) $ do
+    when (maybe False oauthEnabled (httpOAuthConfig config)) $ do
         putStrLn "OAuth authentication enabled"
-        putStrLn $ "Authorization endpoint: " ++ T.unpack (httpBaseUrl configWithTracer) ++ "/authorize"
-        putStrLn $ "Token endpoint: " ++ T.unpack (httpBaseUrl configWithTracer) ++ "/token"
-        case httpOAuthConfig configWithTracer >>= \cfg -> if null (oauthProviders cfg) then Nothing else Just (oauthProviders cfg) of
+        putStrLn $ "Authorization endpoint: " ++ T.unpack (httpBaseUrl config) ++ "/authorize"
+        putStrLn $ "Token endpoint: " ++ T.unpack (httpBaseUrl config) ++ "/token"
+        case httpOAuthConfig config >>= \cfg -> if null (oauthProviders cfg) then Nothing else Just (oauthProviders cfg) of
             Just providers -> do
                 putStrLn $ "OAuth providers: " ++ T.unpack (T.intercalate ", " (map providerName providers))
                 when (any requiresPKCE providers) $ putStrLn "PKCE enabled (required by MCP spec)"
             Nothing -> return ()
 
-    run (httpPort configWithTracer) (mcpApp configWithTracer stateVar oauthStateVar jwtSettings)
+    run (httpPort config) (mcpApp config tracer stateVar oauthStateVar jwtSettings)
