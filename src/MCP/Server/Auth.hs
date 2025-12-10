@@ -68,7 +68,10 @@ import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import GHC.Generics (Generic)
 import Network.HTTP.Simple (addRequestHeader, getResponseBody, httpJSON, parseRequest, setRequestBodyJSON, setRequestMethod)
+import Plow.Logging (IOTracer)
 import System.Random (newStdGen, randomRs)
+
+import MCP.Trace.OAuth (OAuthTrace)
 
 -- | OAuth grant types supported by MCP
 data OAuthGrantType
@@ -279,13 +282,13 @@ extractBearerToken authHeader =
         _ -> Nothing
 
 -- | Validate a bearer token
-validateBearerToken :: (MonadIO m) => OAuthConfig -> Text -> m (Either Text TokenInfo)
-validateBearerToken config token = do
+validateBearerToken :: (MonadIO m) => IOTracer OAuthTrace -> OAuthConfig -> Text -> m (Either Text TokenInfo)
+validateBearerToken _tracer config token = do
     -- Basic validation
     if T.null token
         then return $ Left "Empty token"
         else case tokenValidationEndpoint config of
-            Just endpoint -> introspectToken endpoint token
+            Just endpoint -> introspectToken _tracer endpoint token
             Nothing -> do
                 -- Without an introspection endpoint, perform basic JWT validation
                 -- In production, this should:
@@ -307,8 +310,8 @@ validateBearerToken config token = do
                     _ -> return $ Left "Invalid JWT structure"
 
 -- | Introspect token using OAuth introspection endpoint
-introspectToken :: (MonadIO m) => Text -> Text -> m (Either Text TokenInfo)
-introspectToken endpoint token = liftIO $ do
+introspectToken :: (MonadIO m) => IOTracer OAuthTrace -> Text -> Text -> m (Either Text TokenInfo)
+introspectToken _tracer endpoint token = liftIO $ do
     let url = T.unpack endpoint
     request <- parseRequest url
     let requestWithBody =
@@ -373,13 +376,13 @@ generateCodeChallenge verifier =
      in TE.decodeUtf8 $ B64URL.encodeUnpadded challengeBytes
 
 -- | Validate PKCE code verifier against challenge
-validateCodeVerifier :: Text -> Text -> Bool
-validateCodeVerifier verifier challenge =
+validateCodeVerifier :: IOTracer OAuthTrace -> Text -> Text -> Bool
+validateCodeVerifier _tracer verifier challenge =
     generateCodeChallenge verifier == challenge
 
 -- | Discover OAuth metadata from a well-known endpoint
-discoverOAuthMetadata :: (MonadIO m) => Text -> m (Either String OAuthMetadata)
-discoverOAuthMetadata issuerUrl = liftIO $ do
+discoverOAuthMetadata :: (MonadIO m) => IOTracer OAuthTrace -> Text -> m (Either String OAuthMetadata)
+discoverOAuthMetadata _tracer issuerUrl = liftIO $ do
     let wellKnownUrl = T.unpack issuerUrl <> "/.well-known/openid-configuration"
     request <- parseRequest wellKnownUrl
     response <- httpJSON request
@@ -407,8 +410,8 @@ mkHashedPassword salt password =
      in HashedPassword $ TE.decodeUtf8 $ B64URL.encodeUnpadded hashByteString
 
 -- | Validate a credential against the store using constant-time comparison
-validateCredential :: CredentialStore -> Text -> Text -> Bool
-validateCredential store username password =
+validateCredential :: IOTracer OAuthTrace -> CredentialStore -> Text -> Text -> Bool
+validateCredential _tracer store username password =
     case Map.lookup username (storeCredentials store) of
         Nothing -> False
         Just storedHash ->

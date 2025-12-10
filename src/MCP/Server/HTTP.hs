@@ -73,12 +73,17 @@ import Servant.Server (err400, err401, err500, errBody, errHeaders)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
 
 import Control.Monad (unless, when)
-import Plow.Logging (IOTracer)
+import Plow.Logging (IOTracer (..), Tracer (..))
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
 import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
 import MCP.Trace.HTTP (HTTPTrace)
+import MCP.Trace.OAuth (OAuthTrace)
 import MCP.Types
+
+-- | A no-op tracer that discards all trace events
+nullIOTracer :: IOTracer a
+nullIOTracer = IOTracer (Tracer (\_ -> pure ()))
 
 -- | HTML content type for Servant
 data HTML
@@ -801,7 +806,7 @@ handleLogin config oauthStateVar _jwtSettings mCookie loginForm = do
                 username = formUsername loginForm
                 password = formPassword loginForm
 
-            if validateCredential store username password
+            if validateCredential (nullIOTracer :: IOTracer OAuthTrace) store username password
                 then do
                     -- Generate authorization code
                     code <- liftIO $ generateAuthCodeWithConfig config
@@ -876,7 +881,7 @@ handleAuthCodeGrant jwtSettings config oauthStateVar params = do
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Authorization code expired" :: Text)]}
 
     -- Verify PKCE
-    unless (validateCodeVerifier codeVerifier (authCodeChallenge authCode)) $
+    unless (validateCodeVerifier (nullIOTracer :: IOTracer OAuthTrace) codeVerifier (authCodeChallenge authCode)) $
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Invalid code verifier" :: Text)]}
 
     -- Create user for JWT

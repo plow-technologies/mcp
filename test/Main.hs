@@ -4,7 +4,13 @@ module Main (main) where
 
 import Data.Text (Text)
 import MCP.Server.Auth (HashedPassword (..), defaultDemoCredentialStore, mkHashedPassword, validateCredential)
+import MCP.Trace.OAuth (OAuthTrace)
+import Plow.Logging (IOTracer (..), Tracer (..))
 import Test.Hspec
+
+-- | A no-op tracer that discards all trace events
+nullIOTracer :: IOTracer a
+nullIOTracer = IOTracer (Tracer (\_ -> pure ()))
 
 main :: IO ()
 main = hspec spec
@@ -14,19 +20,19 @@ spec = do
     describe "MCP.Server.Auth" $ do
         describe "validateCredential" $ do
             it "validates correct demo credentials" $ do
-                validateCredential defaultDemoCredentialStore "demo" "demo123" `shouldBe` True
+                validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "demo" "demo123" `shouldBe` True
 
             it "validates correct admin credentials" $ do
-                validateCredential defaultDemoCredentialStore "admin" "admin456" `shouldBe` True
+                validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "admin" "admin456" `shouldBe` True
 
             it "rejects invalid password for demo user" $ do
-                validateCredential defaultDemoCredentialStore "demo" "wrongpassword" `shouldBe` False
+                validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "demo" "wrongpassword" `shouldBe` False
 
             it "rejects invalid password for admin user" $ do
-                validateCredential defaultDemoCredentialStore "admin" "wrongpass" `shouldBe` False
+                validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "admin" "wrongpass" `shouldBe` False
 
             it "rejects invalid username" $ do
-                validateCredential defaultDemoCredentialStore "nonexistent" "demo123" `shouldBe` False
+                validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "nonexistent" "demo123" `shouldBe` False
 
         describe "mkHashedPassword" $ do
             it "produces consistent hashes for same inputs" $ do
