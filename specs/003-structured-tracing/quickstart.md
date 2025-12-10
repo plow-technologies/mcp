@@ -34,18 +34,23 @@ main = withAsyncHandleTracer stderr 1000 $ \textTracer -> do
 
 ## Filtering Traces
 
+The library exports predicate helpers in `MCP.Trace.Types` for common filtering scenarios:
+
+| Predicate | Matches |
+|-----------|---------|
+| `isStdIOTrace` | All StdIO transport traces |
+| `isHTTPTrace` | All HTTP transport traces |
+| `isOAuthTrace` | OAuth subsystem traces (nested in HTTP) |
+| `isErrorTrace` | Error traces from all subsystems |
+
 ### Filter to OAuth Events Only
 
 ```haskell
-import MCP.Trace.Types
+import MCP.Trace.Types (MCPTrace, renderMCPTrace, isOAuthTrace)
 import Plow.Logging (filterTracer, contramap)
+import Plow.Logging.Async (IOTracer)
 
--- Predicate to match only OAuth traces
-isOAuthTrace :: MCPTrace -> Bool
-isOAuthTrace (MCPHttp (HTTPOAuth _)) = True
-isOAuthTrace _ = False
-
--- Create filtered tracer
+-- Create filtered tracer using the exported predicate
 oauthOnlyTracer :: IOTracer Text -> IOTracer MCPTrace
 oauthOnlyTracer textTracer =
     filterTracer isOAuthTrace (contramap renderMCPTrace textTracer)
@@ -54,14 +59,49 @@ oauthOnlyTracer textTracer =
 ### Filter to Errors Only
 
 ```haskell
-isErrorTrace :: MCPTrace -> Bool
-isErrorTrace (MCPProtocol (ProtocolParseError _ _)) = True
-isErrorTrace (MCPProtocol (ProtocolMethodNotFound _ _)) = True
-isErrorTrace (MCPProtocol (ProtocolInvalidParams _ _ _)) = True
-isErrorTrace (MCPStdIO (StdIOReadError _)) = True
-isErrorTrace (MCPHttp (HTTPAuthFailure _)) = True
-isErrorTrace (MCPHttp (HTTPOAuth (OAuthValidationError _ _))) = True
-isErrorTrace _ = False
+import MCP.Trace.Types (MCPTrace, renderMCPTrace, isErrorTrace)
+import Plow.Logging (filterTracer, contramap)
+
+-- Create error-only tracer
+errorTracer :: IOTracer Text -> IOTracer MCPTrace
+errorTracer textTracer =
+    filterTracer isErrorTrace (contramap renderMCPTrace textTracer)
+```
+
+### Combined Filters
+
+Combine predicates with standard boolean operators for fine-grained filtering:
+
+```haskell
+import MCP.Trace.Types (MCPTrace, isOAuthTrace, isErrorTrace, isHTTPTrace)
+import Plow.Logging (filterTracer)
+
+-- OAuth errors only (OAuth AND error)
+oauthErrorsOnly :: MCPTrace -> Bool
+oauthErrorsOnly t = isOAuthTrace t && isErrorTrace t
+
+-- All HTTP traces OR any errors (useful for debugging HTTP with error context)
+httpOrErrors :: MCPTrace -> Bool
+httpOrErrors t = isHTTPTrace t || isErrorTrace t
+
+-- Exclude OAuth traces (show everything except OAuth)
+nonOAuthTracer :: IOTracer Text -> IOTracer MCPTrace
+nonOAuthTracer textTracer =
+    filterTracer (not . isOAuthTrace) (contramap renderMCPTrace textTracer)
+```
+
+### Custom Predicates
+
+For filtering not covered by the built-in helpers, define custom predicates:
+
+```haskell
+import MCP.Trace.Types
+
+-- Only protocol request/response traces (exclude errors)
+isProtocolRequestResponse :: MCPTrace -> Bool
+isProtocolRequestResponse (MCPProtocol (ProtocolRequest{})) = True
+isProtocolRequestResponse (MCPProtocol (ProtocolResponse{})) = True
+isProtocolRequestResponse _ = False
 ```
 
 ## Combining Multiple Outputs
