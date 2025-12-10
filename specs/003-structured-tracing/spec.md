@@ -100,7 +100,7 @@ A developer wants to control trace verbosity to focus on specific subsystems (e.
   - OAuth operations (for HTTP transport): registration, authorization, token exchange
   - State changes (initialization status, capability negotiation)
 - **FR-010**: OAuth trace types MUST be semantically independent of MCP (no MCP-specific terminology or types in OAuth traces) to support future package separation. MCP trace types MAY reference OAuth traces since OAuth is part of the MCP auth specification.
-- **FR-011**: Trace emissions MUST only occur in code with `MonadIO` constraint (at the IO boundary). Pure functions MUST NOT attempt to trace; instead, their results are traced by the calling IO code at the boundary.
+- **FR-011**: Trace emissions MUST only occur in code with `MonadIO` constraint (at the IO boundary). Pure functions MUST NOT attempt to trace; instead, their results are traced by the calling IO code at the boundary. **CRITICAL**: `unsafePerformIO` MUST NEVER be used to call `traceWith` or any tracing function. This prohibition is absolute—no exceptions.
 
 ### Key Entities
 
@@ -135,6 +135,7 @@ A developer wants to control trace verbosity to focus on specific subsystems (e.
 - Q: Should transport traces embed server/protocol traces? → A: Yes. Transport traces (StdIOTrace, HTTPTrace) MUST contain composite constructors (StdIOServer, HTTPServer) to embed ServerTrace. This enables proper contramap threading where callers adapt tracers downward, and callees remain agnostic of parent trace types.
 - Q: Should ServerConfig have separate server and protocol tracers? → A: No. ServerConfig has ONE tracer (`IOTracer ServerTrace`). Transport contramaps via StdIOServer/HTTPServer. Redundant leaves like StdIOServerInit are removed - use `StdIOServer (ServerInit ...)` instead.
 - Q: Should tracers be stored in config structs or passed as arguments? → A: Thread explicitly via function arguments or MonadReader environments, NEVER in mutable config structs alongside unrelated config. ReaderT is acceptable when all environment consumers agree on tracer type (ReaderT is a function argument in disguise). Application creates tracer; library threads it explicitly. Clean composition requires callers to contramap for callees.
+- Q: Can `unsafePerformIO` be used to enable tracing in pure code? → A: **Absolutely not.** `unsafePerformIO` MUST NEVER be used to call `traceWith` or any tracing function. Tracing is exclusively for code with `MonadIO` access. This prohibition is non-negotiable.
 
 ## Assumptions
 
