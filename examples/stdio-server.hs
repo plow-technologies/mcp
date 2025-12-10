@@ -25,6 +25,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
 import Options.Applicative
+import Plow.Logging (IOTracer(..), Tracer(..))
 
 import System.IO (stdin, stdout)
 
@@ -32,6 +33,10 @@ import MCP.Protocol
 import MCP.Server
 import MCP.Server.StdIO
 import MCP.Types
+
+-- | A no-op tracer that discards all trace events
+nullIOTracer :: IOTracer a
+nullIOTracer = IOTracer (Tracer (\_ -> pure ()))
 
 -- | Command line options
 newtype Options = Options
@@ -166,4 +171,4 @@ main = do
     putStrLn "Example test input:"
     putStrLn "'{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}'"
 
-    runServer config
+    runServer config nullIOTracer

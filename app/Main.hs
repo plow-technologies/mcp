@@ -10,12 +10,17 @@ module Main where
 import Control.Monad.IO.Class (liftIO)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
+import Plow.Logging (IOTracer(..), Tracer(..))
 import System.IO (stdin, stdout)
 
 import MCP.Protocol
 import MCP.Server
 import MCP.Server.StdIO
 import MCP.Types
+
+-- | A no-op tracer that discards all trace events
+nullIOTracer :: IOTracer a
+nullIOTracer = IOTracer (Tracer (\_ -> pure ()))
 
 -- | Minimal MCP Server implementation
 instance MCPServer MCPServerM where
@@ -111,4 +116,4 @@ main = do
                 }
 
     putStrLn "Server configured, starting message loop..."
-    MCP.Server.StdIO.runServer config
+    MCP.Server.StdIO.runServer config nullIOTracer

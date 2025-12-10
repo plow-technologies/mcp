@@ -168,7 +168,8 @@ executable mcp
         containers >= 0.6 && < 0.7,
         scientific >= 0.3 && < 0.4,
         time >= 1.12 && < 1.13,
-        data-default >= 0.7 && < 0.8
+        data-default >= 0.7 && < 0.8,
+        plow-log ^>= 0.1.6
 
     -- Directories containing source files.
     hs-source-dirs:   app
@@ -232,7 +233,8 @@ executable mcp-stdio
         scientific >= 0.3 && < 0.4,
         time >= 1.12 && < 1.13,
         optparse-applicative >= 0.17 && < 0.19,
-        data-default >= 0.7 && < 0.8
+        data-default >= 0.7 && < 0.8,
+        plow-log ^>= 0.1.6
 
     -- Directories containing source files.
     hs-source-dirs:   examples

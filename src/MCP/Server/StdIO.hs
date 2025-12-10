@@ -30,10 +30,12 @@ import Data.Aeson qualified as Aeson
 import Data.ByteString.Char8 qualified as BSC
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text qualified as T
+import Plow.Logging (IOTracer)
 import System.IO.Error (isEOFError)
 
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer, sendError, sendResponse)
+import MCP.Trace.StdIO (StdIOTrace)
 import MCP.Types
 
 -- | Handle an incoming JSON-RPC message
@@ -256,8 +258,8 @@ handleNotification _ = do
     return ()
 
 -- | Run the MCP server with the given configuration
-runServer :: (MCPServer MCPServerM) => ServerConfig -> IO ()
-runServer config = do
+runServer :: (MCPServer MCPServerM) => ServerConfig -> IOTracer StdIOTrace -> IO ()
+runServer config _tracer = do
     let initialState = initialServerState (configCapabilities config)
 
     let loop = do
