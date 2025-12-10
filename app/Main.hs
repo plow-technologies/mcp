@@ -8,14 +8,17 @@
 module Main where
 
 import Control.Monad.IO.Class (liftIO)
+import Data.Functor.Contravariant (contramap)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
 import Plow.Logging (IOTracer(..), Tracer(..))
-import System.IO (stdin, stdout)
+import Plow.Logging.Async (withAsyncHandleTracer)
+import System.IO (stdin, stdout, stderr)
 
 import MCP.Protocol
 import MCP.Server
 import MCP.Server.StdIO
+import MCP.Trace.Types (renderMCPTrace, MCPTrace(..))
 import MCP.Types
 
 -- | A no-op tracer that discards all trace events
@@ -116,4 +119,8 @@ main = do
                 }
 
     putStrLn "Server configured, starting message loop..."
-    MCP.Server.StdIO.runServer config nullIOTracer
+
+    -- Setup async tracing to stderr (stdout used for JSON-RPC) with 1000-message buffer
+    withAsyncHandleTracer stderr 1000 $ \textTracer -> do
+        let stdioTracer = contramap (renderMCPTrace . MCPStdIO) textTracer
+        MCP.Server.StdIO.runServer config stdioTracer

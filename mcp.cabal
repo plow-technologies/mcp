@@ -169,7 +169,8 @@ executable mcp
         scientific >= 0.3 && < 0.4,
         time >= 1.12 && < 1.13,
         data-default >= 0.7 && < 0.8,
-        plow-log ^>= 0.1.6
+        plow-log ^>= 0.1.6,
+        plow-log-async ^>= 0.1.4
 
     -- Directories containing source files.
     hs-source-dirs:   app
@@ -202,7 +203,8 @@ executable mcp-http
         time >= 1.12 && < 1.13,
         optparse-applicative >= 0.17 && < 0.19,
         data-default >= 0.7 && < 0.8,
-        plow-log ^>= 0.1.6
+        plow-log ^>= 0.1.6,
+        plow-log-async ^>= 0.1.4
 
     -- Directories containing source files.
     hs-source-dirs:   examples

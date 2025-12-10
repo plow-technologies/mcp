@@ -25,16 +25,20 @@ module Main where
 
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
+import Data.Functor.Contravariant (contramap)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
 import Options.Applicative
 import Plow.Logging (IOTracer(..), Tracer(..))
+import Plow.Logging.Async (withAsyncHandleTracer)
+import System.IO (stdout)
 
 import MCP.Protocol
 import MCP.Server
 import MCP.Server.Auth
 import MCP.Server.HTTP
+import MCP.Trace.Types (renderMCPTrace, MCPTrace(..))
 import MCP.Types
 
 -- | A no-op tracer that discards all trace events
@@ -259,4 +263,7 @@ main = do
 
     putStrLn ""
 
-    runServerHTTP config nullIOTracer
+    -- Setup async tracing to stdout with 1000-message buffer
+    withAsyncHandleTracer stdout 1000 $ \textTracer -> do
+        let httpTracer = contramap (renderMCPTrace . MCPHttp) textTracer
+        runServerHTTP config httpTracer
