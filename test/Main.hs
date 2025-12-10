@@ -5,12 +5,15 @@ module Main (main) where
 import Data.Text (Text)
 import MCP.Server.Auth (HashedPassword (..), defaultDemoCredentialStore, mkHashedPassword, validateCredential)
 import Test.Hspec
+import Trace.OAuthSpec qualified as OAuthSpec
 
 main :: IO ()
 main = hspec spec
 
 spec :: Spec
 spec = do
+    OAuthSpec.spec
+
     describe "MCP.Server.Auth" $ do
         describe "validateCredential" $ do
             it "validates correct demo credentials" $ do
