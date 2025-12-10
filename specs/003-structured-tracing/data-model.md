@@ -106,8 +106,11 @@ renderProtocolTrace :: ProtocolTrace -> Text
 
 ```haskell
 -- | StdIO transport-specific events.
+-- Embeds ServerTrace and ProtocolTrace for events occurring in StdIO context.
 data StdIOTrace
-    = StdIOMessageReceived
+    = StdIOServer ServerTrace      -- Embedded server lifecycle events
+    | StdIOProtocol ProtocolTrace  -- Embedded protocol events
+    | StdIOMessageReceived
         { messageSize :: Int  -- bytes
         }
     | StdIOMessageSent
@@ -117,16 +120,23 @@ data StdIOTrace
         { errorMessage :: Text
         }
     | StdIOEOF
-    | StdIOProtocol ProtocolTrace  -- Nested protocol events
     deriving (Show, Eq)
 ```
 
 **Render Function**:
 ```haskell
 renderStdIOTrace :: StdIOTrace -> Text
+-- Delegates to renderServerTrace for StdIOServer
+-- Delegates to renderProtocolTrace for StdIOProtocol
 ```
 
-**Note**: StdIOTrace wraps ProtocolTrace for protocol-level events occurring in StdIO context.
+**Composability**: Transport layer contramaps to provide child tracers:
+```haskell
+-- In StdIO transport:
+let serverTracer = contramap StdIOServer stdioTracer   -- IOTracer ServerTrace
+let protocolTracer = contramap StdIOProtocol stdioTracer -- IOTracer ProtocolTrace
+-- Pass these to server core; server core never knows about StdIOTrace
+```
 
 ---
 
@@ -136,8 +146,12 @@ renderStdIOTrace :: StdIOTrace -> Text
 
 ```haskell
 -- | HTTP transport-specific events.
+-- Embeds ServerTrace, ProtocolTrace, and OAuthTrace for events occurring in HTTP context.
 data HTTPTrace
-    = HTTPServerStarting
+    = HTTPServer ServerTrace       -- Embedded server lifecycle events
+    | HTTPProtocol ProtocolTrace   -- Embedded protocol events
+    | HTTPOAuth OAuthTrace         -- Embedded OAuth events
+    | HTTPServerStarting
         { port :: Int
         , baseUrl :: Text
         }
@@ -156,14 +170,24 @@ data HTTPTrace
     | HTTPAuthFailure
         { reason :: Text
         }
-    | HTTPProtocol ProtocolTrace   -- Nested protocol events
-    | HTTPOAuth OAuthTrace         -- Nested OAuth events
     deriving (Show, Eq)
 ```
 
 **Render Function**:
 ```haskell
 renderHTTPTrace :: HTTPTrace -> Text
+-- Delegates to renderServerTrace for HTTPServer
+-- Delegates to renderProtocolTrace for HTTPProtocol
+-- Delegates to renderOAuthTrace for HTTPOAuth
+```
+
+**Composability**: Transport layer contramaps to provide child tracers:
+```haskell
+-- In HTTP transport:
+let serverTracer = contramap HTTPServer httpTracer     -- IOTracer ServerTrace
+let protocolTracer = contramap HTTPProtocol httpTracer -- IOTracer ProtocolTrace
+let oauthTracer = contramap HTTPOAuth httpTracer       -- IOTracer OAuthTrace
+-- Pass these to server core and auth module; they never know about HTTPTrace
 ```
 
 ---
@@ -232,22 +256,30 @@ renderOAuthTrace :: OAuthTrace -> Text
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         MCPTrace                                │
-│  ┌──────────────┬──────────────┬──────────────┬──────────────┐ │
-│  │ MCPServer    │ MCPProtocol  │ MCPStdIO     │ MCPHttp      │ │
-│  │ ServerTrace  │ ProtocolTrace│ StdIOTrace   │ HTTPTrace    │ │
-│  └──────────────┴──────────────┴──────┬───────┴──────┬───────┘ │
-│                                       │              │         │
-│                              ┌────────┴───────┐ ┌────┴─────┐   │
-│                              │StdIOProtocol   │ │HTTPProtocol│  │
-│                              │ProtocolTrace   │ │ProtocolTrace│ │
-│                              └────────────────┘ └────┬─────┘   │
-│                                                      │         │
-│                                                 ┌────┴─────┐   │
-│                                                 │HTTPOAuth │   │
-│                                                 │OAuthTrace│   │
-│                                                 └──────────┘   │
+│  ┌──────────────────────────────┬──────────────────────────┐   │
+│  │ MCPStdIO StdIOTrace          │ MCPHttp HTTPTrace        │   │
+│  │  ├─ StdIOServer ServerTrace  │  ├─ HTTPServer ServerTrace│  │
+│  │  ├─ StdIOProtocol Protocol   │  ├─ HTTPProtocol Protocol │  │
+│  │  ├─ StdIOMessageReceived     │  ├─ HTTPOAuth OAuthTrace  │  │
+│  │  ├─ StdIOMessageSent         │  ├─ HTTPServerStarting    │  │
+│  │  ├─ StdIOReadError           │  ├─ HTTPServerStarted     │  │
+│  │  └─ StdIOEOF                 │  ├─ HTTPRequestReceived   │  │
+│  │                              │  ├─ HTTPAuthRequired      │  │
+│  │                              │  ├─ HTTPAuthSuccess       │  │
+│  │                              │  └─ HTTPAuthFailure       │  │
+│  └──────────────────────────────┴──────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
+
+Composability: Traces nest according to the call stack.
+- App main → MCPTrace (knows root type only)
+- Transport → contramap MCPStdIO/MCPHttp → IOTracer StdIOTrace/HTTPTrace
+- Server core → contramap StdIOServer/HTTPServer → IOTracer ServerTrace
+- Protocol → contramap StdIOProtocol/HTTPProtocol → IOTracer ProtocolTrace
+
+Each layer only knows its own trace type. Callers adapt DOWN via contramap.
 ```
+
+**NOTE**: `MCPServer` and `MCPProtocol` constructors at the MCPTrace level may be removed in a future revision since all server/protocol events occur within a transport context. They currently exist for testing convenience but violate the "traces reflect call stack" principle.
 
 ## Validation Rules
 

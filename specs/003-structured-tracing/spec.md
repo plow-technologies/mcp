@@ -88,7 +88,7 @@ A developer wants to control trace verbosity to focus on specific subsystems (e.
 - **FR-003**: Each trace type MUST have a corresponding `render*Trace :: *Trace -> Text` function that produces human-readable text output.
 - **FR-004**: Render functions MUST delegate to sub-component render functions when rendering nested trace types.
 - **FR-005**: Server initialization functions (`runServer`, `runServerHTTP`) MUST accept an `IOTracer` parameter typed to their transport-level trace type (e.g., `IOTracer StdIOTrace`, `IOTracer HTTPTrace`). Library consumers adapt from their root tracer via `contramap`.
-- **FR-006**: Tracer type granularity MUST align with architectural boundaries (module/ReaderT environment/layer). Each component receives an `IOTracer` typed to its own trace type; callers adapt via `contramap` with the relevant trace constructor.
+- **FR-006**: Tracer type granularity MUST align with architectural boundaries (module/ReaderT environment/layer). Each component receives an `IOTracer` typed to its own trace type; callers adapt via `contramap` with the relevant trace constructor. **Composability rule**: Child components MUST be agnostic of parent trace types. Transport traces (StdIOTrace, HTTPTrace) MUST embed ServerTrace and ProtocolTrace via composite constructors (e.g., `StdIOServer ServerTrace`), enabling transports to contramap down to child tracers.
 - **FR-007**: Trace events MUST capture relevant contextual information as typed values (e.g., `RequestId`, method names, error details) rather than pre-formatted strings.
 - **FR-008**: The library MUST use `traceWith` from plow-log to emit trace events at appropriate points in the codebase.
 - **FR-009**: The library MUST trace the following key operations at minimum:
@@ -132,6 +132,8 @@ A developer wants to control trace verbosity to focus on specific subsystems (e.
 - Q: What granularity for tracer types? → A: Align with architectural boundaries (module/ReaderT environment/layer). Each component receives `IOTracer ComponentTrace`; callers adapt via `contramap`.
 - Q: Trace granularity for handler invocations? → A: Entry-point tracing (not entry/exit bookends). Also trace branch decisions within multi-step IO actions (Either results, sum type outcomes). HTTP results implicit via status code.
 - Q: What constitutes "sufficient context" for error traces? → A: Self-contained for diagnosis: request ID, method, error type, and causal chain (using best judgement).
+- Q: Should transport traces embed server/protocol traces? → A: Yes. Transport traces (StdIOTrace, HTTPTrace) MUST contain composite constructors (StdIOServer, HTTPServer) to embed ServerTrace. This enables proper contramap threading where callers adapt tracers downward, and callees remain agnostic of parent trace types.
+- Q: Should ServerConfig have separate server and protocol tracers? → A: No. ServerConfig has ONE tracer (`IOTracer ServerTrace`). Transport contramaps via StdIOServer/HTTPServer. Redundant leaves like StdIOServerInit are removed - use `StdIOServer (ServerInit ...)` instead.
 
 ## Assumptions
 

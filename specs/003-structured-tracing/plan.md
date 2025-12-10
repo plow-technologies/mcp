@@ -108,3 +108,25 @@ The implementation MUST follow this order to ensure compilability at each step:
 | Separate OAuth traces | OAuthTrace in own module, no MCP imports | FR-010: future package split |
 | Trace at IO boundary only | FR-011 compliance | MonadIO constraint on traceWith |
 | Entry-point tracing | Not entry/exit bookends | HTTP results implicit via status; trace branch decisions instead |
+| Transport embeds child traces | StdIOServer/HTTPServer composites | FR-006: contramap flows DOWN, children agnostic of parents |
+| No redundant leaves | Remove StdIOServerInit etc. | Use `StdIOServer (ServerInit ...)` instead |
+| Single ServerConfig tracer | `IOTracer ServerTrace` only | Transport contramaps; no Either/combined types needed |
+
+## Tracer Threading Architecture
+
+```
+App main (IOTracer MCPTrace)
+    │
+    ├─► contramap MCPStdIO ──► StdIO Transport (IOTracer StdIOTrace)
+    │                              │
+    │                              ├─► contramap StdIOServer ──► ServerConfig (IOTracer ServerTrace)
+    │                              └─► contramap StdIOProtocol ──► Protocol handling (IOTracer ProtocolTrace)
+    │
+    └─► contramap MCPHttp ──► HTTP Transport (IOTracer HTTPTrace)
+                                   │
+                                   ├─► contramap HTTPServer ──► ServerConfig (IOTracer ServerTrace)
+                                   ├─► contramap HTTPProtocol ──► Protocol handling (IOTracer ProtocolTrace)
+                                   └─► contramap HTTPOAuth ──► Auth module (IOTracer OAuthTrace)
+```
+
+**Key invariant**: Each component receives `IOTracer OwnTraceType`. Components NEVER know about parent trace types. Contramap happens at call boundaries, not emission sites.
