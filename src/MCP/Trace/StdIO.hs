@@ -25,6 +25,10 @@ data StdIOTrace
     = StdIOPlaceholder
     -- ^ Placeholder constructor for Phase 2 skeleton.
     -- Will be replaced with leaf constructors (StdIOMessageReceived, etc.) in Phase 3.
+    | StdIOServerError
+        { stdioErrorMessage :: Text
+        }
+    -- ^ Server error during operation
     | StdIOProtocol ProtocolTrace
     -- ^ Nested protocol events in StdIO context.
     -- This composite constructor is part of the skeleton structure.
@@ -38,5 +42,6 @@ data StdIOTrace
 -- Delegates to renderProtocolTrace for nested protocol events.
 renderStdIOTrace :: StdIOTrace -> Text
 renderStdIOTrace StdIOPlaceholder = "[StdIO] (skeleton)"
+renderStdIOTrace (StdIOServerError errMsg) = "[StdIO] Server error: " <> errMsg
 renderStdIOTrace (StdIOProtocol pt) = "[StdIO:Protocol] " <> renderProtocolTrace pt
 renderStdIOTrace (StdIOServer st) = "[StdIO:Server] " <> renderServerTrace st

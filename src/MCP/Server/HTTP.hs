@@ -335,7 +335,7 @@ mcpApp config tracer stateVar oauthStateVar jwtSettings =
         handleProtectedResourceMetadata cfg
             :<|> handleMetadata cfg
             :<|> handleRegister cfg oauthState
-            :<|> handleAuthorize cfg oauthState
+            :<|> handleAuthorize cfg httpTracer oauthState
             :<|> handleLogin cfg httpTracer oauthState jwtSettings
             :<|> handleToken jwtSettings cfg httpTracer oauthState
 
@@ -699,10 +699,10 @@ handleRegister config oauthStateVar (ClientRegistrationRequest reqName reqRedire
             }
 
 -- | Handle OAuth authorize endpoint - now returns login page HTML
-handleAuthorize :: HTTPServerConfig -> TVar OAuthState -> Text -> Text -> Text -> Text -> Text -> Maybe Text -> Maybe Text -> Maybe Text -> Handler (Headers '[Header "Set-Cookie" Text] Text)
-handleAuthorize config oauthStateVar responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
+handleAuthorize :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> Text -> Text -> Text -> Text -> Text -> Maybe Text -> Maybe Text -> Maybe Text -> Handler (Headers '[Header "Set-Cookie" Text] Text)
+handleAuthorize config tracer oauthStateVar responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
     -- Log resource parameter for RFC8707 support
-    liftIO $ putStrLn $ "Resource parameter: " <> maybe "not provided" T.unpack mResource
+    liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "authorize endpoint"
 
     -- T037: Validate response_type (return HTML error page instead of JSON)
     when (responseType /= "code") $
@@ -867,7 +867,7 @@ handleToken jwtSettings config tracer oauthStateVar params = do
     let paramMap = Map.fromList params
     case Map.lookup "grant_type" paramMap of
         Just "authorization_code" -> handleAuthCodeGrant jwtSettings config tracer oauthStateVar paramMap
-        Just "refresh_token" -> handleRefreshTokenGrant jwtSettings config oauthStateVar paramMap
+        Just "refresh_token" -> handleRefreshTokenGrant jwtSettings config tracer oauthStateVar paramMap
         Just _other -> throwError err400{errBody = encode $ object ["error" .= ("unsupported_grant_type" :: Text)]}
         Nothing -> throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text), "error_description" .= ("Missing grant_type" :: Text)]}
 
@@ -876,7 +876,7 @@ handleAuthCodeGrant :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> 
 handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
     -- Extract and log resource parameter (RFC8707)
     let mResource = Map.lookup "resource" params
-    liftIO $ putStrLn $ "Resource parameter in token request: " <> maybe "not provided" T.unpack mResource
+    liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "token request (auth code)"
 
     code <- case Map.lookup "code" params of
         Just c -> return c
@@ -935,11 +935,11 @@ handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
             }
 
 -- | Handle refresh token grant
-handleRefreshTokenGrant :: JWTSettings -> HTTPServerConfig -> TVar OAuthState -> Map Text Text -> Handler TokenResponse
-handleRefreshTokenGrant jwtSettings config oauthStateVar params = do
+handleRefreshTokenGrant :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> Map Text Text -> Handler TokenResponse
+handleRefreshTokenGrant jwtSettings config tracer oauthStateVar params = do
     -- Extract and log resource parameter (RFC8707)
     let mResource = Map.lookup "resource" params
-    liftIO $ putStrLn $ "Resource parameter in token request: " <> maybe "not provided" T.unpack mResource
+    liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "token request (refresh token)"
 
     refreshToken <- case Map.lookup "refresh_token" params of
         Just t -> return t
@@ -1152,16 +1152,16 @@ runServerHTTP config tracer = do
                 , pendingAuthorizations = Map.empty
                 }
 
-    putStrLn $ "Starting MCP HTTP Server on port " ++ show (httpPort config) ++ "..."
+    traceWith tracer $ HTTPServerStarting (httpPort config) (httpBaseUrl config)
 
     when (maybe False oauthEnabled (httpOAuthConfig config)) $ do
-        putStrLn "OAuth authentication enabled"
-        putStrLn $ "Authorization endpoint: " ++ T.unpack (httpBaseUrl config) ++ "/authorize"
-        putStrLn $ "Token endpoint: " ++ T.unpack (httpBaseUrl config) ++ "/token"
+        let authEp = httpBaseUrl config <> "/authorize"
+            tokenEp = httpBaseUrl config <> "/token"
+        traceWith tracer $ HTTPOAuthEnabled authEp tokenEp
         case httpOAuthConfig config >>= \cfg -> if null (oauthProviders cfg) then Nothing else Just (oauthProviders cfg) of
             Just providers -> do
-                putStrLn $ "OAuth providers: " ++ T.unpack (T.intercalate ", " (map providerName providers))
-                when (any requiresPKCE providers) $ putStrLn "PKCE enabled (required by MCP spec)"
+                traceWith tracer $ HTTPOAuthProviders (map providerName providers)
+                when (any requiresPKCE providers) $ traceWith tracer HTTPPKCEEnabled
             Nothing -> return ()
 
     run (httpPort config) (mcpApp config tracer stateVar oauthStateVar jwtSettings)
