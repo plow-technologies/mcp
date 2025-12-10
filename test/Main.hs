@@ -20,19 +20,24 @@ spec = do
     describe "MCP.Server.Auth" $ do
         describe "validateCredential" $ do
             it "validates correct demo credentials" $ do
-                validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "demo" "demo123" `shouldBe` True
+                result <- validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "demo" "demo123"
+                result `shouldBe` True
 
             it "validates correct admin credentials" $ do
-                validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "admin" "admin456" `shouldBe` True
+                result <- validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "admin" "admin456"
+                result `shouldBe` True
 
             it "rejects invalid password for demo user" $ do
-                validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "demo" "wrongpassword" `shouldBe` False
+                result <- validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "demo" "wrongpassword"
+                result `shouldBe` False
 
             it "rejects invalid password for admin user" $ do
-                validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "admin" "wrongpass" `shouldBe` False
+                result <- validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "admin" "wrongpass"
+                result `shouldBe` False
 
             it "rejects invalid username" $ do
-                validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "nonexistent" "demo123" `shouldBe` False
+                result <- validateCredential (nullIOTracer :: IOTracer OAuthTrace) defaultDemoCredentialStore "nonexistent" "demo123"
+                result `shouldBe` False
 
         describe "mkHashedPassword" $ do
             it "produces consistent hashes for same inputs" $ do

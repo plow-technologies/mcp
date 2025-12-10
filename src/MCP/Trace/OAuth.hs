@@ -18,6 +18,7 @@ module MCP.Trace.OAuth (
 ) where
 
 import Data.Text (Text)
+import Data.Text qualified as T
 
 {- | OAuth 2.0 flow events.
 
@@ -39,6 +40,11 @@ data OAuthTrace
     | OAuthLoginAttempt
         { username :: Text
         , success :: Bool
+        }
+    | OAuthPKCEValidation
+        { pkceVerifier :: Text
+        , pkceChallenge :: Text
+        , pkceIsValid :: Bool
         }
     | OAuthAuthorizationGranted
         { clientId :: Text
@@ -75,6 +81,8 @@ renderOAuthTrace = \case
         "Login page served for session " <> sid
     OAuthLoginAttempt{username = user, success = ok} ->
         "Login attempt for user " <> user <> ": " <> if ok then "SUCCESS" else "FAILED"
+    OAuthPKCEValidation{pkceVerifier = verifier, pkceChallenge = challenge, pkceIsValid = valid} ->
+        "PKCE validation (verifier=" <> T.take 10 verifier <> "..., challenge=" <> T.take 10 challenge <> "...): " <> if valid then "SUCCESS" else "FAILED"
     OAuthAuthorizationGranted{clientId = cid, userId = uid} ->
         "Authorization granted to client " <> cid <> " by user " <> uid
     OAuthAuthorizationDenied{clientId = cid, reason = rsn} ->
