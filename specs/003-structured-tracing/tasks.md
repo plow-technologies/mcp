@@ -25,9 +25,9 @@
 
 **Purpose**: Project initialization and dependencies
 
-- [ ] T001 Add plow-log and plow-log-async dependencies to `mcp.cabal` build-depends
-- [ ] T002 [P] Create `src/MCP/Trace/` directory structure
-- [ ] T003 Verify dependencies resolve with `cabal build --dry-run`
+- [X] T001 Add plow-log and plow-log-async dependencies to `mcp.cabal` build-depends
+- [X] T002 [P] Create `src/MCP/Trace/` directory structure
+- [X] T003 Verify dependencies resolve with `cabal build --dry-run`
 
 ---
 
