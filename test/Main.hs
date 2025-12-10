@@ -6,7 +6,9 @@ import Data.Text (Text)
 import MCP.Server.Auth (HashedPassword (..), defaultDemoCredentialStore, mkHashedPassword, validateCredential)
 import Test.Hspec
 import Trace.FilterSpec qualified as FilterSpec
+import Trace.GoldenSpec qualified as GoldenSpec
 import Trace.OAuthSpec qualified as OAuthSpec
+import Trace.RenderSpec qualified as RenderSpec
 
 main :: IO ()
 main = hspec spec
@@ -14,7 +16,9 @@ main = hspec spec
 spec :: Spec
 spec = do
     FilterSpec.spec
+    GoldenSpec.spec
     OAuthSpec.spec
+    RenderSpec.spec
 
     describe "MCP.Server.Auth" $ do
         describe "validateCredential" $ do
