@@ -1,5 +1,5 @@
 ---
-: Execute the implementation plan by processing and executing all tasks defined in tasks.md
+description: Execute the implementation by processing beads (tasks) from the feature epic, with proactive discovery tracking and session handoff support.
 ---
 # Coordinator Agent Protocol
 
@@ -22,7 +22,8 @@ You CAN ONLY:
 - Update markdown files under the spec directory
 - Make decisions based on reports
 - Launch new subagents with questions
-- Track progress
+- Track progress via beads (bd CLI)
+- Create/update beads for discovered work
 
 EVERY technical curiosity → Create subagent
 EVERY code question → Delegate to analyzer
@@ -35,10 +36,11 @@ EVERY implementation → Delegate to implementer
 - **NEVER understand implementations** - delegate questions to analyzer subagents
 - **NEVER search codebase** - delegate search tasks to analyzer subagents
 - **NEVER debug or test code** - delegate to test/debug subagents
-- **FORBIDDEN: Read/Grep/Glob on source code** - ONLY use on spec, plans, tasks, etc. files
-- **CAN create/update spec/plan/tasks/etc files ONLY** - Single source of truth for context and progress
-- **CAN read coordination files ONLY** spec/plan/tasks/handoffs/etc for coordination context
+- **FORBIDDEN: Read/Grep/Glob on source code** - ONLY use on spec, plans, etc. files
+- **CAN create/update spec/plan files ONLY** - Single source of truth for context and progress
+- **CAN read coordination files ONLY** spec/plan/handoffs for coordination context
 - **CAN run git status/log** - For state checking only
+- **CAN use bd CLI** - For task tracking and progress
 - **MUST write handoff documents directly** - Never delegate handoff creation
 
 ## DELEGATION-ONLY PROTOCOL
@@ -46,7 +48,7 @@ EVERY implementation → Delegate to implementer
 ```
 PROCEDURE coordinator_main_loop
     // FORBIDDEN: Writing code, analyzing files, running tests, debugging, understanding implementation, Read/Grep/Glob on source code
-    // ALLOWED: Creating/updating/reading coordination files only, launching subagents, git status/log ONLY
+    // ALLOWED: Creating/updating/reading coordination files only, launching subagents, git status/log ONLY, bd CLI
 
     IF about_to_use_Read_OR_Grep_OR_Glob_on_source_code THEN
         ABORT("FORBIDDEN: Read/Grep/Glob on source code - ONLY use on spec dir. Delegate to analyzer.")
@@ -131,9 +133,15 @@ REMINDER: You CANNOT analyze code to understand it. Every technical question nee
 
 ## Outline
 
-1. Run `.specify/scripts/bash/check-prerequisites.sh --json --require-tasks --include-tasks` from repo root and parse FEATURE_DIR and AVAILABLE_DOCS list. All paths must be absolute. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
+1. **Setup**: Run `.specify/scripts/bash/check-prerequisites.sh --json` from repo root and parse FEATURE_DIR and AVAILABLE_DOCS list. All paths must be absolute. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
 
-2. **Check checklists status** (if FEATURE_DIR/checklists/ exists):
+2. **Get feature branch and epic**:
+   - Run `git branch --show-current` to get the current branch name
+   - Run `bd list --type epic --label "feature:<branch-name>" --json` to find the feature epic
+   - If no epic exists, suggest running `/speckit.tasks` first
+   - Store EPIC_ID for tracking
+
+3. **Check checklists status** (if FEATURE_DIR/checklists/ exists):
    - Scan all checklist files in the checklists/ directory
    - For each checklist, count:
      - Total items: All lines matching `- [ ]` or `- [X]` or `- [x]`
@@ -158,21 +166,20 @@ REMINDER: You CANNOT analyze code to understand it. Every technical question nee
      - **STOP** and ask: "Some checklists are incomplete. Do you want to proceed with implementation anyway? (yes/no)"
      - Wait for user response before continuing
      - If user says "no" or "wait" or "stop", halt execution
-     - If user says "yes" or "proceed" or "continue", proceed to step 3
+     - If user says "yes" or "proceed" or "continue", proceed to step 4
 
    - **If all checklists are complete**:
      - Display the table showing all checklists passed
-     - Automatically proceed to step 3
+     - Automatically proceed to step 4
 
-3. Load and analyze the implementation context:
-   - **REQUIRED**: Read tasks.md for the complete task list and execution plan
+4. **Load implementation context**:
    - **REQUIRED**: Read plan.md for tech stack, architecture, and file structure
    - **IF EXISTS**: Read data-model.md for entities and relationships
    - **IF EXISTS**: Read contracts/ for API specifications and test requirements
    - **IF EXISTS**: Read research.md for technical decisions and constraints
    - **IF EXISTS**: Read quickstart.md for integration scenarios
 
-4. **Project Setup Verification**:
+5. **Project Setup Verification**:
    - **REQUIRED**: Create/verify ignore files based on actual project setup:
 
    **Detection & Creation Logic**:
@@ -216,39 +223,168 @@ REMINDER: You CANNOT analyze code to understand it. Every technical question nee
    - **Terraform**: `.terraform/`, `*.tfstate*`, `*.tfvars`, `.terraform.lock.hcl`
    - **Kubernetes/k8s**: `*.secret.yaml`, `secrets/`, `.kube/`, `kubeconfig*`, `*.key`, `*.crt`
 
-5. Parse tasks.md structure and extract:
-   - **Task phases**: Setup, Tests, Core, Integration, Polish
-   - **Task dependencies**: Sequential vs parallel execution rules
-   - **Task details**: ID, description, file paths, parallel markers [P]
-   - **Execution flow**: Order and dependency requirements
+6. **Find ready work**: Run `bd ready --json | jq '.[0]'` to get the next unblocked task.
+   - If no ready tasks: Check `bd blocked` to see what's waiting
+   - Display task details: ID, title, description, priority, labels
 
-6. Execute implementation following the task plan:
-   - **Phase-by-phase execution**: Complete each phase before moving to the next
-   - **Respect dependencies**: Run sequential tasks in order, parallel tasks [P] can run together  
-   - **Follow TDD approach**: Execute test tasks before their corresponding implementation tasks
-   - **File-based coordination**: Tasks affecting the same files must run sequentially
-   - **Validation checkpoints**: Verify each phase completion before proceeding
+7. **Execute implementation loop**:
 
-7. Implementation execution rules:
-   - **Setup first**: Initialize project structure, dependencies, configuration
-   - **Tests before code**: If you need to write tests for contracts, entities, and integration scenarios
-   - **Core development**: Implement models, services, CLI commands, endpoints
-   - **Integration work**: Database connections, middleware, logging, external services
-   - **Polish and validation**: Unit tests, performance optimization, documentation
+   For each task:
 
-8. Progress tracking and error handling:
+   a. **Mark task in progress**:
+      ```bash
+      bd update <task-id> --status in_progress --json
+      ```
+
+   b. **Delegate to implementer subagent** with task details from the bead
+
+   c. **Handle discoveries** (CRITICAL - see Proactive Discovery Protocol below)
+
+   d. **Complete task when done**:
+      ```bash
+      bd close <task-id> --reason "Implemented: <brief summary>" --json
+      ```
+
+   e. **Find next ready task**:
+      ```bash
+      bd ready --json | jq '.[0]'
+      ```
+
+8. **Progress tracking and error handling**:
    - Report progress after each completed task
-   - Halt execution if any non-parallel task fails
-   - For parallel tasks [P], continue with successful tasks, report failed ones
+   - If a task fails, keep it in_progress and create a bead for the blocker
+   - For parallel tasks (labeled `parallel:true`), continue with other tasks
    - Provide clear error messages with context for debugging
    - Suggest next steps if implementation cannot proceed
-   - **IMPORTANT** For completed tasks, make sure to mark the task off as [X] in the tasks file.
 
-9. Completion validation:
-   - Verify all required tasks are completed
+9. **Completion validation**:
+   - Run `bd dep tree <EPIC_ID>` to view overall progress
    - Check that implemented features match the original specification
    - Validate that tests pass and coverage meets requirements
    - Confirm the implementation follows the technical plan
    - Report final status with summary of completed work
 
-Note: This command assumes a complete task breakdown exists in tasks.md. If tasks are incomplete or missing, suggest running `/speckit.tasks` first to regenerate the task list.
+Note: This command assumes beads have been created via `/speckit.tasks`. If no epic or tasks exist, suggest running `/speckit.tasks` first.
+
+## Proactive Discovery Protocol
+
+**CRITICAL**: Never leave implicit work. When implementing, ALWAYS create beads for discovered issues.
+
+### When to Create Discovery Beads
+
+Create a bead immediately when you:
+1. Add a `TODO`, `FIXME`, `XXX`, or `HACK` comment
+2. Implement a workaround or suboptimal solution
+3. Skip proper error handling for expediency
+4. Find a bug you won't fix immediately
+5. Leave technical debt intentionally
+6. Discover scope that wasn't in the original task
+
+### How to Create Discovery Beads
+
+```bash
+# 1. Create the discovered issue
+bd create "TODO: Add input validation for edge case" -t task -p 3 \
+  -l discovered \
+  -d "Found in src/handlers/user.py:142. Need to validate email format before processing." \
+  --json
+
+# 2. Link it to the task where it was discovered
+bd dep add <new-id> <current-task-id> --type discovered-from
+```
+
+**For different discovery types**:
+
+| Discovery Type | Type Flag | Priority | Labels |
+|----------------|-----------|----------|--------|
+| TODO comment | `-t task` | 3 | `discovered` |
+| FIXME marker | `-t bug` | 2 | `discovered` |
+| HACK/workaround | `-t task` | 3 | `discovered`, `tech-debt` |
+| Skipped error handling | `-t task` | 2 | `discovered`, `error-handling` |
+| Bug found | `-t bug` | 0-1 | `discovered` |
+| Security issue | `-t bug` | 0 | `discovered`, `security` |
+
+### Description Requirements
+
+Every discovery bead MUST include in `-d`:
+- **WHERE**: File path and line number (e.g., `src/auth/jwt.py:87`)
+- **WHAT**: Clear description of the issue
+- **WHY**: Why this matters or what could go wrong
+- **CONTEXT**: Relevant error messages, stack traces, or reproduction steps
+
+## Session Handoff Protocol
+
+**CRITICAL**: Always be ready to hand off work. Keep beads updated so another session can continue seamlessly.
+
+### During Work
+
+1. **Keep current task updated**:
+   ```bash
+   bd update <task-id> --status in_progress --json
+   ```
+
+2. **File discoveries immediately** - don't wait until end of session
+
+3. **Commit frequently** with meaningful messages
+
+### Before Ending Session (or if context is running low)
+
+1. **Update current task with progress notes**:
+   ```bash
+   bd update <current-task> -d "Progress: Completed X, Y remaining. Blocker: Z needs resolution." --json
+   ```
+
+2. **Ensure all discoveries are filed** as beads with `discovered-from` links
+
+3. **Sync state**:
+   ```bash
+   bd sync
+   ```
+
+4. **Output handoff summary**:
+   ```
+   Session Handoff Summary
+   ━━━━━━━━━━━━━━━━━━━━━━━
+   Epic: <EPIC_ID> - <Epic Title>
+   Branch: <branch-name>
+
+   Current Task: <task-id>
+   Status: in_progress
+   Progress: <what was done>
+
+   Blockers:
+   - <any blockers encountered>
+
+   Discoveries Filed:
+   - <new-bead-id>: <description>
+
+   Recommended Next:
+   $ bd ready --limit 1
+
+   To continue:
+   $ bd update <task-id> --status in_progress
+   ```
+
+### Resuming Work
+
+When starting a new session:
+
+1. **Sync first**:
+   ```bash
+   bd sync
+   ```
+
+2. **Check current state**:
+   ```bash
+   bd list --status in_progress --json
+   ```
+
+3. **Find ready work**:
+   ```bash
+   bd ready --json | jq '.[0]'
+   ```
+
+4. **Review epic progress**:
+   ```bash
+   bd dep tree <EPIC_ID>
+   ```

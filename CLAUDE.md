@@ -224,6 +224,7 @@ curl -i http://localhost:8080/mcp
 - In-memory (TVar-based state for OAuth codes, tokens, clients) (001-claude-mcp-connector)
 - Haskell GHC2021 (GHC 9.4+) + servant-server 0.19-0.20, warp 3.3, aeson 2.1-2.2, cryptonite 0.30, jose 0.10-0.11 (002-login-auth-page)
 - In-memory (TVar-based state management, consistent with existing OAuth state storage) (002-login-auth-page)
+- N/A (traces emitted to user-provided IOTracer) (003-structured-tracing)
 
 ## Recent Changes
 - 002-login-auth-page: Implemented interactive login page with credential authentication

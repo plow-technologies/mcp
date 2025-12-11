@@ -62,7 +62,6 @@ data ServerConfig = ServerConfig
     , configServerInfo :: Implementation
     , configCapabilities :: ServerCapabilities
     }
-    deriving (Show)
 
 -- | The monad stack for MCP server operations
 type MCPServerM = ReaderT ServerConfig (StateT ServerState (ExceptT Text IO))

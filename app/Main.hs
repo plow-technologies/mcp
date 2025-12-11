@@ -8,14 +8,22 @@
 module Main where
 
 import Control.Monad.IO.Class (liftIO)
+import Data.Functor.Contravariant (contramap)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
-import System.IO (stdin, stdout)
+import Plow.Logging (IOTracer (..), Tracer (..))
+import Plow.Logging.Async (withAsyncHandleTracer)
+import System.IO (stderr, stdin, stdout)
 
 import MCP.Protocol
 import MCP.Server
 import MCP.Server.StdIO
+import MCP.Trace.Types (MCPTrace (..), renderMCPTrace)
 import MCP.Types
+
+-- | A no-op tracer that discards all trace events
+nullIOTracer :: IOTracer a
+nullIOTracer = IOTracer (Tracer (\_ -> pure ()))
 
 -- | Minimal MCP Server implementation
 instance MCPServer MCPServerM where
@@ -65,12 +73,12 @@ instance MCPServer MCPServerM where
     -- handleComplete inherits the default implementation
 
     handleSetLevel _params = do
-        liftIO $ putStrLn "Log level set"
+        -- handleSetLevel is a no-op in this minimal example
+        -- In a real implementation, this would configure the tracer's log level
+        return ()
 
 main :: IO ()
 main = do
-    putStrLn "Starting MCP Haskell Server..."
-
     let serverInfo =
             Implementation
                 { name = "mcp-haskell-example"
@@ -110,5 +118,7 @@ main = do
                 , configCapabilities = capabilities
                 }
 
-    putStrLn "Server configured, starting message loop..."
-    MCP.Server.StdIO.runServer config
+    -- Setup async tracing to stderr (stdout used for JSON-RPC) with 1000-message buffer
+    withAsyncHandleTracer stderr 1000 $ \textTracer -> do
+        let stdioTracer = contramap (renderMCPTrace . MCPStdIO) textTracer
+        MCP.Server.StdIO.runServer config stdioTracer

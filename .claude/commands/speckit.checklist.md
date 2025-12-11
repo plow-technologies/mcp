@@ -78,7 +78,7 @@ You **MUST** consider the user input before proceeding (if not empty).
 4. **Load feature context**: Read from FEATURE_DIR:
    - spec.md: Feature requirements and scope
    - plan.md (if exists): Technical details, dependencies
-   - tasks.md (if exists): Implementation tasks
+   - beads (if epic exists): Run `bd list --type epic --label "feature:<branch-name>" --json` to find epic, then `bd list --parent <EPIC_ID> --json` for implementation tasks
 
    **Context Loading Strategy**:
    - Load only necessary portions relevant to active focus areas (avoid full-file dumping)

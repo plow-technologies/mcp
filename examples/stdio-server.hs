@@ -1,5 +1,5 @@
+{-# LANGUAGE DisambiguateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 {- | Example Stdio MCP Server
@@ -20,11 +20,11 @@ To test:
 -}
 module Main where
 
-import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
 import Options.Applicative
+import Plow.Logging (IOTracer (..), Tracer (..))
 
 import System.IO (stdin, stdout)
 
@@ -33,21 +33,17 @@ import MCP.Server
 import MCP.Server.StdIO
 import MCP.Types
 
+-- | A no-op tracer that discards all trace events
+nullIOTracer :: IOTracer a
+nullIOTracer = IOTracer (Tracer (\_ -> pure ()))
+
 -- | Command line options
-newtype Options = Options
-    { optEnableLogging :: Bool
-    }
+data Options = Options
     deriving (Show)
 
 -- | Parser for command line options
 optionsParser :: Parser Options
-optionsParser =
-    Options
-        <$> switch
-            ( long "log"
-                <> short 'l'
-                <> help "Enable request/response logging"
-            )
+optionsParser = pure Options
 
 -- | Full parser with help
 opts :: ParserInfo Options
@@ -116,10 +112,9 @@ instance MCPServer MCPServerM where
 
 main :: IO ()
 main = do
-    Options{..} <- execParser opts
+    _ <- execParser opts
 
     putStrLn "Starting MCP Haskell Stdio Server..."
-    when optEnableLogging $ putStrLn "Request/Response logging: enabled"
 
     let serverInfo =
             Implementation
@@ -166,4 +161,4 @@ main = do
     putStrLn "Example test input:"
     putStrLn "'{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}'"
 
-    runServer config
+    runServer config nullIOTracer

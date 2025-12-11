@@ -1,9 +1,9 @@
 ---
 description: Execute the implementation planning workflow using the plan template to generate design artifacts.
-handoffs: 
-  - label: Create Tasks
+handoffs:
+  - label: Create Beads
     agent: speckit.tasks
-    prompt: Break the plan into tasks
+    prompt: Break the plan into beads (tasks) under a feature epic
     send: true
   - label: Create Checklist
     agent: speckit.checklist

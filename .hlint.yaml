@@ -1,0 +1,176 @@
+# HLint configuration file
+# https://github.com/ndmitchell/hlint
+##########################
+
+# This file contains a template configuration file, which is typically
+# placed as .hlint.yaml in the root of your project
+
+
+# Specify additional command line arguments
+#
+# - arguments: [--color, --cpp-simple, -XQuasiQuotes]
+
+
+# Control which extensions/flags/modules/functions can be used
+#
+# - extensions:
+#   - default: false # all extension are banned by default
+#   - name: [PatternGuards, ViewPatterns] # only these listed extensions can be used
+#   - {name: CPP, within: CrossPlatform} # CPP can only be used in a given module
+#
+# - flags:
+#   - {name: -w, within: []} # -w is allowed nowhere
+#
+# - modules:
+#   - {name: [Data.Set, Data.HashSet], as: Set} # if you import Data.Set qualified, it must be as 'Set'
+#   - {name: Control.Arrow, within: []} # Certain modules are banned entirely
+#
+# - functions:
+#   - {name: unsafePerformIO, within: []} # unsafePerformIO can only appear in no modules
+
+
+# Add custom hints for this project
+#
+# Will suggest replacing "wibbleMany [myvar]" with "wibbleOne myvar"
+# - error: {lhs: "wibbleMany [x]", rhs: wibbleOne x}
+
+# The hints are named by the string they display in warning messages.
+# For example, if you see a warning starting like
+#
+# Main.hs:116:51: Warning: Redundant ==
+#
+# You can refer to that hint with `{name: Redundant ==}` (see below).
+
+# Turn on hints that are off by default
+#
+# Ban "module X(module X) where", to require a real export list
+# - warn: {name: Use explicit module export list}
+#
+# Replace a $ b $ c with a . b $ c
+# - group: {name: dollar, enabled: true}
+#
+# Generalise map to fmap, ++ to <>
+# - group: {name: generalise, enabled: true}
+#
+# Warn on use of partial functions
+# - group: {name: partial, enabled: true}
+
+
+# Ignore some builtin hints
+# - ignore: {name: Use let}
+# - ignore: {name: Use const, within: SpecialModule} # Only within certain modules
+- ignore: {name: Use if}
+
+# Define some custom infix operators
+# - fixity: infixr 3 ~^#^~
+
+
+# To generate a suitable file for HLint do:
+# $ hlint --default > .hlint.yaml
+
+- functions:
+  - {name: shell, within: [], message: "Highly vulnerable to code injection. Use proc instead. If you need standard input, make sure proc is compiled with ghc-option -threaded."}
+  - {name: shells, within: [], message: "Highly vulnerable to code injection. Use procs instead. If you need standard input, make sure procs is compiled with ghc-option -threaded."}
+  - {name: shellStrict, within: [], message: "Highly vulnerable to code injection. Use procStrict instead. If you need standard input, make sure procStrict is compiled with ghc-option -threaded."}
+  - {name: shellStrictWithErr, within: [], message: "Highly vulnerable to code injection. Use procStrictWithErr instead. If you need standard input, make sure procStrictWithErr is compiled with ghc-option -threaded."}
+  - {name: inshell, within: [], message: "Highly vulnerable to code injection. Use inproc instead. If you need standard input, make sure inproc is compiled with ghc-option -threaded."}
+  - {name: inshellWithErr, within: [], message: "Highly vulnerable to code injection. Use inprocWithErr instead. If you need standard input, make sure inprocWithErr is compiled with ghc-option -threaded."}
+  - {name: System.Process.callCommand, within: [], message: "Highly vulnerable to code injection. Use callProcess instead"}
+  - {name: UnliftIO.callCommand, within: [], message: "Highly vulnerable to code injection. Use callProcess instead"}
+  - {name: System.Process.spawnCommand, within: [], message: "Highly vulnerable to code injection. Use spawnProcess instead"}
+  - {name: UnliftIO.spawnCommand, within: [], message: "Highly vulnerable to code injection. Use spawnProcess instead"}
+
+  - {name: nub, within: [], message: "Has quadtratic complexity. Use Data.List.Extra.nubOrd instead (from extra package)"}
+  - {name: nubBy, within: [], message: "Has quadtratic complexity. Use Data.List.Extra.nubOrdBy instead (from extra package)"}
+  - {name: nubOn, within: [], message: "Has quadtratic complexity. Use Data.List.Extra.nubOrdOn instead (from extra package)"}
+  - {name: foldl, within: [], message: "Leaks space. Use Data.List.foldl' instead with a strict (BangPattern'd) accumulator"}
+
+  # putStrLn allowed in executables for user-facing startup messages, not in library code
+  - {name: putStrLn, within: [Main], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
+  # hPutStrLn allowed in MCP.Server for protocol I/O (JSON-RPC responses must go to specific handles)
+  - {name: hPutStrLn, within: [MCP.Server], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
+  - {name: print, within: [], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
+  - {name: hPrint, within: [], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
+  - {name: putStr, within: [], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
+  - {name: hPutStr, within: [], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
+  - {name: hPutStr, within: [], message: "Fine for debugging when developing but remove before committing or use plow-log instead"}
+
+  - {name: forkIO, within: [], message: "Use Control.Concurrent.Async.withAsync (or async if withAsync not possible) from async package instead"}
+  - {name: forkOn, within: [], message: "Use Control.Concurrent.Async.withAsyncOn (or asyncOn if withAsyncOn not possible) from async package instead"}
+  - {name: forkIOWithUnmask, within: [], message: "Use Control.Concurrent.Async.withAsyncWithUnmask (or asyncWithUnmask if withAsyncWithUnmask not possible) from async package instead"}
+  - {name: forkOnWithUnmask, within: [], message: "Use Control.Concurrent.Async.withAsyncOnWithUnmask (or asyncOnWithUnmask if withAsyncOnWithUnmask not possible) from async package instead"}
+
+  # decodeUtf8 allowed in MCP.Server.Auth and MCP.Server.HTTP for base64url/JWT output (always valid UTF-8)
+  - {name: decodeUtf8, within: [MCP.Server.Auth, MCP.Server.HTTP], message: "Use decodeUtf8' and handle the error case"}
+
+  - {name: threadDelay, within: [], message: "May easily overflow in 32 bit systems. Use Control.Concurrent.Thread.Delay.delay from unbounded-delays package instead"}
+
+  - {name: unsafePerformIO, within: [], message: "Are you REALLY sure you need this? The maintainable and safe way of threading environment is thru MonadReader or function arguments."}
+
+  - {name: runHaxlInHandler, within: [], message: "Use runHaxlAsCurrentUser or runHaxlAsCurrentUserWithId."}
+  - {name: tryRunHaxlInHandler, within: [], message: "Use tryRunHaxlAsCurrentUser or tryRunHaxlAsCurrentUserWithId."}
+  
+- modules:
+  - {name: System.Process, badidents: [ShellCommand], message: "Highly vulnerable to code injection. Use RawCommand instead"}
+  - {name: Data.ByteString.Lazy, badidents: [readFile,getContents,hGetContents], message: "Avoid lazy IO. Use conduit instead or Data.ByteString if data will fit in memory"}
+  - {name: Data.ByteString.Lazy.Char8, badidents: [readFile,getContents,hGetContents], message: "Avoid lazy IO. Use conduit instead or Data.ByteString.Char8 if data will fit in memory"}
+  - {name: Data.Text.Lazy.IO, badidents: [readFile,getContents,hGetContents], message: "Avoid lazy IO. Use conduit instead or Data.Text.IO if data will fit in memory"}
+
+  - {name: Debug.Trace, within: [], message: "Fine for debugging when developing but remove before commit or use plow-log instead"}
+
+  - {name: System.Timeout, badidents: [timeout], message: "May easily overflow in 32 bit systems. Use Control.Concurrent.Timeout.timeout from unbounded-delays package instead"}
+  - {name: UnliftIO.Timeout, badidents: [timeout], message: "May easily overflow in 32 bit systems. Use Control.Concurrent.Timeout.timeout from unbounded-delays package instead"}
+  - {name: System.Timeout.Lifted, badidents: [timeout], message: "May easily overflow in 32 bit systems. Use Control.Concurrent.Timeout.timeout from unbounded-delays package instead"}
+
+- group:
+    name: plow-rules
+    enabled: true
+    imports:
+    - package base
+    rules:
+
+    - warn: {lhs: unsafeCoerce, rhs: coerce, name: Avoid unsafeCoerce}
+
+    # Data.Bifoldable
+
+    - warn: {lhs: bifoldr1, rhs: _FIXME, name: Avoid partial function}
+    - warn: {lhs: bifoldl1, rhs: _FIXME, name: Avoid partial function}
+    - warn: {lhs: bimaximum, rhs: _FIXME, name: Avoid partial function}
+    - warn: {lhs: biminimum, rhs: _FIXME, name: Avoid partial function}
+    - warn: {lhs: bimaximumBy, rhs: _FIXME, name: Avoid partial function}
+    - warn: {lhs: biminimumBy, rhs: _FIXME, name: Avoid partial function}
+
+    # Data.Bits
+
+    - warn: {lhs: bitSize x, rhs: "case bitSizeMaybe x of Just n -> n; Nothing -> error _", name: Avoid partial function}
+    - warn: {lhs: shiftL x b, rhs: shift x b, name: Avoid partial function}
+    - warn: {lhs: shiftR x b, rhs: shift x (-b), name: Avoid partial function}
+    - warn: {lhs: unsafeShiftL x b, rhs: shift x b, name: Avoid partial function}
+    - warn: {lhs: unsafeShiftR x b, rhs: shift x (-b), name: Avoid partial function}
+    - warn: {lhs: rotateL x b, rhs: rotate x b, name: Avoid partial function}
+    - warn: {lhs: rotateR x b, rhs: rotate x (-b), name: Avoid partial function}
+
+    # Data.Foldable
+
+    - warn: {lhs: Prelude.foldr1, rhs: _FIXME, name: Avoid partial function}
+    - warn: {lhs: Prelude.foldl1, rhs: _FIXME, name: Avoid partial function}
+    - warn: {lhs: Prelude.maximum, rhs: _FIXME, name: Avoid partial function}
+    - warn: {lhs: Prelude.minimum, rhs: _FIXME, name: Avoid partial function}
+    - warn: {lhs: Prelude.maximumBy, rhs: _FIXME, name: Avoid partial function}
+    - warn: {lhs: Prelude.minimumBy, rhs: _FIXME, name: Avoid partial function}
+
+    # Data.List
+
+    - warn: {lhs: Prelude.head l, rhs: "case l of x:_ -> x; [] -> error _", name: Avoid partial function}
+    - warn: {lhs: Prelude.last l, rhs: "case reverse l of x:_ -> x; [] -> error _", name: Avoid partial function}
+    - warn: {lhs: Prelude.tail l, rhs: "case l of _:xs -> xs; [] -> error _", name: Avoid partial function}
+    - warn: {lhs: Prelude.init l, rhs: "maybe (error _) Data.List.NonEmpty.init . Data.List.NonEmpty.nonEmpty", name: Avoid partial function}
+    - warn: {lhs: l Prelude.!! n, rhs: "case drop n l of x:_ -> x; [] -> error _", name: Avoid partial function}
+
+    # Data.List.NonEmpty
+
+    - warn: {lhs: Data.List.NonEmpty.fromList l, rhs: "case nonEmpty l of Just xs -> xs; Nothing -> error _", name: Avoid partial function}
+
+    # Data.Maybe
+
+    - warn: {lhs: fromJust v, rhs: "case v of Just x -> x; Nothing -> error _", name: Avoid partial function}

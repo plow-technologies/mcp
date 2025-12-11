@@ -20,21 +20,31 @@ curl -X POST http://localhost:8080/mcp \
 
 Command line options:
 cabal run mcp-http -- --port 8080 --log
+cabal run mcp-http -- --oauth --oauth-traces-only  # Filter to show only OAuth events
 -}
 module Main where
 
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
+import Data.Functor.Contravariant (contramap)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
 import Options.Applicative
+import Plow.Logging (IOTracer (..), Tracer (..), filterTracer)
+import Plow.Logging.Async (withAsyncHandleTracer)
+import System.IO (stdout)
 
 import MCP.Protocol
 import MCP.Server
 import MCP.Server.Auth
 import MCP.Server.HTTP
+import MCP.Trace.Types (MCPTrace (..), isOAuthTrace, renderMCPTrace)
 import MCP.Types
+
+-- | A no-op tracer that discards all trace events
+nullIOTracer :: IOTracer a
+nullIOTracer = IOTracer (Tracer (\_ -> pure ()))
 
 -- | Command line options
 data Options = Options
@@ -42,6 +52,7 @@ data Options = Options
     , optEnableLogging :: Bool
     , optEnableOAuth :: Bool
     , optBaseUrl :: Maybe String
+    , optOAuthTracesOnly :: Bool
     }
     deriving (Show)
 
@@ -73,6 +84,10 @@ optionsParser =
                     <> metavar "URL"
                     <> help "Base URL for OAuth endpoints (default: http://localhost:PORT)"
                 )
+            )
+        <*> switch
+            ( long "oauth-traces-only"
+                <> help "Filter traces to show only OAuth-related events"
             )
 
 -- | Full parser with help
@@ -133,15 +148,16 @@ instance MCPServer MCPServerM where
     -- handleComplete inherits the default implementation
 
     handleSetLevel _params = do
-        liftIO $ putStrLn "Log level set via HTTP"
+        -- handleSetLevel is a no-op in this example
+        -- In a real implementation, this would configure the tracer's log level
+        return ()
 
 main :: IO ()
 main = do
     Options{..} <- execParser opts
 
-    putStrLn "Starting MCP Haskell HTTP Server..."
-    putStrLn $ "Port: " ++ show optPort
     when optEnableLogging $ putStrLn "Request/Response logging: enabled"
+    when optOAuthTracesOnly $ putStrLn "Trace filtering: OAuth events only"
 
     let serverInfo =
             Implementation
@@ -221,7 +237,6 @@ main = do
                 , httpProtectedResourceMetadata = Nothing -- Will be auto-generated from baseUrl
                 }
 
-    putStrLn $ "HTTP server configured, starting on port " ++ show optPort ++ "..."
     putStrLn $ "MCP endpoint available at: POST " ++ T.unpack baseUrl ++ "/mcp"
     putStrLn $ "Protected Resource Metadata: GET " ++ T.unpack baseUrl ++ "/.well-known/oauth-protected-resource"
 
@@ -254,4 +269,15 @@ main = do
 
     putStrLn ""
 
-    runServerHTTP config
+    -- Setup async tracing to stdout with 1000-message buffer
+    withAsyncHandleTracer stdout 1000 $ \textTracer -> do
+        -- Apply OAuth-only filter if requested
+        let mcpTracer = contramap renderMCPTrace textTracer
+            filteredTracer =
+                if optOAuthTracesOnly
+                    then
+                        let unIOTracer (IOTracer t) = t
+                         in IOTracer $ filterTracer isOAuthTrace (unIOTracer mcpTracer)
+                    else mcpTracer
+            httpTracer = contramap MCPHttp filteredTracer
+        runServerHTTP config httpTracer

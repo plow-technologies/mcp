@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Post-edit hook: run cargo clippy on Rust file edits
+# Post-edit hook: run cabal build and run hlint on modified/new files
 # Rejects edits that introduce errors or warnings
-# Formats the file with rustfmt after clippy passes
 
 # Read JSON input from stdin
 input=$(cat)
@@ -32,7 +31,7 @@ if [[ $result -ne 0 ]]; then
   exit 2  # Exit 2 = blocking error, rejects the edit
 fi
 
-# Format the edited file with rustfmt
-#rustfmt "$file_path" 2>&1
+# Format the edited file with fourmolu
+fourmolu -i "$file_path" 2>&1
 
 exit 0

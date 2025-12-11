@@ -52,9 +52,10 @@ import Crypto.JOSE (JWK)
 import Data.Aeson (encode, fromJSON, object, toJSON, (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as LBS
+import Data.Functor.Contravariant (contramap)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
@@ -67,7 +68,7 @@ import Network.Wai (Application)
 import Network.Wai.Handler.Warp (Port, run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant (Context (..), Handler, Proxy (..), Server, serve, serveWithContext, throwError)
-import Servant.API (Accept (..), FormUrlEncoded, Get, Header, Headers, JSON, MimeRender (..), NoContent (..), PlainText, Post, QueryParam, QueryParam', ReqBody, Required, StdMethod (POST), Verb, addHeader, (:<|>) (..), (:>))
+import Servant.API (Accept (..), FormUrlEncoded, Get, Header, Headers, JSON, MimeRender (..), NoContent (..), Post, QueryParam, QueryParam', ReqBody, Required, StdMethod (POST), Verb, addHeader, (:<|>) (..), (:>))
 import Servant.Auth.Server (Auth, AuthResult (..), FromJWT, JWT, JWTSettings, ToJWT, defaultCookieSettings, defaultJWTSettings, generateKey, makeJWT)
 import Servant.Server (err400, err401, err500, errBody, errHeaders)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
@@ -76,7 +77,12 @@ import Control.Monad (unless, when)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
 import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
+import MCP.Trace.HTTP (HTTPTrace (..))
+import MCP.Trace.OAuth qualified as OAuthTrace
+import MCP.Trace.Operation (OperationTrace (..))
+import MCP.Trace.Server (ServerTrace (..))
 import MCP.Types
+import Plow.Logging (IOTracer (..), traceWith)
 
 -- | HTML content type for Servant
 data HTML
@@ -102,7 +108,6 @@ data HTTPServerConfig = HTTPServerConfig
     When Nothing, auto-generated from httpBaseUrl.
     -}
     }
-    deriving (Show)
 
 -- | User information from OAuth
 data AuthUser = AuthUser
@@ -310,8 +315,8 @@ type OAuthAPI =
 type CompleteAPI auths = OAuthAPI :<|> MCPAPI auths
 
 -- | Create a WAI Application for the MCP HTTP server
-mcpApp :: (MCPServer MCPServerM) => HTTPServerConfig -> TVar ServerState -> TVar OAuthState -> JWTSettings -> Application
-mcpApp config stateVar oauthStateVar jwtSettings =
+mcpApp :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> TVar OAuthState -> JWTSettings -> Application
+mcpApp config tracer stateVar oauthStateVar jwtSettings =
     let cookieSettings = defaultCookieSettings
         authContext = cookieSettings :. jwtSettings :. EmptyContext
         baseApp = case httpOAuthConfig config of
@@ -320,27 +325,47 @@ mcpApp config stateVar oauthStateVar jwtSettings =
                     serveWithContext
                         (Proxy :: Proxy (CompleteAPI '[JWT]))
                         authContext
-                        (oauthServer config oauthStateVar :<|> mcpServerAuth config stateVar)
+                        (oauthServer config tracer oauthStateVar :<|> mcpServerAuth config tracer stateVar)
             _ ->
-                serve (Proxy :: Proxy UnprotectedMCPAPI) (mcpServerNoAuth config stateVar)
+                serve (Proxy :: Proxy UnprotectedMCPAPI) (mcpServerNoAuth config tracer stateVar)
      in if httpEnableLogging config
             then logStdoutDev baseApp
             else baseApp
   where
-    oauthServer :: HTTPServerConfig -> TVar OAuthState -> Server OAuthAPI
-    oauthServer cfg oauthState =
+    oauthServer :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> Server OAuthAPI
+    oauthServer cfg httpTracer oauthState =
         handleProtectedResourceMetadata cfg
             :<|> handleMetadata cfg
-            :<|> handleRegister cfg oauthState
-            :<|> handleAuthorize cfg oauthState
-            :<|> handleLogin cfg oauthState jwtSettings
-            :<|> handleToken jwtSettings cfg oauthState
+            :<|> handleRegister cfg httpTracer oauthState
+            :<|> handleAuthorize cfg httpTracer oauthState
+            :<|> handleLogin cfg httpTracer oauthState jwtSettings
+            :<|> handleToken jwtSettings cfg httpTracer oauthState
 
-    mcpServerAuth :: HTTPServerConfig -> TVar ServerState -> AuthResult AuthUser -> Aeson.Value -> Handler Aeson.Value
-    mcpServerAuth httpConfig stateTVar authResult requestValue =
+    mcpServerAuth :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> AuthResult AuthUser -> Aeson.Value -> Handler Aeson.Value
+    mcpServerAuth httpConfig httpTracer stateTVar authResult requestValue =
         case authResult of
-            Authenticated user -> handleHTTPRequest httpConfig stateTVar (Just user) requestValue
-            _ ->
+            Authenticated user -> do
+                liftIO $ traceWith httpTracer $ HTTPAuthSuccess (userId user)
+                handleHTTPRequest httpConfig httpTracer stateTVar (Just user) requestValue
+            BadPassword -> do
+                liftIO $ traceWith httpTracer $ HTTPAuthFailure "Bad password"
+                liftIO $ traceWith httpTracer $ HTTPAuthRequired "/mcp"
+                throwError $
+                    err401
+                        { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
+                        , errBody = encode $ object ["error" .= ("Authentication required" :: Text)]
+                        }
+            NoSuchUser -> do
+                liftIO $ traceWith httpTracer $ HTTPAuthFailure "No such user"
+                liftIO $ traceWith httpTracer $ HTTPAuthRequired "/mcp"
+                throwError $
+                    err401
+                        { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
+                        , errBody = encode $ object ["error" .= ("Authentication required" :: Text)]
+                        }
+            Indefinite -> do
+                liftIO $ traceWith httpTracer $ HTTPAuthFailure "Authentication indefinite"
+                liftIO $ traceWith httpTracer $ HTTPAuthRequired "/mcp"
                 throwError $
                     err401
                         { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
@@ -350,19 +375,22 @@ mcpApp config stateVar oauthStateVar jwtSettings =
         metadataUrl = httpBaseUrl httpConfig <> "/.well-known/oauth-protected-resource"
         wwwAuthenticateValue = TE.encodeUtf8 $ "Bearer resource_metadata=\"" <> metadataUrl <> "\""
 
-    mcpServerNoAuth :: HTTPServerConfig -> TVar ServerState -> Aeson.Value -> Handler Aeson.Value
-    mcpServerNoAuth httpConfig stateTVar = handleHTTPRequest httpConfig stateTVar Nothing
+    mcpServerNoAuth :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> Aeson.Value -> Handler Aeson.Value
+    mcpServerNoAuth httpConfig httpTracer stateTVar = handleHTTPRequest httpConfig httpTracer stateTVar Nothing
 
 -- | Handle HTTP MCP requests following the MCP transport protocol
-handleHTTPRequest :: (MCPServer MCPServerM) => HTTPServerConfig -> TVar ServerState -> Maybe AuthUser -> Aeson.Value -> Handler Aeson.Value
-handleHTTPRequest httpConfig stateVar _mAuthUser requestValue = do
+handleHTTPRequest :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> Maybe AuthUser -> Aeson.Value -> Handler Aeson.Value
+handleHTTPRequest httpConfig tracer stateVar mAuthUser requestValue = do
+    -- Emit trace for received request
+    liftIO $ traceWith tracer $ HTTPRequestReceived "/mcp" "POST" (isJust mAuthUser)
+
     -- Parse the incoming JSON-RPC message
     case fromJSON requestValue of
         Aeson.Success (msg :: JSONRPCMessage) -> do
             case msg of
                 RequestMessage req -> do
                     -- Process the JSON-RPC request
-                    result <- liftIO $ processHTTPRequest httpConfig stateVar req
+                    result <- liftIO $ processHTTPRequest httpConfig tracer stateVar req
                     case result of
                         Left err -> throwError err500{errBody = encode $ object ["error" .= err]}
                         Right response -> return response
@@ -381,8 +409,8 @@ processHTTPNotification _ _ _ = do
     return ()
 
 -- | Process an HTTP MCP request
-processHTTPRequest :: (MCPServer MCPServerM) => HTTPServerConfig -> TVar ServerState -> JSONRPCRequest -> IO (Either Text Aeson.Value)
-processHTTPRequest httpConfig stateVar req = do
+processHTTPRequest :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> JSONRPCRequest -> IO (Either Text Aeson.Value)
+processHTTPRequest httpConfig tracer stateVar req = do
     -- Read the current state
     currentState <- readTVarIO stateVar
     let dummyConfig =
@@ -392,8 +420,10 @@ processHTTPRequest httpConfig stateVar req = do
                 , configServerInfo = httpServerInfo httpConfig
                 , configCapabilities = httpCapabilities httpConfig
                 }
+        serverTracer = contramap HTTPServer tracer
+        opTracer = contramap HTTPOperation tracer
 
-    result <- runMCPServer dummyConfig currentState (handleHTTPRequestInner (httpProtocolVersion httpConfig) req)
+    result <- runMCPServer dummyConfig currentState (handleHTTPRequestInner serverTracer opTracer (httpProtocolVersion httpConfig) req)
     case result of
         Left err -> return $ Left err
         Right (response, newState) -> do
@@ -402,8 +432,8 @@ processHTTPRequest httpConfig stateVar req = do
             return $ Right response
 
 -- | Handle HTTP request within the MCP monad, returning proper JSON-RPC responses
-handleHTTPRequestInner :: (MCPServer MCPServerM) => Text -> JSONRPCRequest -> MCPServerM Aeson.Value
-handleHTTPRequestInner protocolVersion (JSONRPCRequest _ reqId method params) = do
+handleHTTPRequestInner :: (MCPServer MCPServerM) => IOTracer ServerTrace -> IOTracer OperationTrace -> Text -> JSONRPCRequest -> MCPServerM Aeson.Value
+handleHTTPRequestInner serverTracer opTracer protocolVersion (JSONRPCRequest _ reqId method params) = do
     config <- ask
     state <- get
 
@@ -411,7 +441,7 @@ handleHTTPRequestInner protocolVersion (JSONRPCRequest _ reqId method params) = 
         "initialize" -> case params of
             Just p -> case fromJSON p of
                 Aeson.Success initParams -> do
-                    handleInitializeHTTP reqId initParams
+                    handleInitializeHTTP serverTracer reqId initParams
                     let result =
                             InitializeResult
                                 { protocolVersion = protocolVersion
@@ -433,6 +463,7 @@ handleHTTPRequestInner protocolVersion (JSONRPCRequest _ reqId method params) = 
                             JSONRPCErrorInfo (-32602) "Missing params" Nothing
         "ping" -> return $ toJSON $ JSONRPCResponse "2.0" reqId (object [])
         "resources/list" -> do
+            liftIO $ traceWith opTracer OperationResourcesList
             if not (serverInitialized state)
                 then
                     return $
@@ -461,7 +492,8 @@ handleHTTPRequestInner protocolVersion (JSONRPCRequest _ reqId method params) = 
                                 JSONRPCErrorInfo (-32002) "Server not initialized" Nothing
                 else case params of
                     Just p -> case fromJSON p of
-                        Aeson.Success readParams -> do
+                        Aeson.Success readParams@(ReadResourceParams uri) -> do
+                            liftIO $ traceWith opTracer $ OperationResourceRead uri
                             result <- handleReadResource readParams
                             return $ toJSON $ JSONRPCResponse "2.0" reqId (toJSON result)
                         Aeson.Error e ->
@@ -475,6 +507,7 @@ handleHTTPRequestInner protocolVersion (JSONRPCRequest _ reqId method params) = 
                                 JSONRPCError "2.0" reqId $
                                     JSONRPCErrorInfo (-32602) "Missing params" Nothing
         "tools/list" -> do
+            liftIO $ traceWith opTracer OperationToolsList
             if not (serverInitialized state)
                 then
                     return $
@@ -503,8 +536,12 @@ handleHTTPRequestInner protocolVersion (JSONRPCRequest _ reqId method params) = 
                                 JSONRPCErrorInfo (-32002) "Server not initialized" Nothing
                 else case params of
                     Just p -> case fromJSON p of
-                        Aeson.Success callParams -> do
+                        Aeson.Success callParams@(CallToolParams name args) -> do
                             result <- handleCallTool callParams
+                            let argsJson = maybe (toJSON Aeson.Null) toJSON args
+                                resultJson = toJSON result
+                                success = maybe True not (MCP.Protocol.isError result)
+                            liftIO $ traceWith opTracer $ OperationToolCall name argsJson resultJson Nothing success
                             return $ toJSON $ JSONRPCResponse "2.0" reqId (toJSON result)
                         Aeson.Error e ->
                             return $
@@ -517,6 +554,7 @@ handleHTTPRequestInner protocolVersion (JSONRPCRequest _ reqId method params) = 
                                 JSONRPCError "2.0" reqId $
                                     JSONRPCErrorInfo (-32602) "Missing params" Nothing
         "prompts/list" -> do
+            liftIO $ traceWith opTracer OperationPromptsList
             if not (serverInitialized state)
                 then
                     return $
@@ -545,7 +583,8 @@ handleHTTPRequestInner protocolVersion (JSONRPCRequest _ reqId method params) = 
                                 JSONRPCErrorInfo (-32002) "Server not initialized" Nothing
                 else case params of
                     Just p -> case fromJSON p of
-                        Aeson.Success getParams -> do
+                        Aeson.Success getParams@(GetPromptParams name args) -> do
+                            liftIO $ traceWith opTracer $ OperationPromptGet name (toJSON <$> args)
                             result <- handleGetPrompt getParams
                             return $ toJSON $ JSONRPCResponse "2.0" reqId (toJSON result)
                         Aeson.Error e ->
@@ -567,7 +606,11 @@ handleHTTPRequestInner protocolVersion (JSONRPCRequest _ reqId method params) = 
                                 JSONRPCErrorInfo (-32002) "Server not initialized" Nothing
                 else case params of
                     Just p -> case fromJSON p of
-                        Aeson.Success completeParams -> do
+                        Aeson.Success completeParams@(CompleteParams ref (CompletionArgument argName argValue) _context) -> do
+                            let refType = case ref of
+                                    PromptRef _ -> "prompt"
+                                    ResourceTemplateRef _ -> "resource_template"
+                            liftIO $ traceWith opTracer $ OperationComplete refType (argName <> "=" <> argValue)
                             result <- handleComplete completeParams
                             return $ toJSON $ JSONRPCResponse "2.0" reqId (toJSON result)
                         Aeson.Error e ->
@@ -602,12 +645,12 @@ handleHTTPRequestInner protocolVersion (JSONRPCRequest _ reqId method params) = 
                         JSONRPCErrorInfo (-32601) "Method not found" Nothing
 
 -- | Handle HTTP initialize request
-handleInitializeHTTP :: RequestId -> InitializeParams -> MCPServerM ()
-handleInitializeHTTP _ params = do
+handleInitializeHTTP :: IOTracer ServerTrace -> RequestId -> InitializeParams -> MCPServerM ()
+handleInitializeHTTP tracer _ params = do
     config <- ask
     state <- get
 
-    let InitializeParams{capabilities = clientCaps} = params
+    let InitializeParams{capabilities = clientCaps, clientInfo = clientImpl} = params
 
     put
         state
@@ -615,6 +658,25 @@ handleInitializeHTTP _ params = do
             , clientCapabilities = Just clientCaps
             , serverInfo = Just (configServerInfo config)
             }
+
+    -- Emit ServerInitialized trace
+    let Implementation clientName _ _ = clientImpl
+    liftIO $ traceWith tracer (ServerInitialized (Just clientName))
+
+    -- Emit ServerCapabilityNegotiation trace
+    let caps = extractCapabilityNames (serverCapabilities state)
+    liftIO $ traceWith tracer (ServerCapabilityNegotiation caps)
+
+-- | Extract capability names from ServerCapabilities
+extractCapabilityNames :: ServerCapabilities -> [Text]
+extractCapabilityNames (ServerCapabilities res prpts tls comps logCap _exp) =
+    concat
+        [ maybe [] (const ["resources"]) res
+        , maybe [] (const ["prompts"]) prpts
+        , maybe [] (const ["tools"]) tls
+        , maybe [] (const ["completions"]) comps
+        , maybe [] (const ["logging"]) logCap
+        ]
 
 -- | Handler for /.well-known/oauth-protected-resource endpoint
 handleProtectedResourceMetadata :: HTTPServerConfig -> Handler ProtectedResourceMetadata
@@ -645,8 +707,8 @@ handleMetadata config = do
             }
 
 -- | Handle dynamic client registration
-handleRegister :: HTTPServerConfig -> TVar OAuthState -> ClientRegistrationRequest -> Handler ClientRegistrationResponse
-handleRegister config oauthStateVar (ClientRegistrationRequest reqName reqRedirects reqGrants reqResponses reqAuth) = do
+handleRegister :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> ClientRegistrationRequest -> Handler ClientRegistrationResponse
+handleRegister config tracer oauthStateVar (ClientRegistrationRequest reqName reqRedirects reqGrants reqResponses reqAuth) = do
     -- Generate client ID
     let prefix = maybe "client_" clientIdPrefix (httpOAuthConfig config)
     clientId <- liftIO $ (prefix <>) <$> generateAuthCode
@@ -664,6 +726,10 @@ handleRegister config oauthStateVar (ClientRegistrationRequest reqName reqRedire
     liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
         s{registeredClients = Map.insert clientId clientInfo (registeredClients s)}
 
+    -- Emit trace
+    let oauthTracer = contramap HTTPOAuth tracer
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthClientRegistration clientId reqName
+
     return
         ClientRegistrationResponse
             { client_id = clientId
@@ -676,17 +742,21 @@ handleRegister config oauthStateVar (ClientRegistrationRequest reqName reqRedire
             }
 
 -- | Handle OAuth authorize endpoint - now returns login page HTML
-handleAuthorize :: HTTPServerConfig -> TVar OAuthState -> Text -> Text -> Text -> Text -> Text -> Maybe Text -> Maybe Text -> Maybe Text -> Handler (Headers '[Header "Set-Cookie" Text] Text)
-handleAuthorize config oauthStateVar responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
+handleAuthorize :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> Text -> Text -> Text -> Text -> Text -> Maybe Text -> Maybe Text -> Maybe Text -> Handler (Headers '[Header "Set-Cookie" Text] Text)
+handleAuthorize config tracer oauthStateVar responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
+    let oauthTracer = contramap HTTPOAuth tracer
+
     -- Log resource parameter for RFC8707 support
-    liftIO $ putStrLn $ "Resource parameter: " <> maybe "not provided" T.unpack mResource
+    liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "authorize endpoint"
 
     -- T037: Validate response_type (return HTML error page instead of JSON)
-    when (responseType /= "code") $
+    when (responseType /= "code") $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "response_type" ("Unsupported response type: " <> responseType)
         throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Unsupported Response Type" "Only 'code' response type is supported. Please contact the application developer.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     -- T037: Validate code_challenge_method (return HTML error page instead of JSON)
-    when (codeChallengeMethod /= "S256") $
+    when (codeChallengeMethod /= "S256") $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "code_challenge_method" ("Unsupported method: " <> codeChallengeMethod)
         throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Request" "Only 'S256' code challenge method is supported. Please contact the application developer.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     -- Look up client to get client name for display
@@ -695,14 +765,20 @@ handleAuthorize config oauthStateVar responseType clientId redirectUri codeChall
     -- T040: Handle unregistered client_id - render error page (don't redirect - can't trust redirect_uri)
     clientInfo <- case Map.lookup clientId (registeredClients oauthState) of
         Just ci -> return ci
-        Nothing ->
+        Nothing -> do
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "client_id" ("Unregistered client: " <> clientId)
             throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Unregistered Client" ("Client ID '" <> clientId <> "' is not registered. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     -- T041: Handle invalid redirect_uri - render error page (don't redirect)
-    unless (redirectUri `elem` clientRedirectUris clientInfo) $
+    unless (redirectUri `elem` clientRedirectUris clientInfo) $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "redirect_uri" ("Invalid redirect URI: " <> redirectUri)
         throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Redirect URI" ("The redirect URI '" <> redirectUri <> "' is not registered for this client. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     let displayName = clientName clientInfo
+        scopeList = maybe [] (T.splitOn " ") mScope
+
+    -- Emit authorization request trace
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationRequest clientId scopeList (isJust mState)
 
     -- Generate session ID
     sessionId <- liftIO $ UUID.toText <$> UUID.nextRandom
@@ -724,6 +800,9 @@ handleAuthorize config oauthStateVar responseType clientId redirectUri codeChall
     -- Store pending authorization
     liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
         s{pendingAuthorizations = Map.insert sessionId pending (pendingAuthorizations s)}
+
+    -- Emit login page served trace
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginPageServed sessionId
 
     -- Build session cookie
     let sessionExpirySeconds = maybe 600 loginSessionExpirySeconds (httpOAuthConfig config)
@@ -747,38 +826,47 @@ extractSessionFromCookie cookieHeader =
             [] -> Nothing
 
 -- | Handle login form submission
-handleLogin :: HTTPServerConfig -> TVar OAuthState -> JWTSettings -> Maybe Text -> LoginForm -> Handler (Headers '[Header "Location" Text, Header "Set-Cookie" Text] NoContent)
-handleLogin config oauthStateVar _jwtSettings mCookie loginForm = do
+handleLogin :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> JWTSettings -> Maybe Text -> LoginForm -> Handler (Headers '[Header "Location" Text, Header "Set-Cookie" Text] NoContent)
+handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
+    let oauthTracer = contramap HTTPOAuth tracer
+
     -- Extract session ID from form
     let sessionId = formSessionId loginForm
 
     -- T039: Handle cookies disabled - check if cookie matches form session_id
     case mCookie of
-        Nothing ->
+        Nothing -> do
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "No cookie header present"
             throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Cookies Required" "Your browser must have cookies enabled to sign in. Please enable cookies and try again.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
         Just cookie ->
             -- Parse session cookie and verify it matches form session_id
             let cookieSessionId = extractSessionFromCookie cookie
-             in unless (cookieSessionId == Just sessionId) $
+             in unless (cookieSessionId == Just sessionId) $ do
+                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "Session cookie mismatch"
                     throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Cookies Required" "Session cookie mismatch. Please enable cookies and try again.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     -- Look up pending authorization
     oauthState <- liftIO $ readTVarIO oauthStateVar
     pending <- case Map.lookup sessionId (pendingAuthorizations oauthState) of
         Just p -> return p
-        Nothing ->
+        Nothing -> do
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "session" ("Session not found: " <> sessionId)
             throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Session" "Session not found or has expired. Please restart the authorization flow.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     -- T038: Handle expired sessions
     currentTime <- liftIO getCurrentTime
     let sessionExpirySeconds = maybe 600 (fromIntegral . loginSessionExpirySeconds) (httpOAuthConfig config)
         expiryTime = addUTCTime sessionExpirySeconds (pendingCreatedAt pending)
-    when (currentTime > expiryTime) $
+    when (currentTime > expiryTime) $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthSessionExpired sessionId
         throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Session Expired" "Your login session has expired. Please restart the authorization flow.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     -- Check if user denied access
     if formAction loginForm == "deny"
         then do
+            -- Emit denial trace
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationDenied (pendingClientId pending) "User denied authorization"
+
             -- Clear session and redirect with error
             let clearCookie = "mcp_session=; Max-Age=0; Path=/"
                 errorParams = "error=access_denied&error_description=User%20denied%20access"
@@ -799,13 +887,18 @@ handleLogin config oauthStateVar _jwtSettings mCookie loginForm = do
                 username = formUsername loginForm
                 password = formPassword loginForm
 
-            if validateCredential store username password
+            let credentialsValid = validateCredential store username password
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt username credentialsValid
+            if credentialsValid
                 then do
+                    -- Emit authorization granted trace
+                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (pendingClientId pending) username
+
                     -- Generate authorization code
                     code <- liftIO $ generateAuthCodeWithConfig config
-                    currentTime <- liftIO getCurrentTime
+                    codeGenerationTime <- liftIO getCurrentTime
                     let expirySeconds = maybe 600 (fromIntegral . authCodeExpirySeconds) oauthCfg
-                        expiry = addUTCTime expirySeconds currentTime
+                        expiry = addUTCTime expirySeconds codeGenerationTime
                         authCode =
                             AuthorizationCode
                                 { authCode = code
@@ -834,47 +927,60 @@ handleLogin config oauthStateVar _jwtSettings mCookie loginForm = do
 
                     return $ addHeader redirectUrl $ addHeader clearCookie NoContent
                 else
-                    -- Invalid credentials - return error
+                    -- Invalid credentials - return error (validateCredential already emitted OAuthLoginAttempt trace)
                     throwError err401{errBody = encode $ object ["error" .= ("authentication_failed" :: Text), "error_description" .= ("Invalid username or password" :: Text)]}
 
 -- | Handle OAuth token endpoint
-handleToken :: JWTSettings -> HTTPServerConfig -> TVar OAuthState -> [(Text, Text)] -> Handler TokenResponse
-handleToken jwtSettings config oauthStateVar params = do
+handleToken :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> [(Text, Text)] -> Handler TokenResponse
+handleToken jwtSettings config tracer oauthStateVar params = do
     let paramMap = Map.fromList params
     case Map.lookup "grant_type" paramMap of
-        Just "authorization_code" -> handleAuthCodeGrant jwtSettings config oauthStateVar paramMap
-        Just "refresh_token" -> handleRefreshTokenGrant jwtSettings config oauthStateVar paramMap
+        Just "authorization_code" -> handleAuthCodeGrant jwtSettings config tracer oauthStateVar paramMap
+        Just "refresh_token" -> handleRefreshTokenGrant jwtSettings config tracer oauthStateVar paramMap
         Just _other -> throwError err400{errBody = encode $ object ["error" .= ("unsupported_grant_type" :: Text)]}
         Nothing -> throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text), "error_description" .= ("Missing grant_type" :: Text)]}
 
 -- | Handle authorization code grant
-handleAuthCodeGrant :: JWTSettings -> HTTPServerConfig -> TVar OAuthState -> Map Text Text -> Handler TokenResponse
-handleAuthCodeGrant jwtSettings config oauthStateVar params = do
+handleAuthCodeGrant :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> Map Text Text -> Handler TokenResponse
+handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
+    let oauthTracer = contramap HTTPOAuth tracer
+
     -- Extract and log resource parameter (RFC8707)
     let mResource = Map.lookup "resource" params
-    liftIO $ putStrLn $ "Resource parameter in token request: " <> maybe "not provided" T.unpack mResource
+    liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "token request (auth code)"
 
     code <- case Map.lookup "code" params of
         Just c -> return c
-        Nothing -> throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
+        Nothing -> do
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing authorization code"
+            throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
 
     codeVerifier <- case Map.lookup "code_verifier" params of
         Just v -> return v
-        Nothing -> throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
+        Nothing -> do
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing code_verifier"
+            throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
 
     -- Look up authorization code
     oauthState <- liftIO $ readTVarIO oauthStateVar
     authCode <- case Map.lookup code (authCodes oauthState) of
         Just ac -> return ac
-        Nothing -> throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text)]}
+        Nothing -> do
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
+            throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text)]}
 
     -- Verify code hasn't expired
     currentTime <- liftIO getCurrentTime
-    when (currentTime > authExpiry authCode) $
+    when (currentTime > authExpiry authCode) $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "auth_code" "Authorization code expired"
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Authorization code expired" :: Text)]}
 
     -- Verify PKCE
-    unless (validateCodeVerifier codeVerifier (authCodeChallenge authCode)) $
+    let pkceValid = validateCodeVerifier codeVerifier (authCodeChallenge authCode)
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthPKCEValidation codeVerifier (authCodeChallenge authCode) pkceValid
+    unless pkceValid $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Invalid code verifier" :: Text)]}
 
     -- Create user for JWT
@@ -900,6 +1006,9 @@ handleAuthCodeGrant jwtSettings config oauthStateVar params = do
             , refreshTokens = Map.insert refreshToken (accessTokenText, user) (refreshTokens s)
             }
 
+    -- Emit successful token exchange trace
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" True
+
     return
         TokenResponse
             { access_token = accessTokenText
@@ -910,21 +1019,27 @@ handleAuthCodeGrant jwtSettings config oauthStateVar params = do
             }
 
 -- | Handle refresh token grant
-handleRefreshTokenGrant :: JWTSettings -> HTTPServerConfig -> TVar OAuthState -> Map Text Text -> Handler TokenResponse
-handleRefreshTokenGrant jwtSettings config oauthStateVar params = do
+handleRefreshTokenGrant :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> Map Text Text -> Handler TokenResponse
+handleRefreshTokenGrant jwtSettings config tracer oauthStateVar params = do
+    let oauthTracer = contramap HTTPOAuth tracer
+
     -- Extract and log resource parameter (RFC8707)
     let mResource = Map.lookup "resource" params
-    liftIO $ putStrLn $ "Resource parameter in token request: " <> maybe "not provided" T.unpack mResource
+    liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "token request (refresh token)"
 
     refreshToken <- case Map.lookup "refresh_token" params of
         Just t -> return t
-        Nothing -> throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
+        Nothing -> do
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing refresh_token"
+            throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
 
     -- Look up refresh token
     oauthState <- liftIO $ readTVarIO oauthStateVar
     (oldAccessToken, user) <- case Map.lookup refreshToken (refreshTokens oauthState) of
         Just info -> return info
-        Nothing -> throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text)]}
+        Nothing -> do
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenRefresh False
+            throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text)]}
 
     -- Generate new JWT access token
     newAccessTokenText <- generateJWTAccessToken user jwtSettings
@@ -935,6 +1050,9 @@ handleRefreshTokenGrant jwtSettings config oauthStateVar params = do
             { accessTokens = Map.insert newAccessTokenText user $ Map.delete oldAccessToken (accessTokens s)
             , refreshTokens = Map.insert refreshToken (newAccessTokenText, user) (refreshTokens s)
             }
+
+    -- Emit successful token refresh trace
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenRefresh True
 
     return
         TokenResponse
@@ -1106,8 +1224,8 @@ escapeHtml :: Text -> Text
 escapeHtml = T.replace "&" "&amp;" . T.replace "<" "&lt;" . T.replace ">" "&gt;" . T.replace "\"" "&quot;" . T.replace "'" "&#39;"
 
 -- | Run the MCP server as an HTTP server
-runServerHTTP :: (MCPServer MCPServerM) => HTTPServerConfig -> IO ()
-runServerHTTP config = do
+runServerHTTP :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> IO ()
+runServerHTTP config tracer = do
     -- Initialize JWT settings if OAuth is enabled
     jwtSettings <- case httpJWK config of
         Just jwk -> return $ defaultJWTSettings jwk
@@ -1127,16 +1245,17 @@ runServerHTTP config = do
                 , pendingAuthorizations = Map.empty
                 }
 
-    putStrLn $ "Starting MCP HTTP Server on port " ++ show (httpPort config) ++ "..."
+    traceWith tracer $ HTTPServerStarting (httpPort config) (httpBaseUrl config)
 
     when (maybe False oauthEnabled (httpOAuthConfig config)) $ do
-        putStrLn "OAuth authentication enabled"
-        putStrLn $ "Authorization endpoint: " ++ T.unpack (httpBaseUrl config) ++ "/authorize"
-        putStrLn $ "Token endpoint: " ++ T.unpack (httpBaseUrl config) ++ "/token"
+        let authEp = httpBaseUrl config <> "/authorize"
+            tokenEp = httpBaseUrl config <> "/token"
+        traceWith tracer $ HTTPOAuthEnabled authEp tokenEp
         case httpOAuthConfig config >>= \cfg -> if null (oauthProviders cfg) then Nothing else Just (oauthProviders cfg) of
             Just providers -> do
-                putStrLn $ "OAuth providers: " ++ T.unpack (T.intercalate ", " (map providerName providers))
-                when (any requiresPKCE providers) $ putStrLn "PKCE enabled (required by MCP spec)"
+                traceWith tracer $ HTTPOAuthProviders (map providerName providers)
+                when (any requiresPKCE providers) $ traceWith tracer HTTPPKCEEnabled
             Nothing -> return ()
 
-    run (httpPort config) (mcpApp config stateVar oauthStateVar jwtSettings)
+    traceWith tracer HTTPServerStarted
+    run (httpPort config) (mcpApp config tracer stateVar oauthStateVar jwtSettings)
