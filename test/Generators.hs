@@ -61,6 +61,7 @@ import MCP.Server.Auth.Backend (
     mkUsername,
  )
 import MCP.Server.OAuth.Types (
+    AccessTokenId (..),
     AuthCodeId (..),
     AuthUser (..),
     AuthorizationCode (..),
@@ -118,6 +119,10 @@ instance Arbitrary UserId where
 instance Arbitrary RefreshTokenId where
     arbitrary = RefreshTokenId . T.pack . getNonEmpty <$> arbitrary
     shrink (RefreshTokenId t) = [RefreshTokenId (T.pack s) | s <- shrink (T.unpack t), not (null s)]
+
+instance Arbitrary AccessTokenId where
+    arbitrary = AccessTokenId . T.pack . getNonEmpty <$> arbitrary
+    shrink (AccessTokenId t) = [AccessTokenId (T.pack s) | s <- shrink (T.unpack t), not (null s)]
 
 instance Arbitrary Username where
     arbitrary = do
