@@ -95,6 +95,7 @@ library
         MCP.Server.Auth.Backend
         MCP.Server.Time
         MCP.Server.OAuth.Types
+        MCP.Server.OAuth.Store
         MCP.Trace.Types
         MCP.Trace.HTTP
         MCP.Trace.OAuth
@@ -262,6 +263,7 @@ test-suite mcp-test
 
     -- Modules included in this executable, other than Main.
     other-modules:
+        TestMonad
         Trace.FilterSpec
         Trace.GoldenSpec
         Trace.OAuthSpec
@@ -287,4 +289,9 @@ test-suite mcp-test
         hspec >= 2.10 && < 2.12,
         plow-log >= 0.1.6 && < 0.2,
         QuickCheck >= 2.14 && < 2.16,
-        quickcheck-instances >= 0.3 && < 0.4
+        quickcheck-instances >= 0.3 && < 0.4,
+        time >= 1.12 && < 1.13,
+        containers >= 0.6 && < 0.7,
+        mtl >= 2.3 && < 2.4,
+        network-uri >= 2.6 && < 2.7,
+        memory >= 0.18 && < 0.19
