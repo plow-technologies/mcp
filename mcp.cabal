@@ -91,12 +91,14 @@ library
         MCP.Server
         MCP.Server.StdIO
         MCP.Server.HTTP
+        MCP.Server.HTTP.AppEnv
         MCP.Server.Auth
         MCP.Server.Auth.Backend
         MCP.Server.Auth.Demo
         MCP.Server.Time
         MCP.Server.OAuth.Types
         MCP.Server.OAuth.Store
+        MCP.Server.OAuth.InMemory
         MCP.Trace.Types
         MCP.Trace.HTTP
         MCP.Trace.OAuth

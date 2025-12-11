@@ -56,24 +56,20 @@ module MCP.Server.OAuth.InMemory (
     emptyOAuthState,
 ) where
 
-import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVar, writeTVar)
+import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, writeTVar)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Reader (MonadReader, ReaderT, ask)
+import Control.Monad.Reader (ReaderT, ask)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
-import Data.Time.Clock (NominalDiffTime, UTCTime, addUTCTime)
+import Data.Time.Clock (NominalDiffTime, addUTCTime)
 import MCP.Server.OAuth.Store (OAuthStateStore (..))
 import MCP.Server.OAuth.Types (
-    AccessTokenId,
-    AuthCodeId,
     AuthUser,
     AuthorizationCode (..),
     ClientId,
     ClientInfo,
     PendingAuthorization (..),
-    RefreshTokenId,
-    SessionId,
     unAccessTokenId,
     unAuthCodeId,
     unClientId,
