@@ -478,3 +478,180 @@ The `generic-lens` approach is a **modern, GHC.Generics-based implementation** o
 - [Type Families in Haskell](https://serokell.io/blog/type-families-haskell) - Serokell
 - [QuickCheck manual](https://hackage.haskell.org/package/QuickCheck)
 - [Testing Typeclass Laws](https://austinrochford.com/posts/2014-05-27-quickcheck-laws.html)
+
+---
+
+## Phase 3 Research: Type Unification (mcp-51r)
+
+**Added**: 2025-12-11 | **Context**: Blocker discovered during implementation
+
+### 10. Servant Boundary Instances Strategy
+
+**Decision**: Add `FromHttpApiData`/`ToHttpApiData` instances directly to OAuth.Types newtypes
+
+**Rationale**:
+- Servant instances ARE the natural boundary between HTTP (Text) and domain (newtypes)
+- Enables property-based round-trip testing: `parseUrlPiece . toUrlPiece ≡ Right`
+- No separate "Boundary" module needed—instances live with types (orphan-free)
+- Follows "parse, don't validate" principle at the Servant layer
+
+**Alternatives Considered**:
+- **Dedicated Boundary module**: Adds indirection; instances become orphans or require re-exports. Rejected.
+- **Inline conversion in handlers**: Duplicates conversion logic; no centralized validation. Rejected.
+- **Custom Servant combinators**: Over-engineering for simple newtype wrapping. Rejected.
+
+**Example**:
+```haskell
+-- In OAuth.Types (with types they describe)
+
+instance FromHttpApiData ClientId where
+  parseUrlPiece t
+    | Text.null t = Left "ClientId cannot be empty"
+    | otherwise = Right (ClientId t)
+
+instance ToHttpApiData ClientId where
+  toUrlPiece = unClientId
+
+-- For URI-based types, validate during parsing
+instance FromHttpApiData RedirectUri where
+  parseUrlPiece t = case parseURI (Text.unpack t) of
+    Nothing -> Left "Invalid URI format"
+    Just uri
+      | not (isValidRedirectUri uri) -> Left "URI must be https or localhost http"
+      | otherwise -> Right (RedirectUri uri)
+
+instance ToHttpApiData RedirectUri where
+  toUrlPiece (RedirectUri uri) = Text.pack (uriToString id uri "")
+```
+
+### 11. Invariant Enforcement in FromJSON
+
+**Decision**: Reject invalid data at JSON parse time (400 Bad Request), not as domain errors
+
+**Rationale**:
+- "Make illegal states unrepresentable" extends to the parse boundary
+- Domain error types should only contain domain-level failures, not structural validation
+- Servant automatically translates JSON parse failures to 400 Bad Request
+- Keeps handler logic clean—if data reaches the handler, it's already valid
+
+**Alternatives Considered**:
+- **Accept and validate in handler**: Requires domain error cases for structural issues; pollutes error type. Rejected.
+- **Accept and normalize**: Violates principle of least surprise; hides invalid input. Rejected.
+
+**Example**:
+```haskell
+-- NonEmpty enforcement at parse time
+instance FromJSON ClientInfo where
+  parseJSON = withObject "ClientInfo" $ \o -> do
+    name <- o .: "client_name"
+    uriList <- o .: "redirect_uris" :: Parser [RedirectUri]
+    case nonEmpty uriList of
+      Nothing -> fail "redirect_uris must contain at least one URI"
+      Just uris -> do
+        grants <- o .:? "grant_types" .!= Set.singleton GrantAuthorizationCode
+        responses <- o .:? "response_types" .!= Set.singleton ResponseCode
+        authMethod <- o .:? "token_endpoint_auth_method" .!= AuthNone
+        pure $ ClientInfo name uris grants responses authMethod
+```
+
+### 12. Incremental Handler Migration Pattern
+
+**Decision**: Migrate handlers one at a time with coexisting old/new patterns
+
+**Rationale**:
+- Lower risk than big-bang migration
+- Each handler migration is independently testable and commitable
+- Enables continuous integration during migration
+- Proof-of-concept (`handleMetadataAppM`) already demonstrates the pattern
+
+**Migration Order** (by dependency and complexity):
+1. **Foundation**: Servant instances + property tests (no handler changes)
+2. **Simple handlers**: Metadata, health (no OAuth state)
+3. **Read-only OAuth**: Client lookup, token validation
+4. **Mutating OAuth**: Registration, authorization, token exchange
+5. **Complex flows**: Login (session + credentials + auth code)
+6. **Cleanup**: Remove legacy Text-based types
+
+**Pattern for each handler**:
+```haskell
+-- Before (legacy)
+handleAuthorize :: Text -> Text -> ... -> Handler AuthorizeResponse
+
+-- After (newtype)
+handleAuthorize :: ClientId -> RedirectUri -> ... -> Handler AuthorizeResponse
+
+-- Servant API type changes accordingly
+type AuthorizeAPI = "authorize"
+  :> QueryParam' '[Required] "client_id" ClientId  -- Was Text
+  :> QueryParam' '[Required] "redirect_uri" RedirectUri  -- Was Text
+  :> ...
+```
+
+### 13. Property Test Strategy for Boundary Instances
+
+**Decision**: Use QuickCheck with custom generators for all boundary instance round-trips
+
+**Rationale**:
+- FR-019 requires: "parseUrlPiece . toUrlPiece ≡ Right"
+- Property tests catch edge cases (empty strings, special characters, unicode)
+- Generators ensure coverage of valid domain values
+- Complements existing typeclass law tests
+
+**Test Structure**:
+```haskell
+-- test/Laws/BoundarySpec.hs
+module Laws.BoundarySpec (spec) where
+
+import Test.Hspec
+import Test.Hspec.QuickCheck (prop)
+import Test.QuickCheck
+import Servant (FromHttpApiData(..), ToHttpApiData(..))
+import MCP.Server.OAuth.Types
+
+spec :: Spec
+spec = describe "Servant Boundary Instances" $ do
+  describe "FromHttpApiData/ToHttpApiData round-trip" $ do
+    prop "ClientId" $ \(cid :: ClientId) ->
+      parseUrlPiece (toUrlPiece cid) === Right cid
+
+    prop "AuthCodeId" $ \(acid :: AuthCodeId) ->
+      parseUrlPiece (toUrlPiece acid) === Right acid
+
+    prop "RedirectUri" $ \(uri :: RedirectUri) ->
+      parseUrlPiece (toUrlPiece uri) === Right uri
+
+    -- ... for all newtypes
+
+  describe "FromJSON/ToJSON round-trip" $ do
+    prop "ClientInfo" $ \(info :: ClientInfo) ->
+      decode (encode info) === Just info
+
+    prop "AuthorizationCode" $ \(code :: AuthorizationCode) ->
+      decode (encode code) === Just code
+```
+
+**Generator Requirements** (additions to `test/Generators.hs`):
+```haskell
+-- Arbitrary for validated types must only generate valid values
+instance Arbitrary RedirectUri where
+  arbitrary = do
+    -- Only generate valid redirect URIs
+    scheme <- elements ["https://", "http://localhost:"]
+    path <- listOf1 (elements ['a'..'z'])
+    pure $ fromJust $ mkRedirectUri (Text.pack $ scheme ++ path)
+  shrink = const []  -- Can't shrink to invalid values
+
+instance Arbitrary ClientInfo where
+  arbitrary = ClientInfo
+    <$> arbitrary  -- name
+    <*> (NE.fromList <$> listOf1 arbitrary)  -- NonEmpty RedirectUri
+    <*> arbitrary  -- Set GrantType
+    <*> arbitrary  -- Set ResponseType
+    <*> arbitrary  -- ClientAuthMethod
+```
+
+## References (Phase 3)
+
+- [Servant FromHttpApiData](https://hackage.haskell.org/package/servant/docs/Servant-API.html#t:FromHttpApiData)
+- [Parse, don't validate](https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/) - Alexis King
+- [Making illegal states unrepresentable](https://fsharpforfunandprofit.com/posts/designing-with-types-making-illegal-states-unrepresentable/) - Scott Wlaschin

@@ -83,6 +83,11 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 
 ### Session 2025-12-11
 
+- Q: Which type system should be the canonical source of truth for OAuth state types? → A: OAuth.Types newtypes (ClientId, RedirectUri, etc.) are canonical; HTTP.hs converts Text ↔ newtype at boundary
+- Q: Where should Text ↔ newtype boundary conversions be implemented? → A: Servant combinators (FromHttpApiData/ToHttpApiData instances); these ARE the boundary and enable property-based round-trip tests
+- Q: How should invalid data (e.g., empty redirect URI list) be handled at the HTTP boundary? → A: Fail at boundary (400) via FromJSON/FromHttpApiData; make illegal states unrepresentable in types
+- Q: What migration strategy should be used for the 15+ existing HTTP handlers? → A: Incremental per-handler; each handler migrated separately with its own nested bead under mcp-51r
+- Q: Should PendingAuthorization use OAuth.Types newtypes or raw Text for its fields? → A: Same newtypes (ClientId, RedirectUri, etc.); already validated at request parse time
 - Q: How should the system handle OAuth state store unavailability? → A: Fail fast with typed error (retries are infrastructure-level concerns)
 - Q: How should concurrent access to the same authorization code be handled? → A: Implementation-defined atomicity (STM, row locking, etc.)
 - Q: How should partial failures in compound operations be handled? → A: Fail entirely; all-or-nothing semantics, no partial state
@@ -110,6 +115,10 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 - **FR-012**: Handler functions MUST use `MonadError e m` with prism constraints (e.g., `AsType (OAuthStateError m) e`) to compose errors from multiple typeclasses into a unified error type.
 - **FR-013**: Handler functions MUST use `MonadReader env m` with lens constraints (e.g., `HasType (OAuthStateEnv m) env`) to compose environments from multiple typeclasses into a unified environment type.
 - **FR-014**: The typeclasses MUST be framework-agnostic; Servant integration MUST use `hoistServer` to translate the polymorphic error type to `ServerError` at the boundary.
+- **FR-018**: All OAuth.Types newtypes (`ClientId`, `RedirectUri`, `AuthCodeId`, `GrantType`, etc.) MUST implement `FromHttpApiData` and `ToHttpApiData` instances for Servant boundary conversion. These instances serve as the canonical Text ↔ newtype conversion layer.
+- **FR-019**: The `FromHttpApiData`/`ToHttpApiData` instances MUST have property-based round-trip tests verifying `parseUrlPiece . toUrlPiece ≡ Right`.
+- **FR-020**: `FromJSON` instances for OAuth types with invariants (e.g., `NonEmpty RedirectUri`) MUST reject invalid data at parse time, returning appropriate JSON parse errors that Servant translates to 400 Bad Request. Domain error types MUST NOT include cases for structurally invalid input.
+- **FR-021**: HTTP handler migration from Text-based to newtype-based OAuth state MUST be incremental (one handler at a time). Each handler migration is tracked as a nested bead under the parent unification task (mcp-51r). Old and new patterns may coexist during migration.
 - **FR-015**: The design MUST allow the same handler logic to be used outside of Servant (e.g., in CLI tools, tests, or other frameworks) by providing different error/environment interpreters.
 - **FR-016**: Each typeclass MUST document key algebraic laws enabling property-based testing:
   - Round-trip: `lookupX k` after `storeX k v` returns `Just v` (if not expired)
@@ -122,9 +131,9 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 
 - **OAuthStateStore**: Typeclass abstracting persistence of OAuth protocol state (authorization codes, tokens, clients, sessions). Defines associated types `OAuthStateError` and `OAuthStateEnv` for implementation-specific failures and environment.
 - **AuthBackend**: Typeclass abstracting user authentication/credential validation. Defines associated types `AuthBackendError` and `AuthBackendEnv` for implementation-specific failures and environment.
-- **AuthorizationCode**: Existing data type representing an authorization code with PKCE, expiry, and user info.
-- **ClientInfo**: Existing data type representing a registered OAuth client.
-- **PendingAuthorization**: Existing data type representing an in-progress login session.
+- **AuthorizationCode**: Data type from OAuth.Types representing an authorization code with PKCE, expiry, and user info. Uses type-safe newtypes (`AuthCodeId`, `CodeChallenge`, etc.).
+- **ClientInfo**: Data type from OAuth.Types representing a registered OAuth client. Uses type-safe newtypes (`ClientId`, `NonEmpty RedirectUri`, `Set GrantType`).
+- **PendingAuthorization**: Data type from OAuth.Types representing an in-progress login session. Uses type-safe newtypes (`ClientId`, `RedirectUri`, `CodeChallenge`, etc.) for all OAuth parameters (validated at request parse time).
 - **AuthUser**: Existing data type representing an authenticated user.
 - **Error Prisms**: Constraints using `AsType` from generic-lens to inject/project typeclass-specific errors into a unified error sum type.
 - **Environment Lenses**: Constraints using `HasType` from generic-lens to access typeclass-specific environments from a unified environment product type.

@@ -535,3 +535,179 @@ AppEnv (composite) ◄───────────────────�
     ├── HasType OAuthTVarEnv ◄── OAuthStateStore instance
     └── HasType DemoCredentialEnv ◄── AuthBackend instance
 ```
+
+---
+
+## Phase 3 Additions: Servant Boundary Instances (mcp-51r)
+
+**Added**: 2025-12-11 | **Context**: Type unification between HTTP.hs and OAuth.Types
+
+### Servant Instance Requirements
+
+All newtypes that appear in HTTP API types must implement:
+
+| Typeclass | Purpose | Law |
+|-----------|---------|-----|
+| `FromHttpApiData` | Parse from URL path/query | `parseUrlPiece . toUrlPiece ≡ Right` |
+| `ToHttpApiData` | Render to URL path/query | Inverse of `FromHttpApiData` |
+| `FromJSON` | Parse from request body | `decode . encode ≡ Just` |
+| `ToJSON` | Render to response body | Inverse of `FromJSON` |
+
+### Instance Specifications
+
+#### Simple Newtypes (Text wrapper)
+
+These newtypes wrap `Text` with minimal validation (non-empty):
+
+| Type | Validation | Error Message |
+|------|------------|---------------|
+| `ClientId` | Non-empty | "ClientId cannot be empty" |
+| `AuthCodeId` | Non-empty | "AuthCodeId cannot be empty" |
+| `SessionId` | Valid UUID format | "SessionId must be a valid UUID" |
+| `UserId` | Non-empty | "UserId cannot be empty" |
+| `RefreshTokenId` | Non-empty | "RefreshTokenId cannot be empty" |
+| `Scope` | Non-empty, no whitespace | "Scope cannot be empty or contain whitespace" |
+
+```haskell
+-- Pattern for simple newtypes
+instance FromHttpApiData ClientId where
+  parseUrlPiece t
+    | Text.null t = Left "ClientId cannot be empty"
+    | otherwise = Right (ClientId t)
+
+instance ToHttpApiData ClientId where
+  toUrlPiece = unClientId
+```
+
+#### URI-Based Newtypes
+
+These newtypes wrap `URI` with format and security validation:
+
+| Type | Validation | Error Message |
+|------|------------|---------------|
+| `RedirectUri` | Valid URI, https OR http://localhost | "Invalid URI" / "Must be https or localhost" |
+
+```haskell
+instance FromHttpApiData RedirectUri where
+  parseUrlPiece t = case parseURI (Text.unpack t) of
+    Nothing -> Left "Invalid URI format"
+    Just uri
+      | uriScheme uri == "https:" -> Right (RedirectUri uri)
+      | uriScheme uri == "http:" && isLocalhost uri -> Right (RedirectUri uri)
+      | otherwise -> Left "Redirect URI must use https or http://localhost"
+
+instance ToHttpApiData RedirectUri where
+  toUrlPiece (RedirectUri uri) = Text.pack (uriToString id uri "")
+```
+
+#### ADT Types
+
+These types are finite enumerations with string representations:
+
+| Type | Values | JSON Representation |
+|------|--------|---------------------|
+| `CodeChallengeMethod` | `S256`, `Plain` | `"S256"`, `"plain"` |
+| `GrantType` | `GrantAuthorizationCode`, `GrantRefreshToken`, `GrantClientCredentials` | `"authorization_code"`, `"refresh_token"`, `"client_credentials"` |
+| `ResponseType` | `ResponseCode`, `ResponseToken` | `"code"`, `"token"` |
+| `ClientAuthMethod` | `AuthNone`, `AuthClientSecretPost`, `AuthClientSecretBasic` | `"none"`, `"client_secret_post"`, `"client_secret_basic"` |
+
+```haskell
+instance FromHttpApiData GrantType where
+  parseUrlPiece = \case
+    "authorization_code" -> Right GrantAuthorizationCode
+    "refresh_token" -> Right GrantRefreshToken
+    "client_credentials" -> Right GrantClientCredentials
+    other -> Left $ "Unknown grant type: " <> other
+
+instance ToHttpApiData GrantType where
+  toUrlPiece = \case
+    GrantAuthorizationCode -> "authorization_code"
+    GrantRefreshToken -> "refresh_token"
+    GrantClientCredentials -> "client_credentials"
+```
+
+### Composite Type JSON Instances
+
+For types with invariants, validation happens at parse time:
+
+#### ClientInfo (NonEmpty RedirectUri)
+
+```haskell
+instance FromJSON ClientInfo where
+  parseJSON = withObject "ClientInfo" $ \o -> do
+    name <- o .: "client_name"
+    uriList <- o .: "redirect_uris"
+    uris <- case nonEmpty uriList of
+      Nothing -> fail "redirect_uris must contain at least one URI"
+      Just ne -> pure ne
+    grants <- o .:? "grant_types" .!= Set.singleton GrantAuthorizationCode
+    responses <- o .:? "response_types" .!= Set.singleton ResponseCode
+    authMethod <- o .:? "token_endpoint_auth_method" .!= AuthNone
+    pure $ ClientInfo name uris grants responses authMethod
+```
+
+### HTTP.hs Legacy vs OAuth.Types Mapping
+
+| HTTP.hs Field (Legacy) | OAuth.Types Field (Target) | Migration Notes |
+|------------------------|---------------------------|-----------------|
+| `clientRedirectUris :: [Text]` | `clientRedirectUris :: NonEmpty RedirectUri` | Servant parses directly to `NonEmpty`; empty list → 400 |
+| `clientGrantTypes :: [Text]` | `clientGrantTypes :: Set GrantType` | ADT parsing rejects unknown values |
+| `authCode :: Text` | `authCodeId :: AuthCodeId` | Simple newtype wrap |
+| `clientId :: Text` | `clientId :: ClientId` | Simple newtype wrap |
+| `sessionId :: Text` | `sessionId :: SessionId` | UUID validation added |
+| `pendingRedirectUri :: Text` | `pendingRedirectUri :: RedirectUri` | URI validation added |
+
+### Handler Type Signature Evolution
+
+```haskell
+-- Legacy (HTTP.hs current)
+handleClientRegistration ::
+  TVar OAuthState ->
+  OAuthConfig ->
+  ClientRegistrationRequest ->  -- Contains [Text] redirect_uris
+  Handler ClientRegistrationResponse
+
+-- Target (after migration)
+handleClientRegistration ::
+  ( OAuthStateStore m
+  , MonadError e m
+  , AsType (OAuthStateError m) e
+  ) =>
+  ClientRegistrationRequest ->  -- Contains NonEmpty RedirectUri
+  m ClientRegistrationResponse
+```
+
+### Arbitrary Instance Requirements
+
+For property-based testing, all newtypes need `Arbitrary` instances that only generate valid values:
+
+```haskell
+-- test/Generators.hs additions
+
+instance Arbitrary ClientId where
+  arbitrary = ClientId <$> genNonEmptyText
+  shrink (ClientId t) = ClientId <$> filter (not . Text.null) (shrink t)
+
+instance Arbitrary RedirectUri where
+  arbitrary = do
+    scheme <- elements ["https://example.com/", "http://localhost:"]
+    path <- listOf (elements ['a'..'z'])
+    let uri = scheme ++ path
+    pure $ fromJust $ mkRedirectUri (Text.pack uri)
+  shrink = const []  -- Cannot shrink to invalid URIs
+
+instance Arbitrary ClientInfo where
+  arbitrary = ClientInfo
+    <$> arbitrary
+    <*> genNonEmptyList arbitrary  -- NonEmpty RedirectUri
+    <*> arbitrary                   -- Set GrantType (via Bounded/Enum)
+    <*> arbitrary                   -- Set ResponseType
+    <*> arbitrary                   -- ClientAuthMethod
+
+-- Helper
+genNonEmptyText :: Gen Text
+genNonEmptyText = Text.pack <$> listOf1 (elements ['a'..'z'])
+
+genNonEmptyList :: Gen a -> Gen (NonEmpty a)
+genNonEmptyList g = NE.fromList <$> listOf1 g
+```

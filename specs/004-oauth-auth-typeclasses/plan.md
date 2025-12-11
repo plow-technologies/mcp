@@ -120,3 +120,154 @@ test/
 | OAuthStateStore Contract | `specs/004-oauth-auth-typeclasses/contracts/OAuthStateStore.hs` | Typeclass interface specification |
 | AuthBackend Contract | `specs/004-oauth-auth-typeclasses/contracts/AuthBackend.hs` | Typeclass interface specification |
 | Quickstart | `specs/004-oauth-auth-typeclasses/quickstart.md` | Usage examples and integration guide |
+
+---
+
+## Phase 3: Type Unification (mcp-51r)
+
+**Added**: 2025-12-11 | **Blocker**: mcp-51r | **Status**: Planning
+
+### Problem Statement
+
+During implementation, a blocker was discovered (mcp-51r): two incompatible OAuth state type systems exist:
+
+1. **HTTP.hs (legacy)**: Uses `Text` for redirect URIs, grant types, client IDs, etc.
+   - `clientRedirectUris :: [Text]`
+   - `clientGrantTypes :: [Text]`
+   - Simple `Text`-based identifiers throughout
+
+2. **OAuth.Types (new)**: Uses type-safe newtypes with invariants
+   - `clientRedirectUris :: NonEmpty RedirectUri`
+   - `clientGrantTypes :: Set GrantType`
+   - All identifiers wrapped in newtypes (`ClientId`, `AuthCodeId`, etc.)
+
+Full handler migration to typeclass constraints requires type unification first.
+
+### Clarified Decisions (from spec)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Canonical types | OAuth.Types newtypes | Type safety, illegal states unrepresentable |
+| Boundary conversion | Servant `FromHttpApiData`/`ToHttpApiData` instances | Natural boundary, enables property-based round-trip tests |
+| Invalid data handling | Fail at boundary (400) | Parse-don't-validate; no domain errors for structural issues |
+| Migration strategy | Incremental per-handler | Lower risk, continuous integration, each migration testable |
+| PendingAuthorization fields | Same newtypes | Already validated at request parse time |
+
+### New Requirements (FR-018 through FR-021)
+
+- **FR-018**: All OAuth.Types newtypes MUST implement `FromHttpApiData` and `ToHttpApiData`
+- **FR-019**: Round-trip property tests for all `FromHttpApiData`/`ToHttpApiData` instances
+- **FR-020**: `FromJSON` instances reject invalid data at parse time (400, not domain error)
+- **FR-021**: Incremental handler migration with nested beads under mcp-51r
+
+### Implementation Approach
+
+#### Step 1: Add Servant Instances to OAuth.Types
+
+```haskell
+-- In OAuth.Types or a new OAuth.Servant module
+
+instance FromHttpApiData ClientId where
+  parseUrlPiece t
+    | Text.null t = Left "ClientId cannot be empty"
+    | otherwise = Right (ClientId t)
+
+instance ToHttpApiData ClientId where
+  toUrlPiece = unClientId
+
+-- Similar for: AuthCodeId, SessionId, UserId, RefreshTokenId, RedirectUri, Scope
+```
+
+#### Step 2: Update FromJSON Instances with Invariant Checking
+
+```haskell
+-- NonEmpty RedirectUri parsing
+instance FromJSON ClientInfo where
+  parseJSON = withObject "ClientInfo" $ \o -> do
+    name <- o .: "client_name"
+    uris <- o .: "redirect_uris"
+    case nonEmpty uris of
+      Nothing -> fail "redirect_uris must not be empty"
+      Just ne -> ClientInfo name ne <$> ...
+```
+
+#### Step 3: Incremental Handler Migration
+
+Each handler migration is a separate bead under mcp-51r:
+
+| Handler | Current Types | Target Types | Complexity |
+|---------|---------------|--------------|------------|
+| `handleClientRegistration` | `[Text]` redirect URIs | `NonEmpty RedirectUri` | Medium |
+| `handleAuthorize` | `Text` client_id | `ClientId` newtype | Low |
+| `handleToken` | `Text` code, client_id | `AuthCodeId`, `ClientId` | Medium |
+| `handleRefresh` | `Text` refresh_token | `RefreshTokenId` | Low |
+| `handleLogin` | `Text` session_id | `SessionId` | Low |
+| ... (15+ handlers total) | | | |
+
+#### Step 4: Property Tests for Boundary Instances
+
+```haskell
+-- In test/Laws/BoundarySpec.hs
+prop "ClientId round-trip" $ \(cid :: ClientId) ->
+  parseUrlPiece (toUrlPiece cid) === Right cid
+
+prop "RedirectUri round-trip" $ \(uri :: RedirectUri) ->
+  parseUrlPiece (toUrlPiece uri) === Right uri
+
+-- NonEmpty requires custom generator
+prop "NonEmpty RedirectUri FromJSON round-trip" $ \(uris :: NonEmpty RedirectUri) ->
+  decode (encode uris) === Just uris
+```
+
+### Updated Module Organization
+
+```text
+src/MCP/Server/OAuth/
+├── Types.hs           # Newtypes, ADTs, domain entities
+├── Types/
+│   └── Servant.hs     # NEW: FromHttpApiData/ToHttpApiData instances (or in Types.hs)
+├── Store.hs           # OAuthStateStore typeclass
+└── InMemory.hs        # TVar-based implementation
+
+test/
+├── Laws/
+│   ├── OAuthStateStoreSpec.hs
+│   ├── AuthBackendSpec.hs
+│   └── BoundarySpec.hs    # NEW: Round-trip tests for Servant instances
+└── Generators.hs          # Extended: Arbitrary for all newtypes
+```
+
+### Dependencies to Add
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `servant` | (already present) | `FromHttpApiData`, `ToHttpApiData` |
+
+No new dependencies required—Servant instances use existing `servant` package.
+
+### Migration Tracking Structure
+
+```
+mcp-51r (epic): Unify OAuth state types between HTTP.hs and OAuth.Types
+├── mcp-51r.1: Add FromHttpApiData/ToHttpApiData to OAuth.Types newtypes
+├── mcp-51r.2: Add round-trip property tests for boundary instances
+├── mcp-51r.3: Update FromJSON instances to enforce invariants
+├── mcp-51r.4: Migrate handleClientRegistration to newtypes
+├── mcp-51r.5: Migrate handleAuthorize to newtypes
+├── mcp-51r.6: Migrate handleToken to newtypes
+├── ... (one bead per handler)
+└── mcp-51r.N: Remove legacy Text-based types from HTTP.hs
+```
+
+### Constitution Compliance (Phase 3)
+
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. Type-Driven Design | ✅ | Newtypes with invariants (NonEmpty, Set) make illegal states unrepresentable |
+| II. Deep Module Architecture | ✅ | Servant instances in Types module; handlers unchanged except type annotations |
+| III. Denotational Semantics | ✅ | Round-trip laws for all boundary conversions |
+| IV. Total Functions | ✅ | `parseUrlPiece` returns `Either Text a`; no partial functions |
+| V. Pure Core, Impure Shell | ✅ | Boundary conversion is pure; IO only in handler execution |
+| VI. Property-Based Testing | ✅ | FR-019 requires round-trip property tests |
+
+**Gate Status**: PASS - Phase 3 planning complete.

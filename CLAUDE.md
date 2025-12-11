@@ -227,6 +227,7 @@ curl -i http://localhost:8080/mcp
 - N/A (traces emitted to user-provided IOTracer) (003-structured-tracing)
 - Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1) + servant-server 0.19-0.20, servant-auth-server 0.4, jose 0.10-0.11, cryptonite 0.30, stm 2.5, mtl 2.3, aeson 2.1-2.2, generic-lens (to add) (004-oauth-auth-typeclasses)
 - In-memory (TVar-based) for default implementation; typeclass enables PostgreSQL/Redis backends (004-oauth-auth-typeclasses)
+- Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1) + servant-server 0.19-0.20, servant-auth-server 0.4, jose 0.10-0.11, cryptonite 0.30, stm 2.5, mtl 2.3, aeson 2.1-2.2, generic-lens (to add), network-uri (to add) (004-oauth-auth-typeclasses)
 
 ## Recent Changes
 - 002-login-auth-page: Implemented interactive login page with credential authentication
