@@ -83,10 +83,13 @@ import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
 import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), Salt (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
 import MCP.Server.Auth.Backend ()
+
 -- Import AuthBackend instance for AppM
 import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
 import MCP.Server.OAuth.Store ()
+
 -- Import OAuthStateStore instance for AppM
+import MCP.Server.OAuth.Types (ClientAuthMethod (..), GrantType (..), RedirectUri (..), ResponseType (..), mkRedirectUri)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import MCP.Trace.Operation (OperationTrace (..))
@@ -193,10 +196,10 @@ data LoginResult
 -- | Client registration request
 data ClientRegistrationRequest = ClientRegistrationRequest
     { client_name :: Text
-    , redirect_uris :: [Text]
-    , grant_types :: [Text]
-    , response_types :: [Text]
-    , token_endpoint_auth_method :: Text
+    , redirect_uris :: [RedirectUri]
+    , grant_types :: [GrantType]
+    , response_types :: [ResponseType]
+    , token_endpoint_auth_method :: ClientAuthMethod
     }
     deriving (Show, Generic)
 
@@ -208,10 +211,10 @@ data ClientRegistrationResponse = ClientRegistrationResponse
     { client_id :: Text
     , client_secret :: Text -- Empty string for public clients
     , client_name :: Text
-    , redirect_uris :: [Text]
-    , grant_types :: [Text]
-    , response_types :: [Text]
-    , token_endpoint_auth_method :: Text
+    , redirect_uris :: [RedirectUri]
+    , grant_types :: [GrantType]
+    , response_types :: [ResponseType]
+    , token_endpoint_auth_method :: ClientAuthMethod
     }
     deriving (Show, Generic)
 
@@ -221,10 +224,10 @@ instance Aeson.ToJSON ClientRegistrationResponse where
 -- | Client info stored in server
 data ClientInfo = ClientInfo
     { clientName :: Text
-    , clientRedirectUris :: [Text]
-    , clientGrantTypes :: [Text]
-    , clientResponseTypes :: [Text]
-    , clientAuthMethod :: Text
+    , clientRedirectUris :: [RedirectUri]
+    , clientGrantTypes :: [GrantType]
+    , clientResponseTypes :: [ResponseType]
+    , clientAuthMethod :: ClientAuthMethod
     }
     deriving (Show, Generic)
 
@@ -852,8 +855,15 @@ handleAuthorize config tracer oauthStateVar responseType clientId redirectUri co
             throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Unregistered Client" ("Client ID '" <> clientId <> "' is not registered. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     -- T041: Handle invalid redirect_uri - render error page (don't redirect)
-    unless (redirectUri `elem` clientRedirectUris clientInfo) $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "redirect_uri" ("Invalid redirect URI: " <> redirectUri)
+    -- Parse the redirect URI and validate it
+    parsedRedirectUri <- case mkRedirectUri redirectUri of
+        Nothing -> do
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "redirect_uri" ("Invalid redirect URI format: " <> redirectUri)
+            throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Redirect URI" ("The redirect URI '" <> redirectUri <> "' is not a valid URI. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
+        Just uri -> return uri
+
+    unless (parsedRedirectUri `elem` clientRedirectUris clientInfo) $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "redirect_uri" ("Redirect URI not registered: " <> redirectUri)
         throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Redirect URI" ("The redirect URI '" <> redirectUri <> "' is not registered for this client. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     let displayName = clientName clientInfo
