@@ -53,11 +53,13 @@ module MCP.Server.OAuth.Types (
     AuthUser (..),
 ) where
 
+import Control.Monad (forM_, when)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson.Types (Parser)
 import Data.Char (isAsciiLower, isAsciiUpper, isDigit, isHexDigit, isSpace)
-import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty (NonEmpty, nonEmpty)
 import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Time.Clock (UTCTime)
@@ -400,16 +402,39 @@ data AuthorizationCode = AuthorizationCode
     deriving stock (Eq, Show, Generic)
 
 instance FromJSON AuthorizationCode where
-    parseJSON = withObject "AuthorizationCode" $ \v ->
-        AuthorizationCode
-            <$> v .: "auth_code_id"
-            <*> v .: "auth_client_id"
-            <*> v .: "auth_redirect_uri"
-            <*> v .: "auth_code_challenge"
-            <*> v .: "auth_code_challenge_method"
-            <*> v .: "auth_scopes"
-            <*> v .: "auth_user_id"
-            <*> v .: "auth_expiry"
+    parseJSON = withObject "AuthorizationCode" $ \v -> do
+        codeId <- v .: "auth_code_id"
+        -- Validate AuthCodeId is non-empty
+        when (T.null (unAuthCodeId codeId)) $
+            fail "auth_code_id must not be empty"
+
+        clientId <- v .: "auth_client_id"
+        -- Validate ClientId is non-empty
+        when (T.null (unClientId clientId)) $
+            fail "auth_client_id must not be empty"
+
+        redirectUri <- v .: "auth_redirect_uri"
+
+        challengeText <- v .: "auth_code_challenge"
+        challenge <- case mkCodeChallenge challengeText of
+            Just c -> pure c
+            Nothing -> fail "auth_code_challenge must be base64url (43-128 chars)"
+
+        challengeMethod <- v .: "auth_code_challenge_method"
+
+        scopesSet <- v .: "auth_scopes"
+        -- Validate all scopes are valid
+        forM_ (Set.toList scopesSet) $ \scope ->
+            when (T.null (unScope scope) || T.any isSpace (unScope scope)) $
+                fail "auth_scopes must contain valid scopes (non-empty, no whitespace)"
+
+        userId <- v .: "auth_user_id"
+        when (T.null (unUserId userId)) $
+            fail "auth_user_id must not be empty"
+
+        expiry <- v .: "auth_expiry"
+
+        pure $ AuthorizationCode codeId clientId redirectUri challenge challengeMethod scopesSet userId expiry
 
 instance ToJSON AuthorizationCode where
     toJSON AuthorizationCode{..} =
@@ -435,13 +460,19 @@ data ClientInfo = ClientInfo
     deriving stock (Eq, Show, Generic)
 
 instance FromJSON ClientInfo where
-    parseJSON = withObject "ClientInfo" $ \v ->
-        ClientInfo
-            <$> v .: "client_name"
-            <*> v .: "client_redirect_uris"
-            <*> v .: "client_grant_types"
-            <*> v .: "client_response_types"
-            <*> v .: "client_auth_method"
+    parseJSON = withObject "ClientInfo" $ \v -> do
+        name <- v .: "client_name"
+
+        uriList <- v .: "client_redirect_uris"
+        uris <- case nonEmpty uriList of
+            Nothing -> fail "client_redirect_uris must contain at least one URI"
+            Just ne -> pure ne
+
+        grantTypes <- v .: "client_grant_types"
+        responseTypes <- v .: "client_response_types"
+        authMethod <- v .: "client_auth_method"
+
+        pure $ ClientInfo name uris grantTypes responseTypes authMethod
 
 instance ToJSON ClientInfo where
     toJSON ClientInfo{..} =
@@ -467,16 +498,35 @@ data PendingAuthorization = PendingAuthorization
     deriving stock (Eq, Show, Generic)
 
 instance FromJSON PendingAuthorization where
-    parseJSON = withObject "PendingAuthorization" $ \v ->
-        PendingAuthorization
-            <$> v .: "pending_client_id"
-            <*> v .: "pending_redirect_uri"
-            <*> v .: "pending_code_challenge"
-            <*> v .: "pending_code_challenge_method"
-            <*> v .:? "pending_scope"
-            <*> v .:? "pending_state"
-            <*> (v .:? "pending_resource" >>= traverse parseURIText)
-            <*> v .: "pending_created_at"
+    parseJSON = withObject "PendingAuthorization" $ \v -> do
+        clientId <- v .: "pending_client_id"
+        -- Validate ClientId is non-empty
+        when (T.null (unClientId clientId)) $
+            fail "pending_client_id must not be empty"
+
+        redirectUri <- v .: "pending_redirect_uri"
+
+        challengeText <- v .: "pending_code_challenge"
+        challenge <- case mkCodeChallenge challengeText of
+            Just c -> pure c
+            Nothing -> fail "pending_code_challenge must be base64url (43-128 chars)"
+
+        challengeMethod <- v .: "pending_code_challenge_method"
+
+        scopeMaybe <- v .:? "pending_scope"
+        -- Validate scopes if present
+        case scopeMaybe of
+            Just scopesSet ->
+                forM_ (Set.toList scopesSet) $ \scope ->
+                    when (T.null (unScope scope) || T.any isSpace (unScope scope)) $
+                        fail "pending_scope must contain valid scopes (non-empty, no whitespace)"
+            Nothing -> pure ()
+
+        state <- v .:? "pending_state"
+        resource <- v .:? "pending_resource" >>= traverse parseURIText
+        createdAt <- v .: "pending_created_at"
+
+        pure $ PendingAuthorization clientId redirectUri challenge challengeMethod scopeMaybe state resource createdAt
       where
         parseURIText :: Text -> Parser URI
         parseURIText t = case parseURI (T.unpack t) of
