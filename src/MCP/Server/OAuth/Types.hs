@@ -266,6 +266,14 @@ mkCodeChallenge t
             || c == '-'
             || c == '_'
 
+instance FromHttpApiData CodeChallenge where
+    parseUrlPiece t = case mkCodeChallenge t of
+        Just cc -> Right cc
+        Nothing -> Left "CodeChallenge must be base64url (43-128 chars)"
+
+instance ToHttpApiData CodeChallenge where
+    toUrlPiece = unCodeChallenge
+
 -- -----------------------------------------------------------------------------
 -- ADTs
 -- -----------------------------------------------------------------------------

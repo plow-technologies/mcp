@@ -77,6 +77,7 @@ import Servant.API (Accept (..), FormUrlEncoded, Get, Header, Headers, JSON, Mim
 import Servant.Auth.Server (Auth, AuthResult (..), FromJWT, JWT, JWTSettings, ToJWT, defaultCookieSettings, defaultJWTSettings, generateKey, makeJWT)
 import Servant.Server (err400, err401, err500, errBody, errHeaders)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
+import Web.HttpApiData (toUrlPiece)
 
 import Control.Monad (unless, when)
 import MCP.Protocol
@@ -89,7 +90,7 @@ import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
-import MCP.Server.OAuth.Types (ClientAuthMethod (..), GrantType (..), RedirectUri (..), ResponseType (..), mkRedirectUri)
+import MCP.Server.OAuth.Types (ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), GrantType (..), RedirectUri (..), ResponseType (..))
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import MCP.Trace.Operation (OperationTrace (..))
@@ -294,11 +295,11 @@ type OAuthAPI =
             :> ReqBody '[JSON] ClientRegistrationRequest
             :> Post '[JSON] ClientRegistrationResponse
         :<|> "authorize"
-            :> QueryParam' '[Required] "response_type" Text
-            :> QueryParam' '[Required] "client_id" Text
-            :> QueryParam' '[Required] "redirect_uri" Text
-            :> QueryParam' '[Required] "code_challenge" Text
-            :> QueryParam' '[Required] "code_challenge_method" Text
+            :> QueryParam' '[Required] "response_type" ResponseType
+            :> QueryParam' '[Required] "client_id" ClientId
+            :> QueryParam' '[Required] "redirect_uri" RedirectUri
+            :> QueryParam' '[Required] "code_challenge" CodeChallenge
+            :> QueryParam' '[Required] "code_challenge_method" CodeChallengeMethod
             :> QueryParam "scope" Text
             :> QueryParam "state" Text
             :> QueryParam "resource" Text
@@ -827,62 +828,60 @@ handleRegister config tracer oauthStateVar (ClientRegistrationRequest reqName re
             }
 
 -- | Handle OAuth authorize endpoint - now returns login page HTML
-handleAuthorize :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> Text -> Text -> Text -> Text -> Text -> Maybe Text -> Maybe Text -> Maybe Text -> Handler (Headers '[Header "Set-Cookie" Text] Text)
+handleAuthorize :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> ResponseType -> ClientId -> RedirectUri -> CodeChallenge -> CodeChallengeMethod -> Maybe Text -> Maybe Text -> Maybe Text -> Handler (Headers '[Header "Set-Cookie" Text] Text)
 handleAuthorize config tracer oauthStateVar responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
     let oauthTracer = contramap HTTPOAuth tracer
+        responseTypeText = toUrlPiece responseType
+        clientIdText = unClientId clientId
+        redirectUriText = toUrlPiece redirectUri
+        codeChallengeMethodText = toUrlPiece codeChallengeMethod
 
     -- Log resource parameter for RFC8707 support
     liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "authorize endpoint"
 
     -- T037: Validate response_type (return HTML error page instead of JSON)
-    when (responseType /= "code") $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "response_type" ("Unsupported response type: " <> responseType)
+    when (responseType /= ResponseCode) $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "response_type" ("Unsupported response type: " <> responseTypeText)
         throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Unsupported Response Type" "Only 'code' response type is supported. Please contact the application developer.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     -- T037: Validate code_challenge_method (return HTML error page instead of JSON)
-    when (codeChallengeMethod /= "S256") $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "code_challenge_method" ("Unsupported method: " <> codeChallengeMethod)
+    when (codeChallengeMethod /= S256) $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "code_challenge_method" ("Unsupported method: " <> codeChallengeMethodText)
         throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Request" "Only 'S256' code challenge method is supported. Please contact the application developer.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     -- Look up client to get client name for display
     oauthState <- liftIO $ readTVarIO oauthStateVar
 
     -- T040: Handle unregistered client_id - render error page (don't redirect - can't trust redirect_uri)
-    clientInfo <- case Map.lookup clientId (registeredClients oauthState) of
+    clientInfo <- case Map.lookup clientIdText (registeredClients oauthState) of
         Just ci -> return ci
         Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "client_id" ("Unregistered client: " <> clientId)
-            throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Unregistered Client" ("Client ID '" <> clientId <> "' is not registered. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "client_id" ("Unregistered client: " <> clientIdText)
+            throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Unregistered Client" ("Client ID '" <> clientIdText <> "' is not registered. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     -- T041: Handle invalid redirect_uri - render error page (don't redirect)
-    -- Parse the redirect URI and validate it
-    parsedRedirectUri <- case mkRedirectUri redirectUri of
-        Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "redirect_uri" ("Invalid redirect URI format: " <> redirectUri)
-            throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Redirect URI" ("The redirect URI '" <> redirectUri <> "' is not a valid URI. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
-        Just uri -> return uri
-
-    unless (parsedRedirectUri `elem` clientRedirectUris clientInfo) $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "redirect_uri" ("Redirect URI not registered: " <> redirectUri)
-        throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Redirect URI" ("The redirect URI '" <> redirectUri <> "' is not registered for this client. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
+    -- Validate redirect URI is in registered list (already parsed by FromHttpApiData)
+    unless (redirectUri `elem` clientRedirectUris clientInfo) $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "redirect_uri" ("Redirect URI not registered: " <> redirectUriText)
+        throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Redirect URI" ("The redirect URI '" <> redirectUriText <> "' is not registered for this client. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     let displayName = clientName clientInfo
         scopeList = maybe [] (T.splitOn " ") mScope
 
     -- Emit authorization request trace
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationRequest clientId scopeList (isJust mState)
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationRequest clientIdText scopeList (isJust mState)
 
     -- Generate session ID
     sessionId <- liftIO $ UUID.toText <$> UUID.nextRandom
     currentTime <- liftIO getCurrentTime
 
-    -- Create pending authorization
+    -- Create pending authorization (using old PendingAuthorization from HTTP.hs)
     let pending =
             PendingAuthorization
-                { pendingClientId = clientId
-                , pendingRedirectUri = redirectUri
-                , pendingCodeChallenge = codeChallenge
-                , pendingCodeChallengeMethod = codeChallengeMethod
+                { pendingClientId = clientIdText
+                , pendingRedirectUri = redirectUriText
+                , pendingCodeChallenge = unCodeChallenge codeChallenge
+                , pendingCodeChallengeMethod = codeChallengeMethodText
                 , pendingScope = mScope
                 , pendingState = mState
                 , pendingResource = mResource
