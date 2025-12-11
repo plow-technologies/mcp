@@ -54,6 +54,7 @@ module MCP.Server.Auth (
     ProtectedResourceAuthConfig (..),
 
     -- * Legacy Credential Management (DEPRECATED - use Auth.Backend instead)
+
     -- These are kept for backward compatibility but will be removed in a future version
     validateCredential,
 ) where
@@ -82,6 +83,7 @@ import Network.HTTP.Simple (addRequestHeader, getResponseBody, httpJSON, parseRe
 import Plow.Logging (IOTracer)
 import System.Random (newStdGen, randomRs)
 
+import MCP.Server.OAuth.Types (CodeChallenge (..), CodeVerifier (..))
 import MCP.Trace.OAuth (OAuthTrace (..))
 
 -- | OAuth grant types supported by MCP
@@ -137,6 +139,7 @@ data OAuthConfig = OAuthConfig
     , loginSessionExpirySeconds :: Int
     }
     deriving (Generic)
+
 -- Note: No Show instance because CredentialStore contains ScrubbedBytes (no Show)
 
 -- | PKCE challenge data
@@ -377,8 +380,8 @@ generateCodeChallenge verifier =
      in TE.decodeUtf8 $ B64URL.encodeUnpadded challengeBytes
 
 -- | Validate PKCE code verifier against challenge
-validateCodeVerifier :: Text -> Text -> Bool
-validateCodeVerifier verifier challenge = generateCodeChallenge verifier == challenge
+validateCodeVerifier :: CodeVerifier -> CodeChallenge -> Bool
+validateCodeVerifier (CodeVerifier verifier) (CodeChallenge challenge) = generateCodeChallenge verifier == challenge
 
 -- | Discover OAuth metadata from a well-known endpoint
 discoverOAuthMetadata :: (MonadIO m) => IOTracer OAuthTrace -> Text -> m (Either String OAuthMetadata)
@@ -400,9 +403,10 @@ newtype ProtectedResourceAuthConfig = ProtectedResourceAuthConfig
     }
     deriving (Show, Generic)
 
--- | Validate a credential against the store using constant-time comparison
--- DEPRECATED: This is a legacy wrapper for backward compatibility
--- Use MCP.Server.Auth.Backend.validateCredentials instead
+{- | Validate a credential against the store using constant-time comparison
+DEPRECATED: This is a legacy wrapper for backward compatibility
+Use MCP.Server.Auth.Backend.validateCredentials instead
+-}
 validateCredential :: CredentialStore -> Text -> Text -> Bool
 validateCredential store username password =
     case mkUsername username of

@@ -77,7 +77,7 @@ import Servant.API (Accept (..), FormUrlEncoded, Get, Header, Headers, JSON, Mim
 import Servant.Auth.Server (Auth, AuthResult (..), FromJWT, JWT, JWTSettings, ToJWT, defaultCookieSettings, defaultJWTSettings, generateKey, makeJWT)
 import Servant.Server (err400, err401, err500, errBody, errHeaders)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
-import Web.HttpApiData (toUrlPiece)
+import Web.HttpApiData (parseUrlPiece, toUrlPiece)
 
 import Control.Monad (unless, when)
 import MCP.Protocol
@@ -90,7 +90,7 @@ import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
-import MCP.Server.OAuth.Types (ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), GrantType (..), RedirectUri (..), ResponseType (..), SessionId, mkSessionId, unSessionId)
+import MCP.Server.OAuth.Types (AuthCodeId (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), RedirectUri (..), ResponseType (..), SessionId, mkSessionId, unSessionId)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import MCP.Trace.Operation (OperationTrace (..))
@@ -1042,11 +1042,15 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
 handleToken :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> [(Text, Text)] -> Handler TokenResponse
 handleToken jwtSettings config tracer oauthStateVar params = do
     let paramMap = Map.fromList params
+    -- Parse grant_type from Text to GrantType newtype
     case Map.lookup "grant_type" paramMap of
-        Just "authorization_code" -> handleAuthCodeGrant jwtSettings config tracer oauthStateVar paramMap
-        Just "refresh_token" -> handleRefreshTokenGrant jwtSettings config tracer oauthStateVar paramMap
-        Just _other -> throwError err400{errBody = encode $ object ["error" .= ("unsupported_grant_type" :: Text)]}
         Nothing -> throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text), "error_description" .= ("Missing grant_type" :: Text)]}
+        Just grantTypeText -> case parseUrlPiece grantTypeText of
+            Left _err -> throwError err400{errBody = encode $ object ["error" .= ("unsupported_grant_type" :: Text)]}
+            Right grantType -> case grantType of
+                GrantAuthorizationCode -> handleAuthCodeGrant jwtSettings config tracer oauthStateVar paramMap
+                GrantRefreshToken -> handleRefreshTokenGrant jwtSettings config tracer oauthStateVar paramMap
+                GrantClientCredentials -> throwError err400{errBody = encode $ object ["error" .= ("unsupported_grant_type" :: Text)]}
 
 -- | Handle authorization code grant
 handleAuthCodeGrant :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> Map Text Text -> Handler TokenResponse
@@ -1057,21 +1061,31 @@ handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
     let mResource = Map.lookup "resource" params
     liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "token request (auth code)"
 
+    -- Parse code from Text to AuthCodeId
     code <- case Map.lookup "code" params of
-        Just c -> return c
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing authorization code"
             throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
+        Just codeText -> case parseUrlPiece codeText of
+            Left err -> do
+                liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" ("Invalid authorization code: " <> err)
+                throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
+            Right authCodeId -> return authCodeId
 
+    -- Parse code_verifier from Text to CodeVerifier
     codeVerifier <- case Map.lookup "code_verifier" params of
-        Just v -> return v
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing code_verifier"
             throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
+        Just verifierText -> case parseUrlPiece verifierText of
+            Left err -> do
+                liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" ("Invalid code_verifier: " <> err)
+                throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
+            Right verifier -> return verifier
 
-    -- Look up authorization code
+    -- Look up authorization code (unwrap AuthCodeId for map lookup)
     oauthState <- liftIO $ readTVarIO oauthStateVar
-    authCode <- case Map.lookup code (authCodes oauthState) of
+    authCode <- case Map.lookup (unAuthCodeId code) (authCodes oauthState) of
         Just ac -> return ac
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
@@ -1084,9 +1098,11 @@ handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Authorization code expired" :: Text)]}
 
-    -- Verify PKCE
-    let pkceValid = validateCodeVerifier codeVerifier (authCodeChallenge authCode)
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthPKCEValidation codeVerifier (authCodeChallenge authCode) pkceValid
+    -- Verify PKCE (validateCodeVerifier now uses newtypes, but authCodeChallenge is still Text)
+    -- We need to wrap authCodeChallenge as CodeChallenge
+    let authChallenge = CodeChallenge (authCodeChallenge authCode)
+        pkceValid = validateCodeVerifier codeVerifier authChallenge
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthPKCEValidation (unCodeVerifier codeVerifier) (authCodeChallenge authCode) pkceValid
     unless pkceValid $ do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Invalid code verifier" :: Text)]}
@@ -1106,10 +1122,10 @@ handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
     accessTokenText <- generateJWTAccessToken user jwtSettings
     refreshToken <- liftIO $ generateRefreshTokenWithConfig config
 
-    -- Store tokens
+    -- Store tokens (unwrap AuthCodeId for map operations)
     liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
         s
-            { authCodes = Map.delete code (authCodes s)
+            { authCodes = Map.delete (unAuthCodeId code) (authCodes s)
             , accessTokens = Map.insert accessTokenText user (accessTokens s)
             , refreshTokens = Map.insert refreshToken (accessTokenText, user) (refreshTokens s)
             }

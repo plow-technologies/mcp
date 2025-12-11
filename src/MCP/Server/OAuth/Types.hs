@@ -39,6 +39,8 @@ module MCP.Server.OAuth.Types (
     mkScope,
     CodeChallenge (..),
     mkCodeChallenge,
+    CodeVerifier (..),
+    mkCodeVerifier,
 
     -- * ADTs
     CodeChallengeMethod (..),
@@ -273,6 +275,37 @@ instance FromHttpApiData CodeChallenge where
 
 instance ToHttpApiData CodeChallenge where
     toUrlPiece = unCodeChallenge
+
+-- | PKCE code verifier
+newtype CodeVerifier = CodeVerifier {unCodeVerifier :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- | Smart constructor for CodeVerifier (unreserved chars per RFC 7636, 43-128 chars)
+mkCodeVerifier :: Text -> Maybe CodeVerifier
+mkCodeVerifier t
+    | len < 43 || len > 128 = Nothing
+    | not (T.all isUnreservedChar t) = Nothing
+    | otherwise = Just (CodeVerifier t)
+  where
+    len = T.length t
+    -- RFC 7636: unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
+    isUnreservedChar c =
+        isAsciiUpper c
+            || isAsciiLower c
+            || isDigit c
+            || c == '-'
+            || c == '.'
+            || c == '_'
+            || c == '~'
+
+instance FromHttpApiData CodeVerifier where
+    parseUrlPiece t = case mkCodeVerifier t of
+        Just cv -> Right cv
+        Nothing -> Left "CodeVerifier must contain unreserved chars (43-128 chars)"
+
+instance ToHttpApiData CodeVerifier where
+    toUrlPiece = unCodeVerifier
 
 -- -----------------------------------------------------------------------------
 -- ADTs
