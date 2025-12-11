@@ -90,7 +90,7 @@ import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
-import MCP.Server.OAuth.Types (AuthCodeId (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), SessionId, mkSessionId, unSessionId)
+import MCP.Server.OAuth.Types (AuthCodeId (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), SessionId (..), mkSessionId, unSessionId)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import MCP.Trace.Operation (OperationTrace (..))
@@ -130,11 +130,11 @@ data AuthorizationCode = AuthorizationCode
 
 -- | OAuth server state
 data OAuthState = OAuthState
-    { authCodes :: Map Text AuthorizationCode -- code -> AuthorizationCode
-    , accessTokens :: Map Text AuthUser -- token -> user
-    , refreshTokens :: Map Text (Text, AuthUser) -- refresh_token -> (access_token, user)
-    , registeredClients :: Map Text ClientInfo -- client_id -> ClientInfo
-    , pendingAuthorizations :: Map Text PendingAuthorization -- session_id -> pending authorization
+    { authCodes :: Map AuthCodeId AuthorizationCode -- code -> AuthorizationCode
+    , accessTokens :: Map Text AuthUser -- token -> user (still Text, will be AccessTokenId later)
+    , refreshTokens :: Map RefreshTokenId (ClientId, AuthUser) -- refresh_token -> (client_id, user)
+    , registeredClients :: Map ClientId ClientInfo -- client_id -> ClientInfo
+    , pendingAuthorizations :: Map SessionId PendingAuthorization -- session_id -> pending authorization
     }
     deriving (Show, Generic)
 
@@ -810,7 +810,8 @@ handleRegister :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> C
 handleRegister config tracer oauthStateVar (ClientRegistrationRequest reqName reqRedirects reqGrants reqResponses reqAuth) = do
     -- Generate client ID
     let prefix = maybe "client_" clientIdPrefix (httpOAuthConfig config)
-    clientId <- liftIO $ (prefix <>) <$> generateAuthCode
+    clientIdText <- liftIO $ (prefix <>) <$> generateAuthCode
+    let clientId = ClientId clientIdText
 
     -- Store client info
     let clientInfo =
@@ -827,11 +828,11 @@ handleRegister config tracer oauthStateVar (ClientRegistrationRequest reqName re
 
     -- Emit trace
     let oauthTracer = contramap HTTPOAuth tracer
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthClientRegistration clientId reqName
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthClientRegistration clientIdText reqName
 
     return
         ClientRegistrationResponse
-            { client_id = clientId
+            { client_id = clientIdText
             , client_secret = "" -- Empty string for public clients
             , client_name = reqName
             , redirect_uris = reqRedirects
@@ -866,7 +867,7 @@ handleAuthorize config tracer oauthStateVar responseType clientId redirectUri co
     oauthState <- liftIO $ readTVarIO oauthStateVar
 
     -- T040: Handle unregistered client_id - render error page (don't redirect - can't trust redirect_uri)
-    clientInfo <- case Map.lookup clientIdText (registeredClients oauthState) of
+    clientInfo <- case Map.lookup clientId (registeredClients oauthState) of
         Just ci -> return ci
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "client_id" ("Unregistered client: " <> clientIdText)
@@ -885,7 +886,8 @@ handleAuthorize config tracer oauthStateVar responseType clientId redirectUri co
     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationRequest clientIdText scopeList (isJust mState)
 
     -- Generate session ID
-    sessionId <- liftIO $ UUID.toText <$> UUID.nextRandom
+    sessionIdText <- liftIO $ UUID.toText <$> UUID.nextRandom
+    let sessionId = SessionId sessionIdText
     currentTime <- liftIO getCurrentTime
 
     -- Create pending authorization (using old PendingAuthorization from HTTP.hs)
@@ -906,13 +908,13 @@ handleAuthorize config tracer oauthStateVar responseType clientId redirectUri co
         s{pendingAuthorizations = Map.insert sessionId pending (pendingAuthorizations s)}
 
     -- Emit login page served trace
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginPageServed sessionId
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginPageServed sessionIdText
 
     -- Build session cookie
     let sessionExpirySeconds = maybe 600 loginSessionExpirySeconds (httpOAuthConfig config)
-        cookieValue = "mcp_session=" <> sessionId <> "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" <> T.pack (show sessionExpirySeconds)
+        cookieValue = "mcp_session=" <> sessionIdText <> "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" <> T.pack (show sessionExpirySeconds)
         scopes = fromMaybe "default access" mScope
-        loginHtml = renderLoginPage displayName scopes mResource sessionId
+        loginHtml = renderLoginPage displayName scopes mResource sessionIdText
 
     return $ addHeader cookieValue loginHtml
 
@@ -949,9 +951,9 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
                     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "Session cookie mismatch"
                     throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Cookies Required" "Session cookie mismatch. Please enable cookies and try again.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
-    -- Look up pending authorization (pendingAuthorizations is still Text-keyed)
+    -- Look up pending authorization
     oauthState <- liftIO $ readTVarIO oauthStateVar
-    pending <- case Map.lookup (unSessionId sessionId) (pendingAuthorizations oauthState) of
+    pending <- case Map.lookup sessionId (pendingAuthorizations oauthState) of
         Just p -> return p
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "session" ("Session not found: " <> unSessionId sessionId)
@@ -981,7 +983,7 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
 
             -- Remove pending authorization
             liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
-                s{pendingAuthorizations = Map.delete (unSessionId sessionId) (pendingAuthorizations s)}
+                s{pendingAuthorizations = Map.delete sessionId (pendingAuthorizations s)}
 
             return $ addHeader redirectUrl $ addHeader clearCookie NoContent
         else do
@@ -1020,10 +1022,11 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
                                 }
 
                     -- Store authorization code and remove pending authorization
+                    let authCodeId = AuthCodeId code
                     liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
                         s
-                            { authCodes = Map.insert code authCode (authCodes s)
-                            , pendingAuthorizations = Map.delete (unSessionId sessionId) (pendingAuthorizations s)
+                            { authCodes = Map.insert authCodeId authCode (authCodes s)
+                            , pendingAuthorizations = Map.delete sessionId (pendingAuthorizations s)
                             }
 
                     -- Build redirect URL with code
@@ -1083,9 +1086,9 @@ handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
                 throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
             Right verifier -> return verifier
 
-    -- Look up authorization code (unwrap AuthCodeId for map lookup)
+    -- Look up authorization code
     oauthState <- liftIO $ readTVarIO oauthStateVar
-    authCode <- case Map.lookup (unAuthCodeId code) (authCodes oauthState) of
+    authCode <- case Map.lookup code (authCodes oauthState) of
         Just ac -> return ac
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
@@ -1120,14 +1123,16 @@ handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
 
     -- Generate tokens
     accessTokenText <- generateJWTAccessToken user jwtSettings
-    refreshToken <- liftIO $ generateRefreshTokenWithConfig config
+    refreshTokenText <- liftIO $ generateRefreshTokenWithConfig config
+    let refreshToken = RefreshTokenId refreshTokenText
+        clientId = ClientId (authClientId authCode)
 
-    -- Store tokens (unwrap AuthCodeId for map operations)
+    -- Store tokens
     liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
         s
-            { authCodes = Map.delete (unAuthCodeId code) (authCodes s)
+            { authCodes = Map.delete code (authCodes s)
             , accessTokens = Map.insert accessTokenText user (accessTokens s)
-            , refreshTokens = Map.insert refreshToken (accessTokenText, user) (refreshTokens s)
+            , refreshTokens = Map.insert refreshToken (clientId, user) (refreshTokens s)
             }
 
     -- Emit successful token exchange trace
@@ -1138,7 +1143,7 @@ handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
             { access_token = accessTokenText
             , token_type = "Bearer"
             , expires_in = Just $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
-            , refresh_token = Just refreshToken
+            , refresh_token = Just refreshTokenText
             , scope = if null (authScopes authCode) then Nothing else Just (T.intercalate " " (authScopes authCode))
             }
 
@@ -1162,9 +1167,9 @@ handleRefreshTokenGrant jwtSettings config tracer oauthStateVar params = do
                 throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
             Right rtId -> return rtId
 
-    -- Look up refresh token (unwrap RefreshTokenId for map lookup)
+    -- Look up refresh token
     oauthState <- liftIO $ readTVarIO oauthStateVar
-    (oldAccessToken, user) <- case Map.lookup (unRefreshTokenId refreshTokenId) (refreshTokens oauthState) of
+    (clientId, user) <- case Map.lookup refreshTokenId (refreshTokens oauthState) of
         Just info -> return info
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenRefresh False
@@ -1173,11 +1178,11 @@ handleRefreshTokenGrant jwtSettings config tracer oauthStateVar params = do
     -- Generate new JWT access token
     newAccessTokenText <- generateJWTAccessToken user jwtSettings
 
-    -- Update tokens
+    -- Update tokens (keep same refresh token, update with new client/user association)
     liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
         s
-            { accessTokens = Map.insert newAccessTokenText user $ Map.delete oldAccessToken (accessTokens s)
-            , refreshTokens = Map.insert (unRefreshTokenId refreshTokenId) (newAccessTokenText, user) (refreshTokens s)
+            { accessTokens = Map.insert newAccessTokenText user (accessTokens s)
+            , refreshTokens = Map.insert refreshTokenId (clientId, user) (refreshTokens s)
             }
 
     -- Emit successful token refresh trace
