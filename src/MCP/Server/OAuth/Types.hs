@@ -1,0 +1,414 @@
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
+
+{- |
+Module      : MCP.Server.OAuth.Types
+Description : OAuth 2.1 domain types for MCP server
+Copyright   : (C) 2025 Matthias Pall Gissurarson
+License     : MIT
+Maintainer  : mpg@mpg.is
+Stability   : experimental
+Portability : GHC
+
+This module provides type-safe OAuth 2.1 domain types with smart constructors
+for validation. These types form the foundation for the OAuth typeclass
+refactoring.
+-}
+module MCP.Server.OAuth.Types (
+    -- * Identity Newtypes
+    AuthCodeId (..),
+    mkAuthCodeId,
+    ClientId (..),
+    mkClientId,
+    SessionId (..),
+    mkSessionId,
+    AccessTokenId (..),
+    RefreshTokenId (..),
+    mkRefreshTokenId,
+    UserId (..),
+    mkUserId,
+
+    -- * Value Newtypes
+    RedirectUri (..),
+    mkRedirectUri,
+    Scope (..),
+    mkScope,
+    CodeChallenge (..),
+    mkCodeChallenge,
+
+    -- * ADTs
+    CodeChallengeMethod (..),
+    GrantType (..),
+    ResponseType (..),
+    ClientAuthMethod (..),
+
+    -- * Domain Entities
+    AuthorizationCode (..),
+    ClientInfo (..),
+    PendingAuthorization (..),
+    AuthUser (..),
+) where
+
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
+import Data.Aeson.Types (Parser)
+import Data.Char (isAsciiLower, isAsciiUpper, isDigit, isHexDigit, isSpace)
+import Data.List.NonEmpty (NonEmpty)
+import Data.Set (Set)
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Time.Clock (UTCTime)
+import GHC.Generics (Generic)
+import Network.URI (URI, parseURI, uriScheme)
+
+-- -----------------------------------------------------------------------------
+-- Identity Newtypes
+-- -----------------------------------------------------------------------------
+
+-- | Authorization code identifier
+newtype AuthCodeId = AuthCodeId {unAuthCodeId :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- | Smart constructor for AuthCodeId
+mkAuthCodeId :: Text -> Maybe AuthCodeId
+mkAuthCodeId t
+    | T.null t = Nothing
+    | otherwise = Just (AuthCodeId t)
+
+-- | OAuth client identifier
+newtype ClientId = ClientId {unClientId :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- | Smart constructor for ClientId
+mkClientId :: Text -> Maybe ClientId
+mkClientId t
+    | T.null t = Nothing
+    | otherwise = Just (ClientId t)
+
+-- | Session identifier for pending authorizations
+newtype SessionId = SessionId {unSessionId :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- | Smart constructor for SessionId (validates UUID format)
+mkSessionId :: Text -> Maybe SessionId
+mkSessionId t
+    | isValidUUID t = Just (SessionId t)
+    | otherwise = Nothing
+  where
+    -- Check for UUID format: 8-4-4-4-12 hex pattern
+    isValidUUID uuid =
+        let parts = T.splitOn "-" uuid
+         in case parts of
+                [p1, p2, p3, p4, p5]
+                    | T.length p1 == 8
+                        && T.length p2 == 4
+                        && T.length p3 == 4
+                        && T.length p4 == 4
+                        && T.length p5 == 12
+                        && all (T.all isHexDigit) parts ->
+                        True
+                _ -> False
+
+-- | Access token identifier (JWT-generated, no smart constructor needed)
+newtype AccessTokenId = AccessTokenId {unAccessTokenId :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- | Refresh token identifier
+newtype RefreshTokenId = RefreshTokenId {unRefreshTokenId :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- | Smart constructor for RefreshTokenId
+mkRefreshTokenId :: Text -> Maybe RefreshTokenId
+mkRefreshTokenId t
+    | T.null t = Nothing
+    | otherwise = Just (RefreshTokenId t)
+
+-- | User identifier
+newtype UserId = UserId {unUserId :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- | Smart constructor for UserId
+mkUserId :: Text -> Maybe UserId
+mkUserId t
+    | T.null t = Nothing
+    | otherwise = Just (UserId t)
+
+-- -----------------------------------------------------------------------------
+-- Value Newtypes
+-- -----------------------------------------------------------------------------
+
+-- | OAuth redirect URI
+newtype RedirectUri = RedirectUri {unRedirectUri :: URI}
+    deriving stock (Eq, Ord, Show, Generic)
+
+instance FromJSON RedirectUri where
+    parseJSON = withText "RedirectUri" $ \t ->
+        case mkRedirectUri t of
+            Just uri -> pure uri
+            Nothing -> fail $ "Invalid redirect URI: " ++ T.unpack t
+
+instance ToJSON RedirectUri where
+    toJSON (RedirectUri uri) = toJSON (show uri)
+
+-- | Smart constructor for RedirectUri (validates https:// or http://localhost)
+mkRedirectUri :: Text -> Maybe RedirectUri
+mkRedirectUri t = do
+    uri <- parseURI (T.unpack t)
+    let scheme = uriScheme uri
+    -- Allow https:// or http://localhost for development
+    if scheme == "https:"
+        || (scheme == "http:" && ("localhost" `T.isInfixOf` t || "127.0.0.1" `T.isInfixOf` t))
+        then Just (RedirectUri uri)
+        else Nothing
+
+-- | OAuth scope value
+newtype Scope = Scope {unScope :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- | Smart constructor for Scope (non-empty, no whitespace)
+mkScope :: Text -> Maybe Scope
+mkScope t
+    | T.null t = Nothing
+    | T.any isSpace t = Nothing
+    | otherwise = Just (Scope t)
+
+-- | PKCE code challenge
+newtype CodeChallenge = CodeChallenge {unCodeChallenge :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- | Smart constructor for CodeChallenge (base64url charset, 43-128 chars)
+mkCodeChallenge :: Text -> Maybe CodeChallenge
+mkCodeChallenge t
+    | len < 43 || len > 128 = Nothing
+    | not (T.all isBase64UrlChar t) = Nothing
+    | otherwise = Just (CodeChallenge t)
+  where
+    len = T.length t
+    isBase64UrlChar c =
+        isAsciiUpper c
+            || isAsciiLower c
+            || isDigit c
+            || c == '-'
+            || c == '_'
+
+-- -----------------------------------------------------------------------------
+-- ADTs
+-- -----------------------------------------------------------------------------
+
+-- | PKCE code challenge method
+data CodeChallengeMethod
+    = S256
+    | Plain
+    deriving stock (Eq, Ord, Show, Generic)
+
+instance FromJSON CodeChallengeMethod where
+    parseJSON = withText "CodeChallengeMethod" $ \case
+        "S256" -> pure S256
+        "plain" -> pure Plain
+        other -> fail $ "Invalid code_challenge_method: " ++ T.unpack other
+
+instance ToJSON CodeChallengeMethod where
+    toJSON S256 = toJSON ("S256" :: Text)
+    toJSON Plain = toJSON ("plain" :: Text)
+
+-- | OAuth grant type
+data GrantType
+    = GrantAuthorizationCode
+    | GrantRefreshToken
+    | GrantClientCredentials
+    deriving stock (Eq, Ord, Show, Generic)
+
+instance FromJSON GrantType where
+    parseJSON = withText "GrantType" $ \case
+        "authorization_code" -> pure GrantAuthorizationCode
+        "refresh_token" -> pure GrantRefreshToken
+        "client_credentials" -> pure GrantClientCredentials
+        other -> fail $ "Invalid grant_type: " ++ T.unpack other
+
+instance ToJSON GrantType where
+    toJSON GrantAuthorizationCode = toJSON ("authorization_code" :: Text)
+    toJSON GrantRefreshToken = toJSON ("refresh_token" :: Text)
+    toJSON GrantClientCredentials = toJSON ("client_credentials" :: Text)
+
+-- | OAuth response type
+data ResponseType
+    = ResponseCode
+    | ResponseToken
+    deriving stock (Eq, Ord, Show, Generic)
+
+instance FromJSON ResponseType where
+    parseJSON = withText "ResponseType" $ \case
+        "code" -> pure ResponseCode
+        "token" -> pure ResponseToken
+        other -> fail $ "Invalid response_type: " ++ T.unpack other
+
+instance ToJSON ResponseType where
+    toJSON ResponseCode = toJSON ("code" :: Text)
+    toJSON ResponseToken = toJSON ("token" :: Text)
+
+-- | Client authentication method
+data ClientAuthMethod
+    = AuthNone
+    | AuthClientSecretPost
+    | AuthClientSecretBasic
+    deriving stock (Eq, Ord, Show, Generic)
+
+instance FromJSON ClientAuthMethod where
+    parseJSON = withText "ClientAuthMethod" $ \case
+        "none" -> pure AuthNone
+        "client_secret_post" -> pure AuthClientSecretPost
+        "client_secret_basic" -> pure AuthClientSecretBasic
+        other -> fail $ "Invalid token_endpoint_auth_method: " ++ T.unpack other
+
+instance ToJSON ClientAuthMethod where
+    toJSON AuthNone = toJSON ("none" :: Text)
+    toJSON AuthClientSecretPost = toJSON ("client_secret_post" :: Text)
+    toJSON AuthClientSecretBasic = toJSON ("client_secret_basic" :: Text)
+
+-- -----------------------------------------------------------------------------
+-- Domain Entities
+-- -----------------------------------------------------------------------------
+
+-- | Authorization code with PKCE
+data AuthorizationCode = AuthorizationCode
+    { authCodeId :: AuthCodeId
+    , authClientId :: ClientId
+    , authRedirectUri :: RedirectUri
+    , authCodeChallenge :: CodeChallenge
+    , authCodeChallengeMethod :: CodeChallengeMethod
+    , authScopes :: Set Scope
+    , authUserId :: UserId
+    , authExpiry :: UTCTime
+    }
+    deriving stock (Eq, Show, Generic)
+
+instance FromJSON AuthorizationCode where
+    parseJSON = withObject "AuthorizationCode" $ \v ->
+        AuthorizationCode
+            <$> v .: "auth_code_id"
+            <*> v .: "auth_client_id"
+            <*> v .: "auth_redirect_uri"
+            <*> v .: "auth_code_challenge"
+            <*> v .: "auth_code_challenge_method"
+            <*> v .: "auth_scopes"
+            <*> v .: "auth_user_id"
+            <*> v .: "auth_expiry"
+
+instance ToJSON AuthorizationCode where
+    toJSON AuthorizationCode{..} =
+        object
+            [ "auth_code_id" .= authCodeId
+            , "auth_client_id" .= authClientId
+            , "auth_redirect_uri" .= authRedirectUri
+            , "auth_code_challenge" .= authCodeChallenge
+            , "auth_code_challenge_method" .= authCodeChallengeMethod
+            , "auth_scopes" .= authScopes
+            , "auth_user_id" .= authUserId
+            , "auth_expiry" .= authExpiry
+            ]
+
+-- | Registered OAuth client information
+data ClientInfo = ClientInfo
+    { clientName :: Text
+    , clientRedirectUris :: NonEmpty RedirectUri
+    , clientGrantTypes :: Set GrantType
+    , clientResponseTypes :: Set ResponseType
+    , clientAuthMethod :: ClientAuthMethod
+    }
+    deriving stock (Eq, Show, Generic)
+
+instance FromJSON ClientInfo where
+    parseJSON = withObject "ClientInfo" $ \v ->
+        ClientInfo
+            <$> v .: "client_name"
+            <*> v .: "client_redirect_uris"
+            <*> v .: "client_grant_types"
+            <*> v .: "client_response_types"
+            <*> v .: "client_auth_method"
+
+instance ToJSON ClientInfo where
+    toJSON ClientInfo{..} =
+        object
+            [ "client_name" .= clientName
+            , "client_redirect_uris" .= clientRedirectUris
+            , "client_grant_types" .= clientGrantTypes
+            , "client_response_types" .= clientResponseTypes
+            , "client_auth_method" .= clientAuthMethod
+            ]
+
+-- | Pending authorization awaiting user authentication
+data PendingAuthorization = PendingAuthorization
+    { pendingClientId :: ClientId
+    , pendingRedirectUri :: RedirectUri
+    , pendingCodeChallenge :: CodeChallenge
+    , pendingCodeChallengeMethod :: CodeChallengeMethod
+    , pendingScope :: Maybe (Set Scope)
+    , pendingState :: Maybe Text
+    , pendingResource :: Maybe URI
+    , pendingCreatedAt :: UTCTime
+    }
+    deriving stock (Eq, Show, Generic)
+
+instance FromJSON PendingAuthorization where
+    parseJSON = withObject "PendingAuthorization" $ \v ->
+        PendingAuthorization
+            <$> v .: "pending_client_id"
+            <*> v .: "pending_redirect_uri"
+            <*> v .: "pending_code_challenge"
+            <*> v .: "pending_code_challenge_method"
+            <*> v .:? "pending_scope"
+            <*> v .:? "pending_state"
+            <*> (v .:? "pending_resource" >>= traverse parseURIText)
+            <*> v .: "pending_created_at"
+      where
+        parseURIText :: Text -> Parser URI
+        parseURIText t = case parseURI (T.unpack t) of
+            Just uri -> pure uri
+            Nothing -> fail $ "Invalid URI: " ++ T.unpack t
+
+instance ToJSON PendingAuthorization where
+    toJSON PendingAuthorization{..} =
+        object
+            [ "pending_client_id" .= pendingClientId
+            , "pending_redirect_uri" .= pendingRedirectUri
+            , "pending_code_challenge" .= pendingCodeChallenge
+            , "pending_code_challenge_method" .= pendingCodeChallengeMethod
+            , "pending_scope" .= pendingScope
+            , "pending_state" .= pendingState
+            , "pending_resource" .= fmap (T.pack . show) pendingResource
+            , "pending_created_at" .= pendingCreatedAt
+            ]
+
+-- | Authenticated user information
+data AuthUser = AuthUser
+    { userUserId :: UserId
+    , userUserEmail :: Maybe Text
+    , userUserName :: Maybe Text
+    }
+    deriving stock (Eq, Show, Generic)
+
+instance FromJSON AuthUser where
+    parseJSON = withObject "AuthUser" $ \v ->
+        AuthUser
+            <$> v .: "user_id"
+            <*> v .:? "user_email"
+            <*> v .:? "user_name"
+
+instance ToJSON AuthUser where
+    toJSON AuthUser{..} =
+        object
+            [ "user_id" .= userUserId
+            , "user_email" .= userUserEmail
+            , "user_name" .= userUserName
+            ]

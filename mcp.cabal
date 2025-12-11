@@ -93,6 +93,7 @@ library
         MCP.Server.HTTP
         MCP.Server.Auth
         MCP.Server.Time
+        MCP.Server.OAuth.Types
         MCP.Trace.Types
         MCP.Trace.HTTP
         MCP.Trace.OAuth
