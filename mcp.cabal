@@ -92,6 +92,7 @@ library
         MCP.Server.StdIO
         MCP.Server.HTTP
         MCP.Server.Auth
+        MCP.Server.Auth.Backend
         MCP.Server.Time
         MCP.Server.OAuth.Types
         MCP.Trace.Types
