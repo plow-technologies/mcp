@@ -93,6 +93,7 @@ library
         MCP.Server.HTTP
         MCP.Server.Auth
         MCP.Server.Auth.Backend
+        MCP.Server.Auth.Demo
         MCP.Server.Time
         MCP.Server.OAuth.Types
         MCP.Server.OAuth.Store
