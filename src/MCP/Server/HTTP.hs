@@ -90,7 +90,7 @@ import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
-import MCP.Server.OAuth.Types (AuthCodeId (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), SessionId (..), mkSessionId, unSessionId)
+import MCP.Server.OAuth.Types (AuthCodeId (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), Scope (..), SessionId (..), mkSessionId, unSessionId)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import MCP.Trace.Operation (OperationTrace (..))
@@ -711,7 +711,7 @@ handleMetadata config = do
             , userInfoEndpoint = Nothing
             , jwksUri = Nothing
             , scopesSupported = fmap supportedScopes oauthCfg
-            , responseTypesSupported = maybe ["code"] supportedResponseTypes oauthCfg
+            , responseTypesSupported = maybe [ResponseCode] supportedResponseTypes oauthCfg
             , grantTypesSupported = fmap supportedGrantTypes oauthCfg
             , tokenEndpointAuthMethodsSupported = fmap supportedAuthMethods oauthCfg
             , codeChallengeMethodsSupported = fmap supportedCodeChallengeMethods oauthCfg
@@ -774,7 +774,7 @@ handleMetadataAppM = do
             , userInfoEndpoint = Nothing
             , jwksUri = Nothing
             , scopesSupported = fmap supportedScopes oauthCfg
-            , responseTypesSupported = maybe ["code"] supportedResponseTypes oauthCfg
+            , responseTypesSupported = maybe [ResponseCode] supportedResponseTypes oauthCfg
             , grantTypesSupported = fmap supportedGrantTypes oauthCfg
             , tokenEndpointAuthMethodsSupported = fmap supportedAuthMethods oauthCfg
             , codeChallengeMethodsSupported = fmap supportedCodeChallengeMethods oauthCfg
@@ -1237,11 +1237,11 @@ defaultDemoOAuthConfig =
         , authCodeExpirySeconds = 600 -- 10 minutes
         , accessTokenExpirySeconds = 3600 -- 1 hour
         -- Default OAuth parameters
-        , supportedScopes = ["mcp:read", "mcp:write"]
-        , supportedResponseTypes = ["code"]
-        , supportedGrantTypes = ["authorization_code", "refresh_token"]
-        , supportedAuthMethods = ["none"]
-        , supportedCodeChallengeMethods = ["S256"]
+        , supportedScopes = [Scope "mcp:read", Scope "mcp:write"]
+        , supportedResponseTypes = [ResponseCode]
+        , supportedGrantTypes = [GrantAuthorizationCode, GrantRefreshToken]
+        , supportedAuthMethods = [AuthNone]
+        , supportedCodeChallengeMethods = [S256]
         , -- Demo mode settings (no longer auto-approve, now requires login)
           autoApproveAuth = False
         , demoUserIdTemplate = Nothing
@@ -1265,7 +1265,7 @@ defaultProtectedResourceMetadata baseUrl =
     ProtectedResourceMetadata
         { resource = baseUrl
         , authorizationServers = [baseUrl]
-        , scopesSupported = Just ["mcp:read", "mcp:write"]
+        , scopesSupported = Just [Scope "mcp:read", Scope "mcp:write"]
         , bearerMethodsSupported = Just ["header"]
         , resourceName = Nothing
         , resourceDocumentation = Nothing

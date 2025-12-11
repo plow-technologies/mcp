@@ -83,7 +83,15 @@ import Network.HTTP.Simple (addRequestHeader, getResponseBody, httpJSON, parseRe
 import Plow.Logging (IOTracer)
 import System.Random (newStdGen, randomRs)
 
-import MCP.Server.OAuth.Types (CodeChallenge (..), CodeVerifier (..))
+import MCP.Server.OAuth.Types (
+    ClientAuthMethod (..),
+    CodeChallenge (..),
+    CodeChallengeMethod (..),
+    CodeVerifier (..),
+    GrantType (..),
+    ResponseType (..),
+    Scope (..),
+ )
 import MCP.Trace.OAuth (OAuthTrace (..))
 
 -- | OAuth grant types supported by MCP
@@ -117,11 +125,11 @@ data OAuthConfig = OAuthConfig
     , authCodeExpirySeconds :: Int
     , accessTokenExpirySeconds :: Int
     , -- Configurable OAuth parameters
-      supportedScopes :: [Text]
-    , supportedResponseTypes :: [Text]
-    , supportedGrantTypes :: [Text]
-    , supportedAuthMethods :: [Text]
-    , supportedCodeChallengeMethods :: [Text]
+      supportedScopes :: [Scope]
+    , supportedResponseTypes :: [ResponseType]
+    , supportedGrantTypes :: [GrantType]
+    , supportedAuthMethods :: [ClientAuthMethod]
+    , supportedCodeChallengeMethods :: [CodeChallengeMethod]
     , -- Demo mode settings
       autoApproveAuth :: Bool
     , demoUserIdTemplate :: Maybe Text -- Nothing means no demo mode
@@ -158,11 +166,11 @@ data OAuthMetadata = OAuthMetadata
     , registrationEndpoint :: Maybe Text
     , userInfoEndpoint :: Maybe Text
     , jwksUri :: Maybe Text
-    , scopesSupported :: Maybe [Text]
-    , responseTypesSupported :: [Text]
-    , grantTypesSupported :: Maybe [Text]
-    , tokenEndpointAuthMethodsSupported :: Maybe [Text]
-    , codeChallengeMethodsSupported :: Maybe [Text]
+    , scopesSupported :: Maybe [Scope]
+    , responseTypesSupported :: [ResponseType]
+    , grantTypesSupported :: Maybe [GrantType]
+    , tokenEndpointAuthMethodsSupported :: Maybe [ClientAuthMethod]
+    , codeChallengeMethodsSupported :: Maybe [CodeChallengeMethod]
     }
     deriving (Show, Generic)
 
@@ -176,7 +184,7 @@ data ProtectedResourceMetadata = ProtectedResourceMetadata
     {- ^ List of authorization server issuer identifiers
     Required for MCP. At least one entry.
     -}
-    , scopesSupported :: Maybe [Text]
+    , scopesSupported :: Maybe [Scope]
     {- ^ Scope values the resource server understands
     Optional. e.g., ["mcp:read", "mcp:write"]
     -}
