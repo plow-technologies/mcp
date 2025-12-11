@@ -396,9 +396,81 @@ test/
 └── TestMonad.hs             # Test monad with MonadTime, runners
 ```
 
+## Terminology: Haskell Effect Patterns
+
+This section clarifies the terminology used in this feature's design.
+
+### Three-Layer Cake Architecture
+
+**Source**: [Matt Parsons, 2018](https://www.parsonsmatt.org/2018/03/22/three_layer_haskell_cake.html)
+
+The three-layer cake is an **application architecture pattern** organizing code into:
+
+| Layer | Name | Purpose | Example in This Feature |
+|-------|------|---------|-------------------------|
+| 1 | Orchestration | `ReaderT IO` runtime foundation | `AppM` monad with `AppEnv` |
+| 2 | Capabilities | MTL-style typeclasses for mockable abstractions | `OAuthStateStore`, `AuthBackend` |
+| 3 | Business Logic | Pure functions, no effects | Token validation, PKCE verification |
+
+**This feature implements Layer 2** - the typeclasses serve as capability abstractions that can have multiple implementations (in-memory for dev, PostgreSQL for production).
+
+### MTL-Style
+
+**Definition**: Writing functions with **typeclass constraints** (`MonadReader`, `MonadError`, `MonadState`) instead of concrete transformer stacks.
+
+```haskell
+-- MTL-style (polymorphic, testable)
+handleToken :: (MonadReader env m, MonadError e m) => TokenRequest -> m TokenResponse
+
+-- Non-MTL (concrete, harder to test)
+handleToken :: ReaderT AppEnv (ExceptT AppError IO) TokenResponse
+```
+
+**This feature uses MTL-style** for all handler functions.
+
+### Classy-MTL / Has* Pattern / Classy Lenses
+
+**Definition**: A refinement of MTL-style using `Has*` typeclasses to **compose environments and errors** without coupling to concrete types.
+
+**Traditional MTL**: Functions constrained by concrete environment type
+```haskell
+handleLogin :: MonadReader AppEnv m => LoginRequest -> m LoginResponse
+```
+
+**Classy-MTL**: Functions constrained by abstract capabilities
+```haskell
+handleLogin :: (MonadReader env m, HasType AuthBackendEnv env) => LoginRequest -> m LoginResponse
+```
+
+**This feature uses classy-MTL** via `generic-lens`:
+- `HasType` for environment composition (product types)
+- `AsType` for error composition (sum types)
+
+The `generic-lens` approach is a **modern, GHC.Generics-based implementation** of classy-MTL that avoids Template Haskell boilerplate from `makeClassy`.
+
+### ReaderT IO Pattern
+
+**Definition**: A simplified pattern using `type App a = ReaderT AppEnv IO a` as the application monad.
+
+**Relationship to three-layer cake**: The ReaderT IO pattern is **Layer 1** of the three-layer architecture.
+
+**This feature uses ReaderT IO** at the orchestration layer, with Layer 2 typeclasses for testable abstractions.
+
+### Summary: What This Feature Uses
+
+| Pattern | How Used |
+|---------|----------|
+| Three-Layer Cake | Layer 2 capability typeclasses |
+| MTL-Style | `MonadReader`, `MonadError` constraints |
+| Classy-MTL | `AsType`/`HasType` from `generic-lens` |
+| ReaderT IO | Layer 1 orchestration |
+
 ## References
 
 - [Three Layer Haskell Cake](https://www.parsonsmatt.org/2018/03/22/three_layer_haskell_cake.html) - Matt Parsons
+- [Holmusk Three-Layer](https://github.com/Holmusk/three-layer) - Production example
+- [The ReaderT Design Pattern](https://www.fpcomplete.com/blog/readert-design-pattern/) - FP Complete
+- [Classy MTL](https://carlo-hamalainen.net/2015/07/20/classy-mtl/) - Carlo Hämäläinen
 - [generic-lens Hackage](https://hackage.haskell.org/package/generic-lens)
 - [Servant hoistServerWithContext](https://docs.servant.dev/en/latest/cookbook/hoist-server-with-context/HoistServerWithContext.html)
 - [Type Families in Haskell](https://serokell.io/blog/type-families-haskell) - Serokell
