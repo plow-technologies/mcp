@@ -83,14 +83,14 @@ import Control.Monad (unless, when)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
 import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), Salt (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
-import MCP.Server.Auth.Backend ()
+import MCP.Server.Auth.Backend (PlaintextPassword (..), Username, mkPlaintextPassword, mkUsername, unUsername)
 
 -- Import AuthBackend instance for AppM
 import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
-import MCP.Server.OAuth.Types (ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), GrantType (..), RedirectUri (..), ResponseType (..))
+import MCP.Server.OAuth.Types (ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), GrantType (..), RedirectUri (..), ResponseType (..), SessionId, mkSessionId, unSessionId)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import MCP.Trace.Operation (OperationTrace (..))
@@ -153,20 +153,33 @@ data PendingAuthorization = PendingAuthorization
 
 -- | Login form data
 data LoginForm = LoginForm
-    { formUsername :: Text
-    , formPassword :: Text
-    , formSessionId :: Text
+    { formUsername :: MCP.Server.Auth.Backend.Username
+    , formPassword :: MCP.Server.Auth.Backend.PlaintextPassword
+    , formSessionId :: MCP.Server.OAuth.Types.SessionId
     , formAction :: Text
     }
-    deriving (Show, Generic)
+    deriving (Generic)
+
+-- | Custom Show instance that redacts password
+instance Show LoginForm where
+    show (LoginForm u _p s a) = "LoginForm {formUsername = " <> show u <> ", formPassword = <redacted>, formSessionId = " <> show s <> ", formAction = " <> show a <> "}"
 
 instance FromForm LoginForm where
-    fromForm form =
-        LoginForm
-            <$> parseUnique "username" form
-            <*> parseUnique "password" form
-            <*> parseUnique "session_id" form
-            <*> parseUnique "action" form
+    fromForm form = do
+        userText <- parseUnique "username" form
+        passText <- parseUnique "password" form
+        sessText <- parseUnique "session_id" form
+        action <- parseUnique "action" form
+
+        username <- case mkUsername userText of
+            Just u -> Right u
+            Nothing -> Left "Invalid username"
+        let password = mkPlaintextPassword passText
+        sessionId <- case mkSessionId sessText of
+            Just s -> Right s
+            Nothing -> Left "Invalid session_id (must be UUID)"
+
+        pure $ LoginForm username password sessionId action
 
 -- | Login error types
 data LoginError
@@ -904,7 +917,7 @@ handleAuthorize config tracer oauthStateVar responseType clientId redirectUri co
     return $ addHeader cookieValue loginHtml
 
 -- | Extract session ID from cookie header
-extractSessionFromCookie :: Text -> Maybe Text
+extractSessionFromCookie :: Text -> Maybe SessionId
 extractSessionFromCookie cookieHeader =
     let cookies = T.splitOn ";" cookieHeader
         sessionCookies = filter (T.isInfixOf "mcp_session=") cookies
@@ -912,7 +925,7 @@ extractSessionFromCookie cookieHeader =
             (cookie : _) ->
                 let parts = T.splitOn "=" cookie
                  in case parts of
-                        [_, value] -> Just (T.strip value)
+                        [_, value] -> mkSessionId (T.strip value)
                         _ -> Nothing
             [] -> Nothing
 
@@ -936,12 +949,12 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
                     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "Session cookie mismatch"
                     throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Cookies Required" "Session cookie mismatch. Please enable cookies and try again.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
-    -- Look up pending authorization
+    -- Look up pending authorization (pendingAuthorizations is still Text-keyed)
     oauthState <- liftIO $ readTVarIO oauthStateVar
-    pending <- case Map.lookup sessionId (pendingAuthorizations oauthState) of
+    pending <- case Map.lookup (unSessionId sessionId) (pendingAuthorizations oauthState) of
         Just p -> return p
         Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "session" ("Session not found: " <> sessionId)
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "session" ("Session not found: " <> unSessionId sessionId)
             throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Session" "Session not found or has expired. Please restart the authorization flow.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     -- T038: Handle expired sessions
@@ -949,7 +962,7 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
     let sessionExpirySeconds = maybe 600 (fromIntegral . loginSessionExpirySeconds) (httpOAuthConfig config)
         expiryTime = addUTCTime sessionExpirySeconds (pendingCreatedAt pending)
     when (currentTime > expiryTime) $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthSessionExpired sessionId
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthSessionExpired (unSessionId sessionId)
         throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Session Expired" "Your login session has expired. Please restart the authorization flow.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
 
     -- Check if user denied access
@@ -968,7 +981,7 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
 
             -- Remove pending authorization
             liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
-                s{pendingAuthorizations = Map.delete sessionId (pendingAuthorizations s)}
+                s{pendingAuthorizations = Map.delete (unSessionId sessionId) (pendingAuthorizations s)}
 
             return $ addHeader redirectUrl $ addHeader clearCookie NoContent
         else do
@@ -981,12 +994,13 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
                 username = formUsername loginForm
                 password = formPassword loginForm
 
-            let credentialsValid = validateCredential store username password
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt username credentialsValid
+            -- validateCredential expects Text, so unwrap newtypes
+            let credentialsValid = validateCredential store (unUsername username) (TE.decodeUtf8 $ BA.convert $ unPlaintextPassword password)
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt (unUsername username) credentialsValid
             if credentialsValid
                 then do
                     -- Emit authorization granted trace
-                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (pendingClientId pending) username
+                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (pendingClientId pending) (unUsername username)
 
                     -- Generate authorization code
                     code <- liftIO $ generateAuthCodeWithConfig config
@@ -1001,7 +1015,7 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
                                 , authCodeChallenge = pendingCodeChallenge pending
                                 , authCodeChallengeMethod = pendingCodeChallengeMethod pending
                                 , authScopes = maybe [] (T.splitOn " ") (pendingScope pending)
-                                , authUserId = username
+                                , authUserId = unUsername username
                                 , authExpiry = expiry
                                 }
 
@@ -1009,7 +1023,7 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
                     liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
                         s
                             { authCodes = Map.insert code authCode (authCodes s)
-                            , pendingAuthorizations = Map.delete sessionId (pendingAuthorizations s)
+                            , pendingAuthorizations = Map.delete (unSessionId sessionId) (pendingAuthorizations s)
                             }
 
                     -- Build redirect URL with code
