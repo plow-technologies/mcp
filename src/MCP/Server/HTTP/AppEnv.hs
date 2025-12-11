@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 {- |
@@ -44,6 +45,9 @@ handleAppError err = throwError (toServerError err)
 @
 -}
 module MCP.Server.HTTP.AppEnv (
+    -- * HTTP Server Configuration
+    HTTPServerConfig (..),
+
     -- * Composite Environment
     AppEnv (..),
 
@@ -54,17 +58,44 @@ module MCP.Server.HTTP.AppEnv (
     toServerError,
 ) where
 
+import Crypto.JOSE (JWK)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
+import Network.Wai.Handler.Warp (Port)
 import Servant (ServerError, err400, err401, err500, errBody)
 
+import MCP.Server.Auth (OAuthConfig, ProtectedResourceMetadata)
 import MCP.Server.Auth.Demo (DemoAuthError (..), DemoCredentialEnv)
-import MCP.Server.HTTP (HTTPServerConfig)
 import MCP.Server.OAuth.InMemory (OAuthStoreError (..), OAuthTVarEnv)
 import MCP.Trace.HTTP (HTTPTrace)
+import MCP.Types (Implementation, ServerCapabilities)
 import Plow.Logging (IOTracer)
+
+-- -----------------------------------------------------------------------------
+-- HTTP Server Configuration
+-- -----------------------------------------------------------------------------
+
+{- | Configuration for running an MCP HTTP server
+
+This type was moved from MCP.Server.HTTP to avoid circular imports.
+-}
+data HTTPServerConfig = HTTPServerConfig
+    { httpPort :: Port
+    , httpBaseUrl :: Text -- Base URL for OAuth endpoints (e.g., "https://api.example.com")
+    , httpServerInfo :: Implementation
+    , httpCapabilities :: ServerCapabilities
+    , httpEnableLogging :: Bool
+    , httpOAuthConfig :: Maybe OAuthConfig
+    , httpJWK :: Maybe JWK -- JWT signing key
+    , httpProtocolVersion :: Text -- MCP protocol version
+    , httpProtectedResourceMetadata :: Maybe ProtectedResourceMetadata
+    {- ^ Custom protected resource metadata.
+    When Nothing, auto-generated from httpBaseUrl.
+    -}
+    }
+    deriving (Generic)
 
 -- -----------------------------------------------------------------------------
 -- Composite Environment
