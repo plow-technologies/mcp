@@ -90,7 +90,7 @@ import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
-import MCP.Server.OAuth.Types (AuthCodeId (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), RedirectUri (..), ResponseType (..), SessionId, mkSessionId, unSessionId)
+import MCP.Server.OAuth.Types (AuthCodeId (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), SessionId, mkSessionId, unSessionId)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import MCP.Trace.Operation (OperationTrace (..))
@@ -1151,15 +1151,20 @@ handleRefreshTokenGrant jwtSettings config tracer oauthStateVar params = do
     let mResource = Map.lookup "resource" params
     liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "token request (refresh token)"
 
-    refreshToken <- case Map.lookup "refresh_token" params of
-        Just t -> return t
+    -- Parse refresh_token from Text to RefreshTokenId
+    refreshTokenId <- case Map.lookup "refresh_token" params of
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing refresh_token"
             throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
+        Just tokenText -> case parseUrlPiece tokenText of
+            Left err -> do
+                liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" ("Invalid refresh_token: " <> err)
+                throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
+            Right rtId -> return rtId
 
-    -- Look up refresh token
+    -- Look up refresh token (unwrap RefreshTokenId for map lookup)
     oauthState <- liftIO $ readTVarIO oauthStateVar
-    (oldAccessToken, user) <- case Map.lookup refreshToken (refreshTokens oauthState) of
+    (oldAccessToken, user) <- case Map.lookup (unRefreshTokenId refreshTokenId) (refreshTokens oauthState) of
         Just info -> return info
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenRefresh False
@@ -1172,7 +1177,7 @@ handleRefreshTokenGrant jwtSettings config tracer oauthStateVar params = do
     liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
         s
             { accessTokens = Map.insert newAccessTokenText user $ Map.delete oldAccessToken (accessTokens s)
-            , refreshTokens = Map.insert refreshToken (newAccessTokenText, user) (refreshTokens s)
+            , refreshTokens = Map.insert (unRefreshTokenId refreshTokenId) (newAccessTokenText, user) (refreshTokens s)
             }
 
     -- Emit successful token refresh trace
@@ -1183,7 +1188,7 @@ handleRefreshTokenGrant jwtSettings config tracer oauthStateVar params = do
             { access_token = newAccessTokenText
             , token_type = "Bearer"
             , expires_in = Just $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
-            , refresh_token = Just refreshToken
+            , refresh_token = Just (unRefreshTokenId refreshTokenId)
             , scope = Nothing
             }
 
