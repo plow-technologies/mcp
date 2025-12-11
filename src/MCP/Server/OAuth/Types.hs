@@ -62,7 +62,8 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Time.Clock (UTCTime)
 import GHC.Generics (Generic)
-import Network.URI (URI, parseURI, uriScheme)
+import Network.URI (URI, parseURI, uriScheme, uriToString)
+import Web.HttpApiData (FromHttpApiData (..), ToHttpApiData (..))
 
 -- -----------------------------------------------------------------------------
 -- Identity Newtypes
@@ -79,6 +80,14 @@ mkAuthCodeId t
     | T.null t = Nothing
     | otherwise = Just (AuthCodeId t)
 
+instance FromHttpApiData AuthCodeId where
+    parseUrlPiece t
+        | T.null t = Left "AuthCodeId cannot be empty"
+        | otherwise = Right (AuthCodeId t)
+
+instance ToHttpApiData AuthCodeId where
+    toUrlPiece = unAuthCodeId
+
 -- | OAuth client identifier
 newtype ClientId = ClientId {unClientId :: Text}
     deriving stock (Eq, Ord, Show, Generic)
@@ -89,6 +98,14 @@ mkClientId :: Text -> Maybe ClientId
 mkClientId t
     | T.null t = Nothing
     | otherwise = Just (ClientId t)
+
+instance FromHttpApiData ClientId where
+    parseUrlPiece t
+        | T.null t = Left "ClientId cannot be empty"
+        | otherwise = Right (ClientId t)
+
+instance ToHttpApiData ClientId where
+    toUrlPiece = unClientId
 
 -- | Session identifier for pending authorizations
 newtype SessionId = SessionId {unSessionId :: Text}
@@ -115,6 +132,14 @@ mkSessionId t
                         True
                 _ -> False
 
+instance FromHttpApiData SessionId where
+    parseUrlPiece t = case mkSessionId t of
+        Just sid -> Right sid
+        Nothing -> Left "SessionId must be a valid UUID"
+
+instance ToHttpApiData SessionId where
+    toUrlPiece = unSessionId
+
 -- | Access token identifier (JWT-generated, no smart constructor needed)
 newtype AccessTokenId = AccessTokenId {unAccessTokenId :: Text}
     deriving stock (Eq, Ord, Show, Generic)
@@ -131,6 +156,14 @@ mkRefreshTokenId t
     | T.null t = Nothing
     | otherwise = Just (RefreshTokenId t)
 
+instance FromHttpApiData RefreshTokenId where
+    parseUrlPiece t
+        | T.null t = Left "RefreshTokenId cannot be empty"
+        | otherwise = Right (RefreshTokenId t)
+
+instance ToHttpApiData RefreshTokenId where
+    toUrlPiece = unRefreshTokenId
+
 -- | User identifier
 newtype UserId = UserId {unUserId :: Text}
     deriving stock (Eq, Ord, Show, Generic)
@@ -141,6 +174,14 @@ mkUserId :: Text -> Maybe UserId
 mkUserId t
     | T.null t = Nothing
     | otherwise = Just (UserId t)
+
+instance FromHttpApiData UserId where
+    parseUrlPiece t
+        | T.null t = Left "UserId cannot be empty"
+        | otherwise = Right (UserId t)
+
+instance ToHttpApiData UserId where
+    toUrlPiece = unUserId
 
 -- -----------------------------------------------------------------------------
 -- Value Newtypes
@@ -158,6 +199,18 @@ instance FromJSON RedirectUri where
 
 instance ToJSON RedirectUri where
     toJSON (RedirectUri uri) = toJSON (show uri)
+
+instance FromHttpApiData RedirectUri where
+    parseUrlPiece t = case parseURI (T.unpack t) of
+        Nothing -> Left "Invalid URI format"
+        Just uri
+            | uriScheme uri == "https:" -> Right (RedirectUri uri)
+            | uriScheme uri == "http:" && ("localhost" `T.isInfixOf` t || "127.0.0.1" `T.isInfixOf` t) ->
+                Right (RedirectUri uri)
+            | otherwise -> Left "Redirect URI must use https or http://localhost"
+
+instance ToHttpApiData RedirectUri where
+    toUrlPiece (RedirectUri uri) = T.pack (uriToString id uri "")
 
 -- | Smart constructor for RedirectUri (validates https:// or http://localhost)
 mkRedirectUri :: Text -> Maybe RedirectUri
@@ -181,6 +234,15 @@ mkScope t
     | T.null t = Nothing
     | T.any isSpace t = Nothing
     | otherwise = Just (Scope t)
+
+instance FromHttpApiData Scope where
+    parseUrlPiece t
+        | T.null t = Left "Scope cannot be empty"
+        | T.any isSpace t = Left "Scope cannot contain whitespace"
+        | otherwise = Right (Scope t)
+
+instance ToHttpApiData Scope where
+    toUrlPiece = unScope
 
 -- | PKCE code challenge
 newtype CodeChallenge = CodeChallenge {unCodeChallenge :: Text}
@@ -222,6 +284,16 @@ instance ToJSON CodeChallengeMethod where
     toJSON S256 = toJSON ("S256" :: Text)
     toJSON Plain = toJSON ("plain" :: Text)
 
+instance FromHttpApiData CodeChallengeMethod where
+    parseUrlPiece = \case
+        "S256" -> Right S256
+        "plain" -> Right Plain
+        other -> Left $ "Invalid code_challenge_method: " <> other
+
+instance ToHttpApiData CodeChallengeMethod where
+    toUrlPiece S256 = "S256"
+    toUrlPiece Plain = "plain"
+
 -- | OAuth grant type
 data GrantType
     = GrantAuthorizationCode
@@ -241,6 +313,18 @@ instance ToJSON GrantType where
     toJSON GrantRefreshToken = toJSON ("refresh_token" :: Text)
     toJSON GrantClientCredentials = toJSON ("client_credentials" :: Text)
 
+instance FromHttpApiData GrantType where
+    parseUrlPiece = \case
+        "authorization_code" -> Right GrantAuthorizationCode
+        "refresh_token" -> Right GrantRefreshToken
+        "client_credentials" -> Right GrantClientCredentials
+        other -> Left $ "Invalid grant_type: " <> other
+
+instance ToHttpApiData GrantType where
+    toUrlPiece GrantAuthorizationCode = "authorization_code"
+    toUrlPiece GrantRefreshToken = "refresh_token"
+    toUrlPiece GrantClientCredentials = "client_credentials"
+
 -- | OAuth response type
 data ResponseType
     = ResponseCode
@@ -256,6 +340,16 @@ instance FromJSON ResponseType where
 instance ToJSON ResponseType where
     toJSON ResponseCode = toJSON ("code" :: Text)
     toJSON ResponseToken = toJSON ("token" :: Text)
+
+instance FromHttpApiData ResponseType where
+    parseUrlPiece = \case
+        "code" -> Right ResponseCode
+        "token" -> Right ResponseToken
+        other -> Left $ "Invalid response_type: " <> other
+
+instance ToHttpApiData ResponseType where
+    toUrlPiece ResponseCode = "code"
+    toUrlPiece ResponseToken = "token"
 
 -- | Client authentication method
 data ClientAuthMethod
@@ -275,6 +369,18 @@ instance ToJSON ClientAuthMethod where
     toJSON AuthNone = toJSON ("none" :: Text)
     toJSON AuthClientSecretPost = toJSON ("client_secret_post" :: Text)
     toJSON AuthClientSecretBasic = toJSON ("client_secret_basic" :: Text)
+
+instance FromHttpApiData ClientAuthMethod where
+    parseUrlPiece = \case
+        "none" -> Right AuthNone
+        "client_secret_post" -> Right AuthClientSecretPost
+        "client_secret_basic" -> Right AuthClientSecretBasic
+        other -> Left $ "Invalid token_endpoint_auth_method: " <> other
+
+instance ToHttpApiData ClientAuthMethod where
+    toUrlPiece AuthNone = "none"
+    toUrlPiece AuthClientSecretPost = "client_secret_post"
+    toUrlPiece AuthClientSecretBasic = "client_secret_basic"
 
 -- -----------------------------------------------------------------------------
 -- Domain Entities
