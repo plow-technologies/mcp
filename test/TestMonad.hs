@@ -270,8 +270,10 @@ instance OAuthStateStore TestM where
         env <- ask
         now <- liftIO $ readIORef (testTime env)
         state <- liftIO $ readIORef (testOAuthState env)
-        -- Check if session expired (sessions expire after 10 minutes by default)
-        let sessionExpirySeconds = 600 :: Integer
+        -- Check if session expired (600 seconds = 10 minutes, matching InMemory default)
+        -- The law tests set createdAt to 2019-12-31, and currentTime is 2020-01-01,
+        -- so expired sessions will correctly return Nothing.
+        let sessionExpirySeconds = 600 :: Integer -- 10 minutes (matches loginSessionExpiry default)
         pure $ case Map.lookup sessionId (oauthPendingAuths state) of
             Nothing -> Nothing
             Just auth

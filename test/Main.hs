@@ -2,9 +2,27 @@
 
 module Main (main) where
 
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
-import MCP.Server.Auth (HashedPassword (..), defaultDemoCredentialStore, mkHashedPassword, validateCredential)
+import Data.Time.Clock (UTCTime)
+import Data.Time.Format (defaultTimeLocale, parseTimeM)
+
+-- Old Auth module (for existing tests)
+import MCP.Server.Auth qualified as Auth
+
+-- New typeclass modules (for law tests)
+import MCP.Server.Auth.Backend (Username (..), mkPlaintextPassword)
+
 import Test.Hspec
+
+-- Test monad with controlled time
+import TestMonad (TestM, addTestCredential, mkTestEnv, runTestM)
+
+-- Law tests
+import Laws.AuthBackendSpec (authBackendKnownCredentials, authBackendLaws)
+import Laws.OAuthStateStoreSpec (oauthStateStoreLaws)
+
+-- Existing specs
 import Trace.FilterSpec qualified as FilterSpec
 import Trace.GoldenSpec qualified as GoldenSpec
 import Trace.OAuthSpec qualified as OAuthSpec
@@ -13,6 +31,36 @@ import Trace.RenderSpec qualified as RenderSpec
 main :: IO ()
 main = hspec spec
 
+{- | Fixed base time for all tests (year 2020, start of the test data range)
+The Arbitrary instance for UTCTime generates times within 10 years from 2020-01-01,
+so times range from 2020 to 2030. We set currentTime to 2020-01-01 so that ALL
+generated timestamps appear to be in the future. The law tests then manipulate
+timestamps relative to the generated values (e.g., subtract 1 day to make expired).
+With currentTime at the minimum and expiry durations measured in hours, this ensures:
+- Round-trip tests (subtract 60s) remain valid (not expired)
+- Expiry tests (subtract 1 day) become expired
+-}
+baseTestTime :: UTCTime
+baseTestTime = case parseTimeM True defaultTimeLocale "%Y-%m-%d %H:%M:%S %Z" "2020-01-01 00:00:00 UTC" of
+    Just t -> t
+    Nothing -> error "Failed to parse base test time"
+
+-- | Runner for TestM monad (provides both OAuthStateStore and AuthBackend)
+runTestM' :: TestM a -> IO a
+runTestM' action = do
+    env <- mkTestEnv baseTestTime Map.empty
+    runTestM env action
+
+-- | Runner for TestM with demo credentials pre-loaded
+runTestMWithDemoCreds :: TestM a -> IO a
+runTestMWithDemoCreds action = do
+    env <- mkTestEnv baseTestTime Map.empty
+    runTestM env $ do
+        -- Add demo credentials
+        addTestCredential (Username "demo") (mkPlaintextPassword "demo123")
+        addTestCredential (Username "admin") (mkPlaintextPassword "admin456")
+        action
+
 spec :: Spec
 spec = do
     FilterSpec.spec
@@ -20,39 +68,52 @@ spec = do
     OAuthSpec.spec
     RenderSpec.spec
 
+    -- Typeclass law tests (using TestM with controlled time)
+    describe "TestM OAuthStateStore" $ do
+        oauthStateStoreLaws runTestM'
+
+    describe "TestM AuthBackend" $ do
+        authBackendLaws runTestMWithDemoCreds
+        authBackendKnownCredentials
+            runTestMWithDemoCreds
+            (Username "demo")
+            (mkPlaintextPassword "demo123")
+            (mkPlaintextPassword "wrongpassword")
+
+    -- Existing tests for old Auth module
     describe "MCP.Server.Auth" $ do
         describe "validateCredential" $ do
             it "validates correct demo credentials" $ do
-                validateCredential defaultDemoCredentialStore "demo" "demo123" `shouldBe` True
+                Auth.validateCredential Auth.defaultDemoCredentialStore "demo" "demo123" `shouldBe` True
 
             it "validates correct admin credentials" $ do
-                validateCredential defaultDemoCredentialStore "admin" "admin456" `shouldBe` True
+                Auth.validateCredential Auth.defaultDemoCredentialStore "admin" "admin456" `shouldBe` True
 
             it "rejects invalid password for demo user" $ do
-                validateCredential defaultDemoCredentialStore "demo" "wrongpassword" `shouldBe` False
+                Auth.validateCredential Auth.defaultDemoCredentialStore "demo" "wrongpassword" `shouldBe` False
 
             it "rejects invalid password for admin user" $ do
-                validateCredential defaultDemoCredentialStore "admin" "wrongpass" `shouldBe` False
+                Auth.validateCredential Auth.defaultDemoCredentialStore "admin" "wrongpass" `shouldBe` False
 
             it "rejects invalid username" $ do
-                validateCredential defaultDemoCredentialStore "nonexistent" "demo123" `shouldBe` False
+                Auth.validateCredential Auth.defaultDemoCredentialStore "nonexistent" "demo123" `shouldBe` False
 
         describe "mkHashedPassword" $ do
             it "produces consistent hashes for same inputs" $ do
                 let salt = "test-salt" :: Text
                     password = "test-password" :: Text
-                    hash1 = mkHashedPassword salt password
-                    hash2 = mkHashedPassword salt password
-                unHashedPassword hash1 `shouldBe` unHashedPassword hash2
+                    hash1 = Auth.mkHashedPassword salt password
+                    hash2 = Auth.mkHashedPassword salt password
+                Auth.unHashedPassword hash1 `shouldBe` Auth.unHashedPassword hash2
 
             it "produces different hashes for different passwords" $ do
                 let salt = "test-salt" :: Text
-                    hash1 = mkHashedPassword salt "test-password"
-                    hash2 = mkHashedPassword salt "different-password"
-                unHashedPassword hash1 `shouldNotBe` unHashedPassword hash2
+                    hash1 = Auth.mkHashedPassword salt "test-password"
+                    hash2 = Auth.mkHashedPassword salt "different-password"
+                Auth.unHashedPassword hash1 `shouldNotBe` Auth.unHashedPassword hash2
 
             it "produces different hashes for different salts" $ do
                 let password = "test-password" :: Text
-                    hash1 = mkHashedPassword "test-salt" password
-                    hash2 = mkHashedPassword "different-salt" password
-                unHashedPassword hash1 `shouldNotBe` unHashedPassword hash2
+                    hash1 = Auth.mkHashedPassword "test-salt" password
+                    hash2 = Auth.mkHashedPassword "different-salt" password
+                Auth.unHashedPassword hash1 `shouldNotBe` Auth.unHashedPassword hash2

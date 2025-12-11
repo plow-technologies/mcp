@@ -46,7 +46,8 @@ module Laws.OAuthStateStoreSpec (
     oauthStateStoreLaws,
 ) where
 
-import Data.Time.Clock (addUTCTime)
+import Data.Time.Calendar (fromGregorian)
+import Data.Time.Clock (UTCTime (..), addUTCTime)
 import Test.Hspec (Spec, describe)
 import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck (ioProperty, (===))
@@ -149,8 +150,10 @@ oauthStateStoreLaws runM = describe "OAuthStateStore laws" $ do
 
         prop "expiry: lookup returns Nothing for expired codes" $
             \(code :: AuthorizationCode) -> ioProperty $ do
-                -- Make code expired by setting expiry in the past
-                let expiredCode = code{authExpiry = addUTCTime (-3600) (authExpiry code)}
+                -- Make code expired by setting expiry to a fixed past time (year 2019)
+                -- This ensures expiry < currentTime (2020-01-01) for all test runs
+                let pastTime = UTCTime (fromGregorian 2019 12 31) 0
+                let expiredCode = code{authExpiry = pastTime}
                 result <- runM $ do
                     storeAuthCode expiredCode
                     lookupAuthCode (authCodeId expiredCode)
@@ -209,8 +212,10 @@ oauthStateStoreLaws runM = describe "OAuthStateStore laws" $ do
 
         prop "expiry: lookup returns Nothing for expired sessions" $
             \(sessionId :: SessionId) (pending :: PendingAuthorization) -> ioProperty $ do
-                -- Make session expired by setting creation time far in the past
-                let expiredPending = pending{pendingCreatedAt = addUTCTime (-86400) (pendingCreatedAt pending)}
+                -- Make session expired by setting creation time to a fixed past time (year 2019)
+                -- This ensures createdAt + loginSessionExpiry < currentTime (2020-01-01) for all test runs
+                let pastTime = UTCTime (fromGregorian 2019 12 31) 0
+                let expiredPending = pending{pendingCreatedAt = pastTime}
                 result <- runM $ do
                     storePendingAuth sessionId expiredPending
                     lookupPendingAuth sessionId
