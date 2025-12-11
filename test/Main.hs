@@ -22,6 +22,7 @@ import TestMonad (TestM, addTestCredential, mkTestEnv, runTestM)
 
 -- Law tests
 import Laws.AuthBackendSpec (authBackendKnownCredentials, authBackendLaws)
+import Laws.BoundarySpec qualified as BoundarySpec
 import Laws.OAuthStateStoreSpec (oauthStateStoreLaws)
 
 -- Existing specs
@@ -69,6 +70,9 @@ spec = do
     GoldenSpec.spec
     OAuthSpec.spec
     RenderSpec.spec
+
+    -- Boundary layer tests (Servant FromHttpApiData/ToHttpApiData)
+    BoundarySpec.spec
 
     -- Typeclass law tests (using TestM with controlled time)
     describe "TestM OAuthStateStore" $ do
