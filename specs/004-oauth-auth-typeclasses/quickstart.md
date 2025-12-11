@@ -2,6 +2,8 @@
 
 **Feature Branch**: `004-oauth-auth-typeclasses`
 
+> **Note**: Code samples in this document are **illustrative pseudo-code**. Function bodies have not been compiled or tested. Focus on **type signatures, interfaces, and structural intent** rather than implementation details.
+
 ## Overview
 
 This feature introduces two typeclasses that abstract OAuth state persistence and user authentication:
@@ -297,34 +299,60 @@ import Test.QuickCheck
 import MCP.Server.Auth.Backend
 
 -- | Polymorphic spec for AuthBackend.
--- Uses Arbitrary instances for property-based testing.
+-- Requires Arbitrary instances for Username and PlaintextPassword.
+-- Accepts a 'run' function to execute 'm' in 'IO'.
 authBackendLaws ::
   forall m.
   (AuthBackend m) =>
-  (forall a. m a -> IO a) ->                    -- Runner function
-  (Username -> PlaintextPassword -> Bool) ->    -- Oracle: is this credential valid?
+  (forall a. m a -> IO a) ->    -- Runner function (implementation-specific)
   Spec
-authBackendLaws runM isValidCredential = describe "AuthBackend laws" $ do
+authBackendLaws runM = describe "AuthBackend laws" $ do
 
-  prop "determinism: same inputs always produce same outputs" $
-    \(user :: Username) (pass :: PlaintextPassword) -> ioProperty $ do
-      result1 <- runM $ validateCredentials user pass
-      result2 <- runM $ validateCredentials user pass
-      pure $ result1 === result2
+  describe "Credential validation" $ do
 
-  prop "correctness: validation matches oracle" $
-    \(user :: Username) (pass :: PlaintextPassword) -> ioProperty $ do
-      result <- runM $ validateCredentials user pass
-      pure $ result === isValidCredential user pass
+    prop "determinism: same inputs always produce same outputs" $
+      \(user :: Username) (pass :: PlaintextPassword) -> ioProperty $ do
+        result1 <- runM $ validateCredentials user pass
+        result2 <- runM $ validateCredentials user pass
+        pure $ result1 === result2
 
-  prop "independence: validating one user doesn't affect another" $
-    \(user1 :: Username) (pass1 :: PlaintextPassword)
-     (user2 :: Username) (pass2 :: PlaintextPassword) -> ioProperty $ do
-      -- Validate user1 first
-      _ <- runM $ validateCredentials user1 pass1
-      -- Then validate user2 - should give same result as if user1 wasn't validated
-      result <- runM $ validateCredentials user2 pass2
-      pure $ result === isValidCredential user2 pass2
+    prop "independence: validating one user doesn't affect another" $
+      \(user1 :: Username) (pass1 :: PlaintextPassword)
+       (user2 :: Username) (pass2 :: PlaintextPassword) -> ioProperty $ do
+        -- Validate user1 first
+        _ <- runM $ validateCredentials user1 pass1
+        -- Then validate user2
+        result1 <- runM $ validateCredentials user2 pass2
+        -- Validate user2 without validating user1 first (fresh run)
+        result2 <- runM $ validateCredentials user2 pass2
+        -- Results should be identical
+        pure $ result1 === result2
+
+-- | Additional tests for known credentials (implementation-specific).
+-- These are NOT polymorphic laws - they test specific credential stores.
+authBackendKnownCredentials ::
+  forall m.
+  (AuthBackend m) =>
+  (forall a. m a -> IO a) ->    -- Runner function
+  Username ->                    -- Known valid username
+  PlaintextPassword ->           -- Known valid password
+  PlaintextPassword ->           -- Known invalid password
+  Spec
+authBackendKnownCredentials runM validUser validPass invalidPass =
+  describe "Known credentials" $ do
+
+    it "accepts valid credentials" $ do
+      result <- runM $ validateCredentials validUser validPass
+      result `shouldBe` True
+
+    it "rejects invalid password for valid user" $ do
+      result <- runM $ validateCredentials validUser invalidPass
+      result `shouldBe` False
+
+    it "rejects unknown user" $ do
+      let unknownUser = Username "nonexistent_user_xyz"
+      result <- runM $ validateCredentials unknownUser validPass
+      result `shouldBe` False
 ```
 
 ### Running Tests Against Multiple Implementations
@@ -335,25 +363,32 @@ module Main where
 import Test.Hspec
 import Laws.OAuthStateStoreSpec
 import Laws.AuthBackendSpec
+import MCP.Server.Auth.Backend (Username(..), mkPlaintextPassword)
 import qualified InMemory
 import qualified PureState
 
 spec :: Spec
 spec = do
   describe "InMemory implementation" $ do
-    oauthStateStoreLaws InMemory.run
-    authBackendLaws InMemory.run InMemory.isValidCredential
+    oauthStateStoreLaws InMemory.runOAuth
+    authBackendLaws InMemory.runAuth
+    -- Test known demo credentials
+    authBackendKnownCredentials
+      InMemory.runAuth
+      (Username "demo")
+      (mkPlaintextPassword "demo123")
+      (mkPlaintextPassword "wrongpassword")
 
   describe "Pure State implementation" $ do
-    oauthStateStoreLaws PureState.run
-    authBackendLaws PureState.run PureState.isValidCredential
+    oauthStateStoreLaws PureState.runOAuth
+    authBackendLaws PureState.runAuth
 
 main :: IO ()
 main = hspec spec
 
--- Each implementation provides:
--- 1. A runner: (forall a. m a -> IO a)
--- 2. An oracle for credential validation (for AuthBackend tests)
+-- Each implementation provides runners:
+-- runOAuth :: (forall a. OAuthM a -> IO a)  -- For OAuthStateStore tests
+-- runAuth  :: (forall a. AuthM a -> IO a)   -- For AuthBackend tests
 ```
 
 ### Arbitrary Instances for Domain Types

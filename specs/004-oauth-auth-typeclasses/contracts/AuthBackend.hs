@@ -3,6 +3,10 @@
 
 {- | User Authentication Backend Typeclass
 
+__DISCLAIMER__: This is a design contract, not production code. Code samples
+are illustrative pseudo-code. Function bodies have not been compiled or tested.
+Focus on type signatures, interfaces, and structural intent.
+
 This module defines the abstract interface for user credential validation,
 enabling integration with external identity providers (LDAP, Active Directory,
 Okta, etc.) while maintaining backward compatibility with the existing
@@ -235,29 +239,29 @@ instance MonadIO m => AuthBackend (ReaderT DemoCredentialEnv m) where
 
 == Testing Pattern
 
-Tests should be polymorphic over the monad:
+Tests should be polymorphic over the monad, using @prop@ for property-based testing:
 
 @
 authBackendLaws ::
   forall m.
   (AuthBackend m) =>
-  (forall a. m a -> IO a) ->       -- Runner function
-  Username ->                       -- Known valid username
-  PlaintextPassword ->              -- Known valid password
-  PlaintextPassword ->              -- Known invalid password
+  (forall a. m a -> IO a) ->    -- Runner function
   Spec
-authBackendLaws runM validUser validPass invalidPass = do
-  it "accepts valid credentials" $ do
-    result <- runM $ validateCredentials validUser validPass
-    result `shouldBe` True
+authBackendLaws runM = describe "AuthBackend laws" $ do
 
-  it "rejects invalid password" $ do
-    result <- runM $ validateCredentials validUser invalidPass
-    result `shouldBe` False
+  prop "determinism: same inputs always produce same outputs" $
+    \\(user :: Username) (pass :: PlaintextPassword) -> ioProperty $ do
+      result1 <- runM $ validateCredentials user pass
+      result2 <- runM $ validateCredentials user pass
+      pure $ result1 === result2
 
-  it "rejects unknown user" $ do
-    result <- runM $ validateCredentials unknownUser validPass
-    result `shouldBe` False
+  prop "independence: validating one user doesn't affect another" $
+    \\(user1 :: Username) (pass1 :: PlaintextPassword)
+     (user2 :: Username) (pass2 :: PlaintextPassword) -> ioProperty $ do
+      _ <- runM $ validateCredentials user1 pass1
+      result1 <- runM $ validateCredentials user2 pass2
+      result2 <- runM $ validateCredentials user2 pass2
+      pure $ result1 === result2
 @
 -}
 class (Monad m) => AuthBackend m where

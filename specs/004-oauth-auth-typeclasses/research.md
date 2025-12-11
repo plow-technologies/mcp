@@ -3,6 +3,8 @@
 **Feature Branch**: `004-oauth-auth-typeclasses`
 **Date**: 2025-12-11
 
+> **Note**: Code samples in this document are **illustrative pseudo-code**. Function bodies have not been compiled or tested. Focus on **type signatures, interfaces, and structural intent** rather than implementation details.
+
 ## Technical Decisions
 
 ### 1. Associated Type Families vs Functional Dependencies

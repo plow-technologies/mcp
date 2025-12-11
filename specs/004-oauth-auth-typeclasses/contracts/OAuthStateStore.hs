@@ -3,6 +3,10 @@
 
 {- | OAuth 2.1 State Persistence Typeclass
 
+__DISCLAIMER__: This is a design contract, not production code. Code samples
+are illustrative pseudo-code. Function bodies have not been compiled or tested.
+Focus on type signatures, interfaces, and structural intent.
+
 This module defines the abstract interface for OAuth state persistence,
 enabling swappable production implementations (PostgreSQL, Redis, etc.)
 while maintaining backward compatibility with the existing TVar-based
@@ -107,8 +111,19 @@ import Network.URI (URI)
 
 {- | Time abstraction for testable time-dependent operations.
 
+__IMPORTANT__: Use the @monad-time@ package from Hackage instead of defining this ourselves!
+See: https://hackage.haskell.org/package/monad-time
+
+The package provides exactly this typeclass with instances for IO, transformers, etc.
+Import @Control.Monad.Time@ and add @monad-time@ to dependencies.
+
 Production uses 'IO' time; tests use controlled/mock time.
 This enables deterministic testing of expiry behavior.
+
+@
+import Control.Monad.Time (MonadTime(..))
+-- getCurrentTime :: MonadTime m => m UTCTime
+@
 -}
 class (Monad m) => MonadTime m where
     {- | Get the current time.
