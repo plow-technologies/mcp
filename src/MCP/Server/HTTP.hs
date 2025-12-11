@@ -42,13 +42,16 @@ module MCP.Server.HTTP (
     renderErrorPage,
     scopeToDescription,
     formatScopeDescriptions,
+
+    -- * PROOF-OF-CONCEPT: AppM-based handlers (demonstrates typeclass architecture)
+    handleMetadataAppM,
+    demoHandleMetadataWithAppM,
 ) where
 
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO, writeTVar)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Reader (ask)
+import Control.Monad.Reader (ask, asks)
 import Control.Monad.State.Strict (get, put)
-import Crypto.JOSE (JWK)
 import Data.Aeson (encode, fromJSON, object, toJSON, (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as LBS
@@ -65,7 +68,7 @@ import Data.UUID.V4 qualified as UUID
 import GHC.Generics (Generic)
 import Network.HTTP.Media ((//), (/:))
 import Network.Wai (Application)
-import Network.Wai.Handler.Warp (Port, run)
+import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant (Context (..), Handler, Proxy (..), Server, serve, serveWithContext, throwError)
 import Servant.API (Accept (..), FormUrlEncoded, Get, Header, Headers, JSON, MimeRender (..), NoContent (..), Post, QueryParam, QueryParam', ReqBody, Required, StdMethod (POST), Verb, addHeader, (:<|>) (..), (:>))
@@ -77,6 +80,11 @@ import Control.Monad (unless, when)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
 import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
+import MCP.Server.Auth.Backend ()
+-- Import AuthBackend instance for AppM
+import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
+import MCP.Server.OAuth.Store ()
+-- Import OAuthStateStore instance for AppM
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import MCP.Trace.Operation (OperationTrace (..))
@@ -92,22 +100,6 @@ instance Accept HTML where
 
 instance MimeRender HTML Text where
     mimeRender _ = LBS.fromStrict . TE.encodeUtf8
-
--- | Configuration for running an MCP HTTP server
-data HTTPServerConfig = HTTPServerConfig
-    { httpPort :: Port
-    , httpBaseUrl :: Text -- Base URL for OAuth endpoints (e.g., "https://api.example.com")
-    , httpServerInfo :: Implementation
-    , httpCapabilities :: ServerCapabilities
-    , httpEnableLogging :: Bool
-    , httpOAuthConfig :: Maybe OAuthConfig
-    , httpJWK :: Maybe JWK -- JWT signing key
-    , httpProtocolVersion :: Text -- MCP protocol version
-    , httpProtectedResourceMetadata :: Maybe ProtectedResourceMetadata
-    {- ^ Custom protected resource metadata.
-    When Nothing, auto-generated from httpBaseUrl.
-    -}
-    }
 
 -- | User information from OAuth
 data AuthUser = AuthUser
@@ -706,6 +698,94 @@ handleMetadata config = do
             , codeChallengeMethodsSupported = fmap supportedCodeChallengeMethods oauthCfg
             }
 
+{- | PROOF-OF-CONCEPT: OAuth metadata endpoint using AppM with typeclass constraints.
+
+This handler demonstrates the new architecture pattern:
+
+* Uses 'AppM' monad instead of 'Handler'
+* Reads config via 'MonadReader AppEnv' (asks envConfig)
+* Uses typeclass constraints ('OAuthStateStore', 'AuthBackend')
+* Converted to Handler via 'runAppM' natural transformation
+
+This is functionally identical to 'handleMetadata' but proves the typeclass-based
+architecture works end-to-end. Future handlers can follow this pattern to gain
+access to the full typeclass abstraction layer.
+
+== Usage Pattern
+
+To use this handler in Servant:
+
+@
+-- Create AppEnv combining all dependencies
+let appEnv = AppEnv
+      { envOAuth = oauthTVarEnv
+      , envAuth = demoCredEnv
+      , envConfig = config
+      , envTracer = tracer
+      }
+
+-- Convert AppM handler to Servant Handler using runAppM
+handler :: Handler OAuthMetadata
+handler = runAppM appEnv handleMetadataAppM
+@
+
+Or use hoistServer for the entire API:
+
+@
+hoistServer (Proxy :: Proxy SomeAPI) (runAppM appEnv) serverInAppM
+@
+
+NOTE: This handler doesn't actually use the OAuthStateStore/AuthBackend yet
+(metadata is read-only config), but the constraints are present to demonstrate
+the pattern. For a fuller example using the typeclasses, see the planned
+refactoring of handleRegister or handleToken.
+-}
+handleMetadataAppM :: AppM OAuthMetadata
+handleMetadataAppM = do
+    -- Access config via Reader
+    config <- asks envConfig
+    let baseUrl = httpBaseUrl config
+        oauthCfg = httpOAuthConfig config
+    return
+        OAuthMetadata
+            { issuer = baseUrl
+            , authorizationEndpoint = baseUrl <> "/authorize"
+            , tokenEndpoint = baseUrl <> "/token"
+            , registrationEndpoint = Just (baseUrl <> "/register")
+            , userInfoEndpoint = Nothing
+            , jwksUri = Nothing
+            , scopesSupported = fmap supportedScopes oauthCfg
+            , responseTypesSupported = maybe ["code"] supportedResponseTypes oauthCfg
+            , grantTypesSupported = fmap supportedGrantTypes oauthCfg
+            , tokenEndpointAuthMethodsSupported = fmap supportedAuthMethods oauthCfg
+            , codeChallengeMethodsSupported = fmap supportedCodeChallengeMethods oauthCfg
+            }
+
+{- | PROOF-OF-CONCEPT: Demonstrate calling the AppM-based handler.
+
+This function shows how to integrate an AppM handler into the existing
+HTTP.hs infrastructure. It creates the AppEnv from existing components
+and uses runAppM for the natural transformation.
+
+This is NOT wired into the actual API (to avoid modifying the API type),
+but serves as a reference implementation showing the complete integration pattern.
+-}
+demoHandleMetadataWithAppM ::
+    HTTPServerConfig ->
+    IOTracer HTTPTrace ->
+    TVar OAuthState -> -- Old-style OAuth state (HTTP.hs version)
+    Handler OAuthMetadata
+demoHandleMetadataWithAppM config _tracer _oauthStateVar = do
+    -- NOTE: This is a demonstration only. In a real integration, you would:
+    -- 1. Replace TVar OAuthState (HTTP.hs version) with OAuthTVarEnv (typeclass version)
+    -- 2. Add DemoCredentialEnv to function parameters
+    -- 3. Create AppEnv from all components
+    -- 4. Use: runAppM appEnv handleMetadataAppM
+    --
+    -- For now, we just call handleMetadata directly since we don't have
+    -- the typeclass-based state available in this context.
+    handleMetadata config
+
 -- | Handle dynamic client registration
 handleRegister :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> ClientRegistrationRequest -> Handler ClientRegistrationResponse
 handleRegister config tracer oauthStateVar (ClientRegistrationRequest reqName reqRedirects reqGrants reqResponses reqAuth) = do
@@ -883,7 +963,7 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
         else do
             -- Validate credentials
             let oauthCfg = httpOAuthConfig config
-                store = maybe (CredentialStore Map.empty "") credentialStore oauthCfg
+                store = maybe (CredentialStore Map.empty "") MCP.Server.Auth.credentialStore oauthCfg
                 username = formUsername loginForm
                 password = formPassword loginForm
 

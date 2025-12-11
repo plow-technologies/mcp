@@ -1,6 +1,9 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- |
 Module      : MCP.Server.HTTP.AppEnv
@@ -54,21 +57,31 @@ module MCP.Server.HTTP.AppEnv (
     -- * Composite Error
     AppError (..),
 
+    -- * Application Monad
+    AppM (..),
+    runAppM,
+
     -- * Error Translation
     toServerError,
 ) where
 
+import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
+import Control.Monad.Time (MonadTime (..))
 import Crypto.JOSE (JWK)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
 import Network.Wai.Handler.Warp (Port)
-import Servant (ServerError, err400, err401, err500, errBody)
+import Servant (Handler, ServerError, err400, err401, err500, errBody)
 
 import MCP.Server.Auth (OAuthConfig, ProtectedResourceMetadata)
+import MCP.Server.Auth.Backend (AuthBackend (..))
 import MCP.Server.Auth.Demo (DemoAuthError (..), DemoCredentialEnv)
 import MCP.Server.OAuth.InMemory (OAuthStoreError (..), OAuthTVarEnv)
+import MCP.Server.OAuth.Store (OAuthStateStore (..))
 import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types (Implementation, ServerCapabilities)
 import Plow.Logging (IOTracer)
@@ -123,6 +136,65 @@ data AppEnv = AppEnv
     -- ^ Tracer for HTTP and OAuth events
     }
     deriving (Generic)
+
+-- -----------------------------------------------------------------------------
+-- Application Monad
+-- -----------------------------------------------------------------------------
+
+{- | Application monad for HTTP handlers.
+
+Combines ReaderT for environment access with ExceptT for error handling,
+layered over Servant's Handler monad.
+
+This monad provides:
+
+* 'MonadReader AppEnv': Access to OAuth state, auth backend, config, and tracer
+* 'MonadError AppError': Composable error handling via AppError sum type
+* 'MonadIO': Lift IO operations
+* Automatic conversion to Handler via natural transformation
+
+== Usage
+
+@
+myHandler :: AppM ResponseType
+myHandler = do
+  -- Access environment components
+  oauthEnv <- asks envOAuth
+
+  -- Perform operations that may fail
+  result <- lookupAuthCode codeId
+  case result of
+    Nothing -> throwError (ValidationErr "Invalid code")
+    Just code -> ...
+@
+-}
+newtype AppM a = AppM
+    { unAppM :: ReaderT AppEnv (ExceptT AppError Handler) a
+    }
+    deriving newtype
+        ( Functor
+        , Applicative
+        , Monad
+        , MonadIO
+        , MonadReader AppEnv
+        , MonadError AppError
+        )
+
+{- | Run an AppM computation in the Handler monad.
+
+Executes the ReaderT and ExceptT layers, translating AppError to ServerError.
+
+@
+handler :: AppEnv -> AppM a -> Handler a
+handler env action = runAppM env action
+@
+-}
+runAppM :: AppEnv -> AppM a -> Handler a
+runAppM env action = do
+    result <- runExceptT $ runReaderT (unAppM action) env
+    case result of
+        Left err -> throwError (toServerError err)
+        Right a -> pure a
 
 -- -----------------------------------------------------------------------------
 -- Composite Error
@@ -206,3 +278,91 @@ toServerError (ServerErr serverErr) =
 -- | Convert Text to lazy ByteString for errBody
 toLBS :: Text -> LBS.ByteString
 toLBS = LBS.fromStrict . TE.encodeUtf8
+
+-- -----------------------------------------------------------------------------
+-- Typeclass Instances for AppM
+-- -----------------------------------------------------------------------------
+
+{- | MonadTime instance for AppM.
+
+Delegates to IO's MonadTime instance to get real system time.
+-}
+instance MonadTime AppM where
+    currentTime = liftIO currentTime
+    monotonicTime = liftIO monotonicTime
+
+{- | OAuthStateStore instance for AppM.
+
+Delegates operations to the in-memory TVar-based implementation via
+the OAuthTVarEnv in the AppEnv. Uses ReaderT transformation to access
+the OAuth environment component.
+-}
+instance OAuthStateStore AppM where
+    type OAuthStateError AppM = OAuthStoreError
+    type OAuthStateEnv AppM = OAuthTVarEnv
+
+    storeAuthCode code = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (storeAuthCode code) oauthEnv
+
+    lookupAuthCode codeId = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (lookupAuthCode codeId) oauthEnv
+
+    deleteAuthCode codeId = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (deleteAuthCode codeId) oauthEnv
+
+    storeAccessToken tokenId user = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (storeAccessToken tokenId user) oauthEnv
+
+    lookupAccessToken tokenId = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (lookupAccessToken tokenId) oauthEnv
+
+    storeRefreshToken tokenId pair = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (storeRefreshToken tokenId pair) oauthEnv
+
+    lookupRefreshToken tokenId = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (lookupRefreshToken tokenId) oauthEnv
+
+    updateRefreshToken tokenId pair = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (updateRefreshToken tokenId pair) oauthEnv
+
+    storeClient clientId info = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (storeClient clientId info) oauthEnv
+
+    lookupClient clientId = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (lookupClient clientId) oauthEnv
+
+    storePendingAuth sessionId auth = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (storePendingAuth sessionId auth) oauthEnv
+
+    lookupPendingAuth sessionId = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (lookupPendingAuth sessionId) oauthEnv
+
+    deletePendingAuth sessionId = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (deletePendingAuth sessionId) oauthEnv
+
+{- | AuthBackend instance for AppM.
+
+Delegates credential validation to the demo credential implementation via
+the DemoCredentialEnv in the AppEnv. Uses ReaderT transformation to access
+the auth environment component.
+-}
+instance AuthBackend AppM where
+    type AuthBackendError AppM = DemoAuthError
+    type AuthBackendEnv AppM = DemoCredentialEnv
+
+    validateCredentials username password = do
+        authEnv <- asks envAuth
+        liftIO $ runReaderT (validateCredentials username password) authEnv
