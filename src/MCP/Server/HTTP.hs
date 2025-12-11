@@ -61,20 +61,22 @@ import Data.Functor.Contravariant (contramap)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isJust)
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Data.Time.Clock (UTCTime, addUTCTime, getCurrentTime)
+import Data.Time.Clock (addUTCTime, getCurrentTime)
 import Data.UUID qualified as UUID
 import Data.UUID.V4 qualified as UUID
 import GHC.Generics (Generic)
 import Network.HTTP.Media ((//), (/:))
+import Network.URI (parseURI)
 import Network.Wai (Application)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant (Context (..), Handler, Proxy (..), Server, serve, serveWithContext, throwError)
 import Servant.API (Accept (..), FormUrlEncoded, Get, Header, Headers, JSON, MimeRender (..), NoContent (..), Post, QueryParam, QueryParam', ReqBody, Required, StdMethod (POST), Verb, addHeader, (:<|>) (..), (:>))
-import Servant.Auth.Server (Auth, AuthResult (..), FromJWT, JWT, JWTSettings, ToJWT, defaultCookieSettings, defaultJWTSettings, generateKey, makeJWT)
+import Servant.Auth.Server (Auth, AuthResult (..), JWT, JWTSettings, defaultCookieSettings, defaultJWTSettings, generateKey, makeJWT)
 import Servant.Server (err400, err401, err500, errBody, errHeaders)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
 import Web.HttpApiData (parseUrlPiece, toUrlPiece)
@@ -90,7 +92,7 @@ import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
-import MCP.Server.OAuth.Types (AuthCodeId (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), Scope (..), SessionId (..), mkSessionId, unSessionId)
+import MCP.Server.OAuth.Types (AuthCodeId (..), AuthUser (..), AuthorizationCode (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), PendingAuthorization (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), Scope (..), SessionId (..), UserId (..), mkScope, mkSessionId, mkUserId, unClientId, unCodeChallenge, unScope, unSessionId, unUserId)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import MCP.Trace.Operation (OperationTrace (..))
@@ -107,27 +109,6 @@ instance Accept HTML where
 instance MimeRender HTML Text where
     mimeRender _ = LBS.fromStrict . TE.encodeUtf8
 
--- | User information from OAuth
-data AuthUser = AuthUser
-    { userId :: Text
-    , userEmail :: Maybe Text
-    , userName :: Maybe Text
-    }
-    deriving (Show, Generic)
-
--- | Authorization code with PKCE
-data AuthorizationCode = AuthorizationCode
-    { authCode :: Text
-    , authClientId :: Text
-    , authRedirectUri :: Text
-    , authCodeChallenge :: Text
-    , authCodeChallengeMethod :: Text
-    , authScopes :: [Text]
-    , authUserId :: Text
-    , authExpiry :: UTCTime
-    }
-    deriving (Show, Generic)
-
 -- | OAuth server state
 data OAuthState = OAuthState
     { authCodes :: Map AuthCodeId AuthorizationCode -- code -> AuthorizationCode
@@ -135,19 +116,6 @@ data OAuthState = OAuthState
     , refreshTokens :: Map RefreshTokenId (ClientId, AuthUser) -- refresh_token -> (client_id, user)
     , registeredClients :: Map ClientId ClientInfo -- client_id -> ClientInfo
     , pendingAuthorizations :: Map SessionId PendingAuthorization -- session_id -> pending authorization
-    }
-    deriving (Show, Generic)
-
--- | Pending authorization awaiting user authentication
-data PendingAuthorization = PendingAuthorization
-    { pendingClientId :: Text
-    , pendingRedirectUri :: Text
-    , pendingCodeChallenge :: Text
-    , pendingCodeChallengeMethod :: Text
-    , pendingScope :: Maybe Text
-    , pendingState :: Maybe Text
-    , pendingResource :: Maybe Text
-    , pendingCreatedAt :: UTCTime
     }
     deriving (Show, Generic)
 
@@ -265,25 +233,6 @@ instance Aeson.ToJSON TokenResponse where
                 ++ maybe [] (\r -> ["refresh_token" .= r]) refresh_token
                 ++ maybe [] (\s -> ["scope" .= s]) scope
 
-instance Aeson.FromJSON AuthUser where
-    parseJSON = Aeson.withObject "AuthUser" $ \v ->
-        AuthUser
-            <$> v Aeson..: "sub"
-            <*> v Aeson..:? "email"
-            <*> v Aeson..:? "name"
-
-instance Aeson.ToJSON AuthUser where
-    toJSON AuthUser{..} =
-        object
-            [ "sub" .= userId
-            , "email" .= userEmail
-            , "name" .= userName
-            ]
-
--- Instances for JWT
-instance ToJWT AuthUser
-instance FromJWT AuthUser
-
 -- | MCP API definition for HTTP server (following the MCP transport spec)
 type MCPAPI auths = Auth auths AuthUser :> "mcp" :> ReqBody '[JSON] Aeson.Value :> Post '[JSON] Aeson.Value
 
@@ -356,7 +305,7 @@ mcpApp config tracer stateVar oauthStateVar jwtSettings =
     mcpServerAuth httpConfig httpTracer stateTVar authResult requestValue =
         case authResult of
             Authenticated user -> do
-                liftIO $ traceWith httpTracer $ HTTPAuthSuccess (userId user)
+                liftIO $ traceWith httpTracer $ HTTPAuthSuccess (unUserId $ userUserId user)
                 handleHTTPRequest httpConfig httpTracer stateTVar (Just user) requestValue
             BadPassword -> do
                 liftIO $ traceWith httpTracer $ HTTPAuthFailure "Bad password"
@@ -890,16 +839,25 @@ handleAuthorize config tracer oauthStateVar responseType clientId redirectUri co
     let sessionId = SessionId sessionIdText
     currentTime <- liftIO getCurrentTime
 
-    -- Create pending authorization (using old PendingAuthorization from HTTP.hs)
+    -- Convert mScope from Maybe Text to Maybe (Set Scope)
+    let scopesSet =
+            mScope >>= \scopeText ->
+                let scopeTexts = T.splitOn " " scopeText
+                    scopesMaybe = traverse (mkScope . T.strip) scopeTexts
+                 in fmap Set.fromList scopesMaybe
+        -- Convert mResource from Maybe Text to Maybe URI
+        resourceUri = mResource >>= (parseURI . T.unpack)
+
+    -- Create pending authorization
     let pending =
             PendingAuthorization
-                { pendingClientId = clientIdText
-                , pendingRedirectUri = redirectUriText
-                , pendingCodeChallenge = unCodeChallenge codeChallenge
-                , pendingCodeChallengeMethod = codeChallengeMethodText
-                , pendingScope = mScope
+                { pendingClientId = clientId
+                , pendingRedirectUri = redirectUri
+                , pendingCodeChallenge = codeChallenge
+                , pendingCodeChallengeMethod = codeChallengeMethod
+                , pendingScope = scopesSet
                 , pendingState = mState
-                , pendingResource = mResource
+                , pendingResource = resourceUri
                 , pendingCreatedAt = currentTime
                 }
 
@@ -971,7 +929,7 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
     if formAction loginForm == "deny"
         then do
             -- Emit denial trace
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationDenied (pendingClientId pending) "User denied authorization"
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationDenied (unClientId $ pendingClientId pending) "User denied authorization"
 
             -- Clear session and redirect with error
             let clearCookie = "mcp_session=; Max-Age=0; Path=/"
@@ -979,7 +937,7 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
                 stateParam = case pendingState pending of
                     Just s -> "&state=" <> s
                     Nothing -> ""
-                redirectUrl = pendingRedirectUri pending <> "?" <> errorParams <> stateParam
+                redirectUrl = toUrlPiece (pendingRedirectUri pending) <> "?" <> errorParams <> stateParam
 
             -- Remove pending authorization
             liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
@@ -1002,22 +960,28 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
             if credentialsValid
                 then do
                     -- Emit authorization granted trace
-                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (pendingClientId pending) (unUsername username)
+                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (unClientId $ pendingClientId pending) (unUsername username)
 
                     -- Generate authorization code
                     code <- liftIO $ generateAuthCodeWithConfig config
                     codeGenerationTime <- liftIO getCurrentTime
                     let expirySeconds = maybe 600 (fromIntegral . authCodeExpirySeconds) oauthCfg
                         expiry = addUTCTime expirySeconds codeGenerationTime
+                        -- Convert pendingScope from Maybe (Set Scope) to Set Scope
+                        scopes = fromMaybe Set.empty (pendingScope pending)
+                        -- Create UserId from username
+                        userId = case mkUserId (unUsername username) of
+                            Just uid -> uid
+                            Nothing -> Prelude.error "Invalid user ID" -- This shouldn't happen as username is already validated
                         authCode =
                             AuthorizationCode
-                                { authCode = code
+                                { authCodeId = AuthCodeId code
                                 , authClientId = pendingClientId pending
                                 , authRedirectUri = pendingRedirectUri pending
                                 , authCodeChallenge = pendingCodeChallenge pending
                                 , authCodeChallengeMethod = pendingCodeChallengeMethod pending
-                                , authScopes = maybe [] (T.splitOn " ") (pendingScope pending)
-                                , authUserId = unUsername username
+                                , authScopes = scopes
+                                , authUserId = userId
                                 , authExpiry = expiry
                                 }
 
@@ -1033,10 +997,10 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
                     let stateParam = case pendingState pending of
                             Just s -> "&state=" <> s
                             Nothing -> ""
-                        redirectUrl = pendingRedirectUri pending <> "?code=" <> code <> stateParam
+                        redirectUrl = toUrlPiece (pendingRedirectUri pending) <> "?code=" <> code <> stateParam
                         clearCookie = "mcp_session=; Max-Age=0; Path=/"
 
-                    return $ addHeader redirectUrl $ addHeader clearCookie NoContent
+                    return $ addHeader clearCookie $ addHeader redirectUrl NoContent
                 else
                     -- Invalid credentials - return error (validateCredential already emitted OAuthLoginAttempt trace)
                     throwError err401{errBody = encode $ object ["error" .= ("authentication_failed" :: Text), "error_description" .= ("Invalid username or password" :: Text)]}
@@ -1101,11 +1065,10 @@ handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Authorization code expired" :: Text)]}
 
-    -- Verify PKCE (validateCodeVerifier now uses newtypes, but authCodeChallenge is still Text)
-    -- We need to wrap authCodeChallenge as CodeChallenge
-    let authChallenge = CodeChallenge (authCodeChallenge authCode)
+    -- Verify PKCE (authCodeChallenge is already CodeChallenge from AuthorizationCode)
+    let authChallenge = authCodeChallenge authCode
         pkceValid = validateCodeVerifier codeVerifier authChallenge
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthPKCEValidation (unCodeVerifier codeVerifier) (authCodeChallenge authCode) pkceValid
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthPKCEValidation (unCodeVerifier codeVerifier) (unCodeChallenge authChallenge) pkceValid
     unless pkceValid $ do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
         throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Invalid code verifier" :: Text)]}
@@ -1114,18 +1077,19 @@ handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
     let oauthCfg = httpOAuthConfig config
         emailDomain = maybe "example.com" demoEmailDomain oauthCfg
         userName = maybe "User" demoUserName oauthCfg
+        userId = authUserId authCode
         user =
             AuthUser
-                { userId = authUserId authCode
-                , userEmail = Just $ authUserId authCode <> "@" <> emailDomain
-                , userName = Just userName
+                { userUserId = userId
+                , userUserEmail = Just $ unUserId userId <> "@" <> emailDomain
+                , userUserName = Just userName
                 }
 
     -- Generate tokens
     accessTokenText <- generateJWTAccessToken user jwtSettings
     refreshTokenText <- liftIO $ generateRefreshTokenWithConfig config
     let refreshToken = RefreshTokenId refreshTokenText
-        clientId = ClientId (authClientId authCode)
+        clientId = authClientId authCode
 
     -- Store tokens
     liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
@@ -1144,7 +1108,7 @@ handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
             , token_type = "Bearer"
             , expires_in = Just $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
             , refresh_token = Just refreshTokenText
-            , scope = if null (authScopes authCode) then Nothing else Just (T.intercalate " " (authScopes authCode))
+            , scope = if Set.null (authScopes authCode) then Nothing else Just (T.intercalate " " (map unScope $ Set.toList $ authScopes authCode))
             }
 
 -- | Handle refresh token grant
