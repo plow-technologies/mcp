@@ -6,16 +6,28 @@
 
 {- |
 Module      : MCP.Server.Auth
-Description : MCP-compliant OAuth 2.1 authentication
+Description : MCP-compliant OAuth 2.1 authentication with pluggable credential backends
 Copyright   : (C) 2025 Matthias Pall Gissurarson
 License     : MIT
 Maintainer  : mpg@mpg.is
 Stability   : experimental
 Portability : GHC
 
-This module provides MCP-compliant OAuth 2.1 authentication with PKCE support.
+This module provides MCP-compliant OAuth 2.1 authentication with PKCE support,
+and re-exports the credential authentication backend types.
+
+== Re-exports
+
+* "MCP.Server.Auth.Backend" - AuthBackend typeclass for pluggable credential validation
+* "MCP.Server.Auth.Demo" - Demo implementation with hardcoded credentials
 -}
 module MCP.Server.Auth (
+    -- * AuthBackend typeclass (re-exported from MCP.Server.Auth.Backend)
+    module MCP.Server.Auth.Backend,
+
+    -- * Demo implementation (re-exported from MCP.Server.Auth.Demo)
+    module MCP.Server.Auth.Demo,
+
     -- * OAuth Configuration
     OAuthConfig (..),
     OAuthProvider (..),
@@ -41,13 +53,14 @@ module MCP.Server.Auth (
     ProtectedResourceAuth,
     ProtectedResourceAuthConfig (..),
 
-    -- * Credential Management
-    CredentialStore (..),
-    HashedPassword (..),
-    mkHashedPassword,
+    -- * Legacy Credential Management (DEPRECATED - use Auth.Backend instead)
+    -- These are kept for backward compatibility but will be removed in a future version
     validateCredential,
-    defaultDemoCredentialStore,
 ) where
+
+-- Re-exports
+import MCP.Server.Auth.Backend
+import MCP.Server.Auth.Demo
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Crypto.Hash (hashWith)
@@ -56,10 +69,8 @@ import Data.Aeson (FromJSON, ToJSON)
 import Data.Aeson qualified as Aeson
 import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
-import Data.ByteString qualified as BS
 import Data.ByteString.Base64.URL qualified as B64URL
 import Data.ByteString.Lazy qualified as LBS
-import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -125,18 +136,8 @@ data OAuthConfig = OAuthConfig
       credentialStore :: CredentialStore
     , loginSessionExpirySeconds :: Int
     }
-    deriving (Show, Generic)
-
--- | Hashed password wrapper
-newtype HashedPassword = HashedPassword {unHashedPassword :: Text}
-    deriving (Show, Eq)
-
--- | In-memory credential store
-data CredentialStore = CredentialStore
-    { storeCredentials :: Map Text HashedPassword -- username -> hashed password
-    , storeSalt :: Text -- Server-wide salt for hashing
-    }
-    deriving (Show, Generic)
+    deriving (Generic)
+-- Note: No Show instance because CredentialStore contains ScrubbedBytes (no Show)
 
 -- | PKCE challenge data
 data PKCEChallenge = PKCEChallenge
@@ -399,47 +400,16 @@ newtype ProtectedResourceAuthConfig = ProtectedResourceAuthConfig
     }
     deriving (Show, Generic)
 
--- | Create a hashed password from plaintext using SHA256
-mkHashedPassword :: Text -> Text -> HashedPassword
-mkHashedPassword salt password =
-    let saltedPassword = salt <> password
-        passwordBytes = TE.encodeUtf8 saltedPassword
-        hashBytes = hashWith SHA256 passwordBytes
-        hashByteString = convert hashBytes :: ByteString
-     in HashedPassword $ TE.decodeUtf8 $ B64URL.encodeUnpadded hashByteString
-
 -- | Validate a credential against the store using constant-time comparison
+-- DEPRECATED: This is a legacy wrapper for backward compatibility
+-- Use MCP.Server.Auth.Backend.validateCredentials instead
 validateCredential :: CredentialStore -> Text -> Text -> Bool
 validateCredential store username password =
-    case Map.lookup username (storeCredentials store) of
+    case mkUsername username of
         Nothing -> False
-        Just storedHash ->
-            let candidateHash = mkHashedPassword (storeSalt store) password
-             in constantTimeCompare (unHashedPassword storedHash) (unHashedPassword candidateHash)
-
--- | Constant-time string comparison to prevent timing attacks
-constantTimeCompare :: Text -> Text -> Bool
-constantTimeCompare a b =
-    let bytesA = TE.encodeUtf8 a
-        bytesB = TE.encodeUtf8 b
-     in constantTimeCompareBytes bytesA bytesB
-  where
-    constantTimeCompareBytes :: ByteString -> ByteString -> Bool
-    constantTimeCompareBytes xs ys
-        | BS.length xs /= BS.length ys = False
-        | otherwise =
-            let differences = zipWith (/=) (BS.unpack xs) (BS.unpack ys)
-             in not (or differences)
-
--- | Default demo credential store with test accounts
-defaultDemoCredentialStore :: CredentialStore
-defaultDemoCredentialStore =
-    let salt = "mcp-demo-salt"
-     in CredentialStore
-            { storeCredentials =
-                Map.fromList
-                    [ ("demo", mkHashedPassword salt "demo123")
-                    , ("admin", mkHashedPassword salt "admin456")
-                    ]
-            , storeSalt = salt
-            }
+        Just uname ->
+            case Map.lookup uname (storeCredentials store) of
+                Nothing -> False
+                Just storedHash ->
+                    let candidateHash = mkHashedPassword (storeSalt store) (mkPlaintextPassword password)
+                     in storedHash == candidateHash -- ScrubbedBytes Eq is constant-time

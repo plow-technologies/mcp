@@ -2,8 +2,10 @@
 
 module Main (main) where
 
+import Data.ByteArray qualified as BA
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
+import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (UTCTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeM)
 
@@ -100,20 +102,24 @@ spec = do
 
         describe "mkHashedPassword" $ do
             it "produces consistent hashes for same inputs" $ do
-                let salt = "test-salt" :: Text
-                    password = "test-password" :: Text
+                let saltBytes = BA.convert (TE.encodeUtf8 ("test-salt" :: Text)) :: BA.ScrubbedBytes
+                    salt = Auth.Salt saltBytes
+                    password = Auth.mkPlaintextPassword "test-password"
                     hash1 = Auth.mkHashedPassword salt password
                     hash2 = Auth.mkHashedPassword salt password
-                Auth.unHashedPassword hash1 `shouldBe` Auth.unHashedPassword hash2
+                (hash1 == hash2) `shouldBe` True
 
             it "produces different hashes for different passwords" $ do
-                let salt = "test-salt" :: Text
-                    hash1 = Auth.mkHashedPassword salt "test-password"
-                    hash2 = Auth.mkHashedPassword salt "different-password"
-                Auth.unHashedPassword hash1 `shouldNotBe` Auth.unHashedPassword hash2
+                let saltBytes = BA.convert (TE.encodeUtf8 ("test-salt" :: Text)) :: BA.ScrubbedBytes
+                    salt = Auth.Salt saltBytes
+                    hash1 = Auth.mkHashedPassword salt (Auth.mkPlaintextPassword "test-password")
+                    hash2 = Auth.mkHashedPassword salt (Auth.mkPlaintextPassword "different-password")
+                (hash1 /= hash2) `shouldBe` True
 
             it "produces different hashes for different salts" $ do
-                let password = "test-password" :: Text
-                    hash1 = Auth.mkHashedPassword "test-salt" password
-                    hash2 = Auth.mkHashedPassword "different-salt" password
-                Auth.unHashedPassword hash1 `shouldNotBe` Auth.unHashedPassword hash2
+                let password = Auth.mkPlaintextPassword "test-password"
+                    saltBytes1 = BA.convert (TE.encodeUtf8 ("test-salt" :: Text)) :: BA.ScrubbedBytes
+                    saltBytes2 = BA.convert (TE.encodeUtf8 ("different-salt" :: Text)) :: BA.ScrubbedBytes
+                    hash1 = Auth.mkHashedPassword (Auth.Salt saltBytes1) password
+                    hash2 = Auth.mkHashedPassword (Auth.Salt saltBytes2) password
+                (hash1 /= hash2) `shouldBe` True

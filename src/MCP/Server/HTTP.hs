@@ -54,6 +54,8 @@ import Control.Monad.Reader (ask, asks)
 import Control.Monad.State.Strict (get, put)
 import Data.Aeson (encode, fromJSON, object, toJSON, (.=))
 import Data.Aeson qualified as Aeson
+import Data.ByteArray qualified as BA
+import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Functor.Contravariant (contramap)
 import Data.Map.Strict (Map)
@@ -79,7 +81,7 @@ import Web.FormUrlEncoded (FromForm (..), parseUnique)
 import Control.Monad (unless, when)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
-import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
+import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), Salt (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
 import MCP.Server.Auth.Backend ()
 -- Import AuthBackend instance for AppM
 import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
@@ -963,7 +965,10 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
         else do
             -- Validate credentials
             let oauthCfg = httpOAuthConfig config
-                store = maybe (CredentialStore Map.empty "") MCP.Server.Auth.credentialStore oauthCfg
+                -- Create empty store if no OAuth config (shouldn't happen, but defensive)
+                emptySalt = MCP.Server.Auth.Salt (BA.convert ("" :: ByteString) :: BA.ScrubbedBytes)
+                emptyStore = CredentialStore Map.empty emptySalt
+                store = maybe emptyStore MCP.Server.Auth.credentialStore oauthCfg
                 username = formUsername loginForm
                 password = formPassword loginForm
 
