@@ -119,21 +119,89 @@ Both transports use the same MCPServer typeclass, so server implementations work
 
 ## OAuth Implementation Details
 
-When implementing OAuth features or modifying the authentication flow:
+The OAuth implementation uses a **typeclass-based architecture** for pluggable backends.
+
+### Typeclass Architecture (004-oauth-auth-typeclasses)
+
+**OAuthStateStore** (`MCP.Server.OAuth.Store`):
+- Manages OAuth state persistence (codes, tokens, clients, sessions)
+- Associated types: `OAuthStateError m`, `OAuthStateEnv m`
+- Methods: `storeAuthCode`, `lookupAuthCode`, `deleteAuthCode`, `storeAccessToken`, `lookupAccessToken`, `storeRefreshToken`, `lookupRefreshToken`, `updateRefreshToken`, `storeClient`, `lookupClient`, `storePendingAuth`, `lookupPendingAuth`, `deletePendingAuth`
+- Default: In-memory TVar implementation (`MCP.Server.OAuth.InMemory`)
+
+**AuthBackend** (`MCP.Server.Auth.Backend`):
+- Validates user credentials
+- Associated types: `AuthBackendError m`, `AuthBackendEnv m`
+- Method: `validateCredentials :: Username -> PlaintextPassword -> m Bool`
+- Default: Demo hardcoded credentials (`MCP.Server.Auth.Demo`)
+
+**MonadTime** (`MCP.Server.Time`):
+- Re-export of `Control.Monad.Time.MonadTime`
+- Used by OAuthStateStore for expiry checks
+
+### OAuth Modules:
+- **MCP.Server.OAuth.Types** - Newtypes: `AuthCodeId`, `ClientId`, `SessionId`, `AccessTokenId`, `RefreshTokenId`, `UserId`, `RedirectUri`, `Scope`, `CodeChallenge`, `CodeVerifier`
+- **MCP.Server.OAuth.Store** - OAuthStateStore typeclass definition
+- **MCP.Server.OAuth.InMemory** - TVar-based default implementation
+- **MCP.Server.OAuth.Boundary** - Servant handler boundary translation
+- **MCP.Server.Auth.Backend** - AuthBackend typeclass definition
+- **MCP.Server.Auth.Demo** - Demo credentials implementation
+
+### Composite Types (Three-Layer Cake Pattern)
+
+**AppEnv** (`MCP.Server.HTTP.AppEnv`):
+```haskell
+data AppEnv = AppEnv
+  { envOAuth  :: OAuthTVarEnv        -- OAuth state storage
+  , envAuth   :: DemoCredentialEnv   -- Credential authentication
+  , envConfig :: HTTPServerConfig    -- Server config
+  , envTracer :: IOTracer HTTPTrace  -- Structured tracing
+  }
+```
+
+**AppError** (Sum type for all error sources):
+```haskell
+data AppError
+  = OAuthStoreErr OAuthStoreError  -- Storage errors → 500
+  | AuthBackendErr DemoAuthError   -- Auth failures → 401
+  | ValidationErr Text             -- Input errors → 400
+  | ServerErr ServerError          -- Servant passthrough
+```
+
+Uses `generic-lens` with `HasType` constraints for composable environment/error access.
 
 ### Key Data Types:
-- **HTTPServerConfig** - Main server configuration with httpBaseUrl, httpProtocolVersion, etc.
-- **OAuthConfig** - Comprehensive OAuth configuration with timing, demo settings, and parameters
-- **OAuthState** - Server state containing auth codes, tokens, and registered clients
-- **ClientRegistrationRequest/Response** - Dynamic client registration
-- **AuthorizationCode** - Stores PKCE challenge and expiry
-- **TokenResponse** - Standard OAuth token response format
-- **OAuthMetadata** - Server metadata for discovery
+- **HTTPServerConfig** - Server config with httpBaseUrl, httpProtocolVersion
+- **OAuthConfig** - OAuth settings (timing, demo settings, parameters)
+- **AuthorizationCode** - PKCE code with expiry, client, user, scopes
+- **ClientInfo** - Registered client metadata (redirect URIs, grant types)
+- **PendingAuthorization** - OAuth params awaiting login approval
+- **AuthUser** - Authenticated user (ToJWT/FromJWT)
+- **ExpiryConfig** - Configurable expiry times
+
+### Implementing Custom Backends
+
+**Custom OAuthStateStore** (e.g., PostgreSQL):
+```haskell
+instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT PostgresEnv m) where
+  type OAuthStateError (ReaderT PostgresEnv m) = SqlError
+  type OAuthStateEnv (ReaderT PostgresEnv m) = PostgresEnv
+  storeAuthCode = ...  -- INSERT into auth_codes table
+  lookupAuthCode = ... -- SELECT with expiry check
+```
+
+**Custom AuthBackend** (e.g., LDAP):
+```haskell
+instance MonadIO m => AuthBackend (ReaderT LdapConfig m) where
+  type AuthBackendError (ReaderT LdapConfig m) = LdapError
+  type AuthBackendEnv (ReaderT LdapConfig m) = LdapConfig
+  validateCredentials user pass = ldapBind user pass
+```
 
 ### Important Implementation Notes:
 1. **Client Registration**: Returns configurable client_secret (default empty string for public clients)
 2. **PKCE Validation**: Uses validateCodeVerifier from MCP.Server.Auth
-3. **Token Generation**: 
+3. **Token Generation**:
    - Authorization codes: UUID v4 with configurable prefix (default "code_")
    - Access tokens: JWT tokens using servant-auth-server's makeJWT
    - Refresh tokens: UUID v4 with configurable prefix (default "rt_")
@@ -141,6 +209,7 @@ When implementing OAuth features or modifying the authentication flow:
 5. **Demo Mode**: Configurable auto-approval and demo user generation
 6. **JWT Integration**: Proper JWT tokens fix authentication loops with MCP clients
 7. **Production Ready**: All hardcoded values extracted to configuration parameters
+8. **Thread Safety**: In-memory implementation uses STM transactions
 
 ### Configuration Options:
 
@@ -230,6 +299,13 @@ curl -i http://localhost:8080/mcp
 - Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1) + servant-server 0.19-0.20, servant-auth-server 0.4, jose 0.10-0.11, cryptonite 0.30, stm 2.5, mtl 2.3, aeson 2.1-2.2, generic-lens (to add), network-uri (to add) (004-oauth-auth-typeclasses)
 
 ## Recent Changes
+- 004-oauth-auth-typeclasses: Refactored OAuth to typeclass-based architecture
+  - Added OAuthStateStore typeclass for pluggable state persistence
+  - Added AuthBackend typeclass for pluggable credential validation
+  - Created OAuth.Types module with validated newtypes (AuthCodeId, ClientId, SessionId, etc.)
+  - Implemented three-layer cake pattern with AppEnv/AppError composite types
+  - Default implementations: in-memory TVar (OAuthStateStore), demo credentials (AuthBackend)
+  - Uses generic-lens for composable error/environment handling
 - 002-login-auth-page: Implemented interactive login page with credential authentication
   - Replaced auto-approval OAuth flow with secure login form
   - Added session cookie management and credential validation
