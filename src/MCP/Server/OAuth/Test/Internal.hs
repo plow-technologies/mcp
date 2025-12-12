@@ -50,6 +50,7 @@ module MCP.Server.OAuth.Test.Internal (
 
     -- * Authorization Flow Helpers
     withAuthorizedUser,
+    withAccessToken,
 ) where
 
 import Control.Monad (when)
@@ -68,7 +69,8 @@ import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (NominalDiffTime)
 import Data.UUID qualified as UUID
 import Data.UUID.V4 qualified as UUID
-import Network.HTTP.Types (hLocation, status201)
+import Network.HTTP.Types (hLocation, status200, status201)
+import Network.HTTP.Types.URI (renderSimpleQuery)
 import Network.URI (URI (..), parseURI, uriQuery)
 import Network.Wai (Application)
 import Network.Wai.Test (SResponse, simpleBody, simpleHeaders, simpleStatus)
@@ -480,3 +482,115 @@ withAuthorizedUser config clientId action = do
 
     -- Pass code and verifier to continuation
     action code verifier
+
+{- | Exchange authorization code for access token and run action with token.
+
+Issues real HTTP request to complete the token exchange flow:
+
+1. Uses withAuthorizedUser to obtain authorization code and PKCE verifier
+2. POST /token with authorization code grant type
+3. Extract access token from JSON response
+4. Pass access token to the continuation action
+
+The function:
+1. Delegates to withAuthorizedUser to get AuthCodeId and code verifier
+2. Constructs application/x-www-form-urlencoded token request body with:
+   - grant_type: "authorization_code"
+   - code: authorization code from previous step
+   - redirect_uri: must match the one used in /authorize
+   - client_id: the registered client ID
+   - code_verifier: PKCE verifier for validation
+3. POSTs to /token endpoint
+4. Verifies 200 OK status
+5. Parses JSON response to extract "access_token" field
+6. Passes Text access token to the continuation
+
+Returns:
+- The result of the continuation action
+- Fails with error if token exchange fails (network error, invalid response, etc.)
+
+== Example
+
+@
+it "can obtain access token" $ do
+  withRegisteredClient config $ \\clientId -> do
+    withAccessToken config clientId $ \\accessToken -> do
+      -- accessToken is now available for API requests
+      request methodGet "/mcp"
+        [(hAuthorization, "Bearer " <> TE.encodeUtf8 accessToken)]
+        "" \`shouldRespondWith\` 200
+@
+
+== Error Handling
+
+Uses `error` for failures since this is a test helper combinator. The caller
+expects a valid access token or test failure. Common failure modes:
+
+- Token exchange fails → non-200 status code
+- Malformed JSON response → parse error
+- Missing access_token field → field extraction error
+
+== Security Note
+
+This helper completes the full OAuth flow including PKCE validation.
+The access token returned is a JWT signed by the server.
+-}
+withAccessToken ::
+    TestConfig m ->
+    ClientId ->
+    (Text -> WaiSession st a) ->
+    WaiSession st a
+withAccessToken config clientId action = do
+    withAuthorizedUser config clientId $ \code verifier -> do
+        -- Construct form-encoded token request body
+        let tokenBody =
+                renderSimpleQuery
+                    False
+                    [ ("grant_type", "authorization_code")
+                    , ("code", TE.encodeUtf8 $ unAuthCodeId code)
+                    , ("redirect_uri", "http://localhost/callback")
+                    , ("client_id", TE.encodeUtf8 $ unClientId clientId)
+                    , ("code_verifier", TE.encodeUtf8 verifier)
+                    ]
+
+        -- POST to /token endpoint
+        resp <- post "/token" (LBS.fromStrict tokenBody)
+
+        -- Verify 200 OK status
+        let status = simpleStatus resp
+            bodyBytes = simpleBody resp
+
+        when (status /= status200) $
+            liftIO $
+                error $
+                    "Token exchange failed: Expected 200 OK, got "
+                        <> show status
+                        <> ". Body: "
+                        <> show bodyBytes
+
+        -- Extract access_token from JSON response
+        case eitherDecodeAccessToken bodyBytes of
+            Left err ->
+                liftIO $
+                    error $
+                        "Failed to parse access_token from response: "
+                            <> err
+                            <> ". Body: "
+                            <> show bodyBytes
+            Right accessToken -> action accessToken
+  where
+    -- Helper to decode access_token from JSON response
+    eitherDecodeAccessToken :: LBS.ByteString -> Either String Text
+    eitherDecodeAccessToken bs = do
+        val <- eitherDecode bs
+        case val of
+            Object obj ->
+                case KM.lookup "access_token" obj of
+                    Just (String tokenText) ->
+                        Right tokenText
+                    Just other ->
+                        Left $ "access_token was not a string: " <> show other
+                    Nothing ->
+                        Left "access_token field not found in response"
+            _ ->
+                Left $ "Response was not a JSON object: " <> show val
