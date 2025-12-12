@@ -75,8 +75,10 @@ module MCP.Server.OAuth.Server (
     handleMetadata,
     handleProtectedResourceMetadata,
     handleRegister,
+    handleAuthorize,
 ) where
 
+import Control.Monad (unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, asks)
 import Data.Aeson ((.=))
@@ -86,12 +88,16 @@ import Data.Functor.Contravariant (contramap)
 import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
 import Data.List.NonEmpty qualified as NE
+import Data.Maybe (fromMaybe, isJust)
 import Data.Set qualified as Set
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
+import Data.Time.Clock (getCurrentTime)
 import Data.UUID.V4 qualified as UUID
 import GHC.Generics (Generic)
 import Network.HTTP.Media ((//), (/:))
+import Network.URI (parseURI)
 import Servant (
     FormUrlEncoded,
     Get,
@@ -107,11 +113,13 @@ import Servant (
     Server,
     StdMethod (POST),
     Verb,
+    addHeader,
     (:<|>),
     (:>),
  )
 import Servant.API (Accept (..), MimeRender (..))
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
+import Web.HttpApiData (ToHttpApiData (..))
 
 import Data.UUID qualified as UUID
 import MCP.Server.Auth (
@@ -122,20 +130,22 @@ import MCP.Server.Auth (
  )
 import MCP.Server.Auth.Backend (AuthBackend, PlaintextPassword, Username, mkPlaintextPassword, mkUsername)
 import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
-import MCP.Server.OAuth.Store (OAuthStateStore (storeClient))
+import MCP.Server.OAuth.Store (OAuthStateStore (..))
 import MCP.Server.OAuth.Types (
     ClientAuthMethod,
     ClientId (..),
     ClientInfo (..),
     CodeChallenge,
-    CodeChallengeMethod,
+    CodeChallengeMethod (..),
     GrantType,
+    PendingAuthorization (..),
     RedirectTarget,
     RedirectUri,
     ResponseType (..),
     Scope (..),
-    SessionCookie,
-    SessionId,
+    SessionCookie (..),
+    SessionId (..),
+    mkScope,
     mkSessionId,
  )
 import MCP.Trace.HTTP (HTTPTrace (..))
@@ -566,3 +576,206 @@ handleRegister (ClientRegistrationRequest reqName reqRedirects reqGrants reqResp
             , response_types = reqResponses
             , token_endpoint_auth_method = reqAuth
             }
+
+{- | Authorization endpoint handler (polymorphic).
+
+Handles OAuth authorization requests and returns an interactive login page.
+
+This handler is polymorphic over the monad @m@, requiring:
+
+* 'OAuthStateStore m': Storage for pending authorizations
+* 'MonadIO m': Ability to generate UUIDs and get current time
+* 'MonadReader env m': Access to environment containing config and tracer
+* 'HasType HTTPServerConfig env': Config can be extracted via generic-lens
+* 'HasType (IOTracer HTTPTrace) env': Tracer can be extracted via generic-lens
+
+The handler:
+
+1. Validates response_type (only "code" supported)
+2. Validates code_challenge_method (only "S256" supported)
+3. Looks up the client to verify it's registered
+4. Validates the redirect_uri is registered for this client
+5. Generates a session ID and stores pending authorization
+6. Returns login page HTML with session cookie
+
+== Usage
+
+@
+-- In AppM (with AppEnv)
+loginPage <- handleAuthorize responseType clientId redirectUri codeChallenge method scope state resource
+
+-- In custom monad
+loginPage <- handleAuthorize responseType clientId redirectUri codeChallenge method scope state resource
+@
+
+== Migration Note
+
+This is ported from HTTP.hs as part of the typeclass-based architecture
+migration. The shim pattern is used: HTTP.hs maintains the old signature
+by calling this handler via runAppM.
+-}
+handleAuthorize ::
+    ( OAuthStateStore m
+    , MonadIO m
+    , MonadReader env m
+    , HasType HTTPServerConfig env
+    , HasType (IOTracer HTTPTrace) env
+    ) =>
+    ResponseType ->
+    ClientId ->
+    RedirectUri ->
+    CodeChallenge ->
+    CodeChallengeMethod ->
+    Maybe Text ->
+    Maybe Text ->
+    Maybe Text ->
+    m (Headers '[Header "Set-Cookie" SessionCookie] Text)
+handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
+    config <- asks (getTyped @HTTPServerConfig)
+    tracer <- asks (getTyped @(IOTracer HTTPTrace))
+
+    let oauthTracer = contramap HTTPOAuth tracer
+        responseTypeText = toUrlPiece responseType
+        clientIdText = unClientId clientId
+        redirectUriText = toUrlPiece redirectUri
+        codeChallengeMethodText = toUrlPiece codeChallengeMethod
+
+    -- Log resource parameter for RFC8707 support
+    liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "authorize endpoint"
+
+    -- Validate response_type (only "code" supported)
+    when (responseType /= ResponseCode) $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "response_type" ("Unsupported response type: " <> responseTypeText)
+        error $ T.unpack $ "Unsupported response_type: " <> responseTypeText
+
+    -- Validate code_challenge_method (only "S256" supported)
+    when (codeChallengeMethod /= S256) $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "code_challenge_method" ("Unsupported method: " <> codeChallengeMethodText)
+        error $ T.unpack $ "Unsupported code_challenge_method: " <> codeChallengeMethodText
+
+    -- Look up client to verify it's registered
+    mClientInfo <- lookupClient clientId
+    clientInfo <- case mClientInfo of
+        Just ci -> return ci
+        Nothing -> do
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "client_id" ("Unregistered client: " <> clientIdText)
+            error $ T.unpack $ "Unregistered client_id: " <> clientIdText
+
+    -- Validate redirect_uri is registered for this client
+    unless (redirectUri `elem` NE.toList (clientRedirectUris clientInfo)) $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "redirect_uri" ("Redirect URI not registered: " <> redirectUriText)
+        error $ T.unpack $ "Invalid redirect_uri: " <> redirectUriText
+
+    let displayName = clientName clientInfo
+        scopeList = maybe [] (T.splitOn " ") mScope
+
+    -- Emit authorization request trace
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationRequest clientIdText scopeList (isJust mState)
+
+    -- Generate session ID
+    sessionIdText <- liftIO $ UUID.toText <$> UUID.nextRandom
+    let sessionId = case mkSessionId sessionIdText of
+            Just sid -> sid
+            Nothing -> error "Generated invalid session UUID"
+    currentTime <- liftIO getCurrentTime
+
+    -- Convert mScope from Maybe Text to Maybe (Set Scope)
+    let scopesSet =
+            mScope >>= \scopeText ->
+                let scopeTexts = T.splitOn " " scopeText
+                    scopesMaybe = traverse (mkScope . T.strip) scopeTexts
+                 in fmap Set.fromList scopesMaybe
+        -- Convert mResource from Maybe Text to Maybe URI
+        resourceUri = mResource >>= (parseURI . T.unpack)
+
+    -- Create pending authorization
+    let pending =
+            PendingAuthorization
+                { pendingClientId = clientId
+                , pendingRedirectUri = redirectUri
+                , pendingCodeChallenge = codeChallenge
+                , pendingCodeChallengeMethod = codeChallengeMethod
+                , pendingScope = scopesSet
+                , pendingState = mState
+                , pendingResource = resourceUri
+                , pendingCreatedAt = currentTime
+                }
+
+    -- Store pending authorization
+    storePendingAuth sessionId pending
+
+    -- Emit login page served trace
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginPageServed sessionIdText
+
+    -- Build session cookie
+    let sessionExpirySeconds = maybe 600 loginSessionExpirySeconds (httpOAuthConfig config)
+        cookieValue = SessionCookie $ "mcp_session=" <> sessionIdText <> "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" <> T.pack (show sessionExpirySeconds)
+        scopes = fromMaybe "default access" mScope
+        loginHtml = renderLoginPage displayName scopes mResource sessionIdText
+
+    return $ addHeader cookieValue loginHtml
+
+-- -----------------------------------------------------------------------------
+-- Helper Functions
+-- -----------------------------------------------------------------------------
+
+-- | Map scope to human-readable description
+scopeToDescription :: Text -> Text
+scopeToDescription "mcp:read" = "Read MCP resources"
+scopeToDescription "mcp:write" = "Write MCP resources"
+scopeToDescription "mcp:tools" = "Execute MCP tools"
+scopeToDescription other = other -- fallback to raw scope
+
+-- | Format scopes as human-readable descriptions
+formatScopeDescriptions :: Text -> Text
+formatScopeDescriptions scopes =
+    let scopeList = T.splitOn " " scopes
+        descriptions = map scopeToDescription scopeList
+     in T.intercalate ", " descriptions
+
+-- | Escape HTML special characters
+escapeHtml :: Text -> Text
+escapeHtml = T.replace "&" "&amp;" . T.replace "<" "&lt;" . T.replace ">" "&gt;" . T.replace "\"" "&quot;" . T.replace "'" "&#39;"
+
+-- | Render login page HTML
+renderLoginPage :: Text -> Text -> Maybe Text -> Text -> Text
+renderLoginPage clientName scopes mResource sessionId =
+    T.unlines
+        [ "<!DOCTYPE html>"
+        , "<html>"
+        , "<head>"
+        , "  <meta charset=\"utf-8\">"
+        , "  <title>Sign In - MCP Server</title>"
+        , "  <style>"
+        , "    body { font-family: system-ui, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; }"
+        , "    h1 { color: #333; }"
+        , "    form { margin-top: 20px; }"
+        , "    label { display: block; margin: 15px 0 5px; }"
+        , "    input[type=text], input[type=password] { width: 100%; padding: 8px; box-sizing: border-box; }"
+        , "    button { margin-top: 20px; margin-right: 10px; padding: 10px 20px; }"
+        , "    .info { background: #f0f0f0; padding: 15px; border-radius: 5px; margin: 20px 0; }"
+        , "  </style>"
+        , "</head>"
+        , "<body>"
+        , "  <h1>Sign In</h1>"
+        , "  <div class=\"info\">"
+        , "    <p>Application <strong>" <> escapeHtml clientName <> "</strong> is requesting access.</p>"
+        , "    <p>Permissions requested: " <> escapeHtml (formatScopeDescriptions scopes) <> "</p>"
+        , case mResource of
+            Just res -> "    <p>Resource: " <> escapeHtml res <> "</p>"
+            Nothing -> ""
+        , "  </div>"
+        , "  <form method=\"POST\" action=\"/login\">"
+        , "    <input type=\"hidden\" name=\"session_id\" value=\"" <> escapeHtml sessionId <> "\">"
+        , "    <label>Username:"
+        , "      <input type=\"text\" name=\"username\" required autofocus>"
+        , "    </label>"
+        , "    <label>Password:"
+        , "      <input type=\"password\" name=\"password\" required>"
+        , "    </label>"
+        , "    <button type=\"submit\" name=\"action\" value=\"login\">Sign In</button>"
+        , "    <button type=\"submit\" name=\"action\" value=\"deny\">Deny</button>"
+        , "  </form>"
+        , "</body>"
+        , "</html>"
+        ]

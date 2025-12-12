@@ -69,7 +69,6 @@ import Data.UUID qualified as UUID
 import Data.UUID.V4 qualified as UUID
 import GHC.Generics (Generic)
 import Network.HTTP.Media ((//), (/:))
-import Network.URI (parseURI)
 import Network.Wai (Application)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
@@ -97,7 +96,7 @@ import MCP.Server.OAuth.Server qualified as OAuthServer
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
-import MCP.Server.OAuth.Types (AuthCodeId (..), AuthUser (..), AuthorizationCode (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), PendingAuthorization (..), RedirectTarget (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), Scope (..), SessionCookie (..), SessionId (..), UserId (..), mkScope, mkSessionId, mkUserId, unClientId, unCodeChallenge, unScope, unSessionId, unUserId)
+import MCP.Server.OAuth.Types (AuthCodeId (..), AuthUser (..), AuthorizationCode (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), PendingAuthorization (..), RedirectTarget (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), Scope (..), SessionCookie (..), SessionId (..), UserId (..), mkSessionId, mkUserId, unClientId, unCodeChallenge, unScope, unSessionId, unUserId)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import MCP.Trace.Operation (OperationTrace (..))
@@ -676,91 +675,47 @@ handleRegister config tracer _oauthStateVar req = do
     -- Call polymorphic handler via runAppM
     runAppM appEnv (OAuthServer.handleRegister req)
 
--- | Handle OAuth authorize endpoint - now returns login page HTML
+{- | Handle OAuth authorize endpoint - now returns login page HTML (SHIM)
+
+This is a temporary shim that maintains the old signature during the migration
+to typeclass-based architecture. It creates a fresh AppEnv and calls the
+polymorphic handler from OAuth.Server.
+
+The shim creates a fresh InMemory OAuthState for the polymorphic handler.
+Clients registered via this endpoint will not be visible to HTTP.hs code
+that uses the old TVar OAuthState.
+
+This is a temporary limitation during migration - will be fixed when HTTP.hs
+is fully migrated to use the polymorphic handlers throughout.
+
+Maintains old signature for compatibility during migration.
+Calls polymorphic handler from OAuth.Server module.
+
+Temporary shim - will be removed in mcp-di0.16.1.5 when all call sites are migrated.
+-}
 handleAuthorize :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> ResponseType -> ClientId -> RedirectUri -> CodeChallenge -> CodeChallengeMethod -> Maybe Text -> Maybe Text -> Maybe Text -> Handler (Headers '[Header "Set-Cookie" SessionCookie] Text)
-handleAuthorize config tracer oauthStateVar responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
-    let oauthTracer = contramap HTTPOAuth tracer
-        responseTypeText = toUrlPiece responseType
-        clientIdText = unClientId clientId
-        redirectUriText = toUrlPiece redirectUri
-        codeChallengeMethodText = toUrlPiece codeChallengeMethod
+handleAuthorize config tracer _oauthStateVar responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
+    -- NOTE: This shim creates a fresh InMemory OAuthState for the polymorphic handler.
+    -- The pending authorization will not be visible to HTTP.hs code that uses the old TVar OAuthState.
+    -- This is a temporary limitation during migration - will be fixed when HTTP.hs is fully migrated.
 
-    -- Log resource parameter for RFC8707 support
-    liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "authorize endpoint"
+    -- Create fresh OAuth environment for polymorphic handler
+    oauthEnv <- liftIO $ newOAuthTVarEnv defaultExpiryConfig
 
-    -- T037: Validate response_type (return HTML error page instead of JSON)
-    when (responseType /= ResponseCode) $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "response_type" ("Unsupported response type: " <> responseTypeText)
-        throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Unsupported Response Type" "Only 'code' response type is supported. Please contact the application developer.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
+    -- Get auth environment (demo credentials)
+    let authEnv = DemoCredentialEnv defaultDemoCredentialStore
 
-    -- T037: Validate code_challenge_method (return HTML error page instead of JSON)
-    when (codeChallengeMethod /= S256) $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "code_challenge_method" ("Unsupported method: " <> codeChallengeMethodText)
-        throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Request" "Only 'S256' code challenge method is supported. Please contact the application developer.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
-
-    -- Look up client to get client name for display
-    oauthState <- liftIO $ readTVarIO oauthStateVar
-
-    -- T040: Handle unregistered client_id - render error page (don't redirect - can't trust redirect_uri)
-    clientInfo <- case Map.lookup clientId (registeredClients oauthState) of
-        Just ci -> return ci
-        Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "client_id" ("Unregistered client: " <> clientIdText)
-            throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Unregistered Client" ("Client ID '" <> clientIdText <> "' is not registered. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
-
-    -- T041: Handle invalid redirect_uri - render error page (don't redirect)
-    -- Validate redirect URI is in registered list (already parsed by FromHttpApiData)
-    unless (redirectUri `elem` clientRedirectUris clientInfo) $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "redirect_uri" ("Redirect URI not registered: " <> redirectUriText)
-        throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Redirect URI" ("The redirect URI '" <> redirectUriText <> "' is not registered for this client. Please contact the application developer."), errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
-
-    let displayName = clientName clientInfo
-        scopeList = maybe [] (T.splitOn " ") mScope
-
-    -- Emit authorization request trace
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationRequest clientIdText scopeList (isJust mState)
-
-    -- Generate session ID
-    sessionIdText <- liftIO $ UUID.toText <$> UUID.nextRandom
-    let sessionId = SessionId sessionIdText
-    currentTime <- liftIO getCurrentTime
-
-    -- Convert mScope from Maybe Text to Maybe (Set Scope)
-    let scopesSet =
-            mScope >>= \scopeText ->
-                let scopeTexts = T.splitOn " " scopeText
-                    scopesMaybe = traverse (mkScope . T.strip) scopeTexts
-                 in fmap Set.fromList scopesMaybe
-        -- Convert mResource from Maybe Text to Maybe URI
-        resourceUri = mResource >>= (parseURI . T.unpack)
-
-    -- Create pending authorization
-    let pending =
-            PendingAuthorization
-                { pendingClientId = clientId
-                , pendingRedirectUri = redirectUri
-                , pendingCodeChallenge = codeChallenge
-                , pendingCodeChallengeMethod = codeChallengeMethod
-                , pendingScope = scopesSet
-                , pendingState = mState
-                , pendingResource = resourceUri
-                , pendingCreatedAt = currentTime
+    -- Construct AppEnv
+    let appEnv =
+            AppEnv
+                { envOAuth = oauthEnv
+                , envAuth = authEnv
+                , envConfig = config
+                , envTracer = tracer
                 }
 
-    -- Store pending authorization
-    liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
-        s{pendingAuthorizations = Map.insert sessionId pending (pendingAuthorizations s)}
-
-    -- Emit login page served trace
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginPageServed sessionIdText
-
-    -- Build session cookie
-    let sessionExpirySeconds = maybe 600 loginSessionExpirySeconds (httpOAuthConfig config)
-        cookieValue = SessionCookie $ "mcp_session=" <> sessionIdText <> "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" <> T.pack (show sessionExpirySeconds)
-        scopes = fromMaybe "default access" mScope
-        loginHtml = renderLoginPage displayName scopes mResource sessionIdText
-
-    return $ addHeader cookieValue loginHtml
+    -- Call polymorphic handler via runAppM
+    runAppM appEnv (OAuthServer.handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource)
 
 -- | Extract session ID from cookie header
 extractSessionFromCookie :: Text -> Maybe SessionId
