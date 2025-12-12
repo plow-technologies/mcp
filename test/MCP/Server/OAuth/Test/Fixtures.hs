@@ -51,6 +51,7 @@ import Data.Time.Format (defaultTimeLocale, parseTimeOrError)
 import Plow.Logging (IOTracer (..), Tracer (..))
 import Servant (Context (..), Proxy (..), hoistServerWithContext, serveWithContext)
 import Servant.Auth.Server (CookieSettings, JWTSettings, defaultCookieSettings, defaultJWTSettings, generateKey)
+import Servant.Server.Internal.Handler (runHandler)
 
 import MCP.Server.Auth.Demo (DemoCredentialEnv (..), defaultDemoCredentialStore)
 import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata)
@@ -224,12 +225,15 @@ referenceTestConfig = do
     return
         TestConfig
             { tcMakeApp = makeApp
-            , tcRunM = \action ->
-                -- For law tests: create a throwaway environment
-                -- Note: runAppM returns Handler a, but tcRunM needs IO a
-                -- This is a design limitation that will be resolved when HTTP.hs
-                -- is fully migrated to AppM. For now, this prevents law tests from running.
-                let _ = action
-                 in error "tcRunM: Cannot convert Handler to IO without Servant runtime - HTTP.hs migration pending"
+            , tcRunM = \action -> do
+                -- Create a throwaway environment for law tests
+                timeTVar <- newTVarIO defaultTestTime
+                env <- mkTestEnv timeTVar
+                -- Run AppM action via runAppM (returns Handler a)
+                -- Then unwrap Handler using runHandler :: Handler a -> IO (Either ServerError a)
+                result <- runHandler $ runAppM env action
+                case result of
+                    Left err -> fail ("tcRunM: Handler failed with ServerError: " <> show err)
+                    Right a -> pure a
             , tcCredentials = TestCredentials "demo" "demo123"
             }
