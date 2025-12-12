@@ -81,6 +81,11 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 
 ## Clarifications
 
+### Session 2025-12-12
+
+- Q: How should HTTP response headers be type-protected to prevent position-swap bugs (e.g., Location/Set-Cookie confusion)? → A: Use Servant's typed header combinators where available; add semantic newtypes for header values (e.g., `Header "Location" RedirectTarget`, `Header "Set-Cookie" SessionCookie`) where names describe the value's purpose, not the header name
+- Q: Where should response header newtypes (RedirectTarget, SessionCookie) be defined? → A: OAuth.Types alongside existing newtypes. Design principle: all OAuth combinators must be usable outside Servant; Servant is a production-ready reference implementation, not the only target. Domain types belong in domain modules.
+
 ### Session 2025-12-11
 
 - Q: Which type system should be the canonical source of truth for OAuth state types? → A: OAuth.Types newtypes (ClientId, RedirectUri, etc.) are canonical; HTTP.hs converts Text ↔ newtype at boundary
@@ -126,6 +131,7 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
   - Idempotence: `storeX k v >> storeX k v` equivalent to `storeX k v`
   - Overwrite: `storeX k v2` after `storeX k v1` makes `lookupX k` return `Just v2`
 - **FR-017**: Lookup operations for time-bounded entities (auth codes, pending authorizations) MUST filter expired entries, returning `Nothing` for expired items. This enables backend TTL mechanisms (e.g., Redis EXPIRE, PostgreSQL scheduled cleanup) and keeps expiry enforcement within the store abstraction.
+- **FR-022**: HTTP response headers MUST use type-safe values to prevent position-swap bugs. Use Servant's typed header combinators where available. For custom/composite headers, add semantic newtypes describing the value's purpose (e.g., `RedirectTarget`, `SessionCookie`) enabling usage like `Header "Location" RedirectTarget`. The `addHeader` call order must match the type-level header list, and distinct types make swaps a compile error.
 
 ### Key Entities
 
@@ -137,6 +143,8 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 - **AuthUser**: Existing data type representing an authenticated user.
 - **Error Prisms**: Constraints using `AsType` from generic-lens to inject/project typeclass-specific errors into a unified error sum type.
 - **Environment Lenses**: Constraints using `HasType` from generic-lens to access typeclass-specific environments from a unified environment product type.
+- **RedirectTarget**: Newtype wrapping redirect URL `Text` for type-safe `Header "Location" RedirectTarget` usage in HTTP 3xx responses. Name describes the semantic purpose (where to redirect), not the header name.
+- **SessionCookie**: Newtype wrapping cookie value `Text` for type-safe `Header "Set-Cookie" SessionCookie` usage. Distinct type from `RedirectTarget` makes position-swap bugs a compile error.
 
 ## Success Criteria *(mandatory)*
 
@@ -158,3 +166,4 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 - The current `OAuthConfig` may be split or restructured to fit into the environment types.
 - JWT signing and validation remain unchanged; only state persistence and credential validation are abstracted.
 - The `generic-lens` package provides both `AsType` (for error prisms) and `HasType` (for environment lenses) constraints.
+- All OAuth domain types (including response types like `RedirectTarget`, `SessionCookie`) belong in `OAuth.Types`, not in HTTP/Servant modules. Design principle: OAuth combinators must be framework-agnostic; Servant is a production-ready reference implementation, not the only target.
