@@ -579,6 +579,7 @@ handleRegister ::
     ( OAuthStateStore m
     , MonadIO m
     , MonadReader env m
+    , MonadError AppError m
     , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
     ) =>
@@ -587,6 +588,11 @@ handleRegister ::
 handleRegister (ClientRegistrationRequest reqName reqRedirects reqGrants reqResponses reqAuth) = do
     config <- asks (getTyped @HTTPServerConfig)
     tracer <- asks (getTyped @(IOTracer HTTPTrace))
+
+    -- Validate redirect_uris is not empty
+    when (null reqRedirects) $
+        throwError $
+            ValidationErr "redirect_uris must not be empty"
 
     -- Generate client ID
     let prefix = maybe "client_" clientIdPrefix (httpOAuthConfig config)
@@ -598,7 +604,7 @@ handleRegister (ClientRegistrationRequest reqName reqRedirects reqGrants reqResp
     -- Note: ClientInfo from OAuth.Types requires NonEmpty and Set
     redirectsNE <- case NE.nonEmpty reqRedirects of
         Just ne -> pure ne
-        Nothing -> error "ClientRegistrationRequest must have at least one redirect_uri"
+        Nothing -> throwError $ ValidationErr "redirect_uris must not be empty"
 
     let grantsSet = Set.fromList reqGrants
         responsesSet = Set.fromList reqResponses
