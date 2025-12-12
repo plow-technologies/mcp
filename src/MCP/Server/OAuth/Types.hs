@@ -42,6 +42,10 @@ module MCP.Server.OAuth.Types (
     CodeVerifier (..),
     mkCodeVerifier,
 
+    -- * HTTP Response Newtypes
+    RedirectTarget (..),
+    SessionCookie (..),
+
     -- * ADTs
     CodeChallengeMethod (..),
     GrantType (..),
@@ -307,6 +311,20 @@ instance FromHttpApiData CodeVerifier where
 
 instance ToHttpApiData CodeVerifier where
     toUrlPiece = unCodeVerifier
+
+-- -----------------------------------------------------------------------------
+-- HTTP Response Newtypes
+-- -----------------------------------------------------------------------------
+
+-- | Semantic wrapper for HTTP redirect target (Location header)
+newtype RedirectTarget = RedirectTarget {unRedirectTarget :: Text}
+    deriving stock (Eq, Show)
+    deriving newtype (ToHttpApiData)
+
+-- | Semantic wrapper for HTTP session cookie (Set-Cookie header)
+newtype SessionCookie = SessionCookie {unSessionCookie :: Text}
+    deriving stock (Eq, Show)
+    deriving newtype (ToHttpApiData)
 
 -- -----------------------------------------------------------------------------
 -- ADTs
@@ -613,4 +631,5 @@ instance ToJSON AuthUser where
 
 -- | JWT instances for AuthUser (rely on JSON instances above)
 instance ToJWT AuthUser
+
 instance FromJWT AuthUser
