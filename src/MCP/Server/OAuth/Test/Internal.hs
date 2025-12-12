@@ -55,6 +55,7 @@ module MCP.Server.OAuth.Test.Internal (
     -- * Test Specs
     clientRegistrationSpec,
     loginFlowSpec,
+    tokenExchangeSpec,
 ) where
 
 import Control.Monad (when)
@@ -775,3 +776,90 @@ loginFlowSpec config = with (withFreshApp config) $ do
                         , ("action", "approve")
                         ]
                 postHtmlForm "/login" loginForm `shouldRespondWith` 401
+
+{- | Test specification for token exchange endpoint.
+
+Tests the /token endpoint according to OAuth 2.0 token exchange flow with PKCE.
+
+Covers:
+- Successful token exchange with valid authorization code and PKCE verifier
+- Response includes access_token and refresh_token
+- Invalid PKCE verifier returns 400
+- Invalid authorization code returns 400
+
+== Usage
+
+@
+import MCP.Server.OAuth.Test.Internal (tokenExchangeSpec)
+
+spec :: Spec
+spec = do
+  let config = TestConfig { ... }
+  tokenExchangeSpec config
+@
+
+== Test Isolation
+
+Each test uses 'withFreshApp' to get a fresh Application instance, ensuring
+complete isolation between tests (no shared state).
+-}
+tokenExchangeSpec :: TestConfig m -> Spec
+tokenExchangeSpec config = with (withFreshApp config) $ do
+    describe "Token Exchange" $ do
+        it "exchanges valid code for tokens" $ do
+            withRegisteredClient config $ \clientId -> do
+                withAuthorizedUser config clientId $ \code verifier -> do
+                    let body = tokenExchangeBody clientId code verifier
+                    resp <- post "/token" (LBS.fromStrict body)
+                    liftIO $ do
+                        simpleStatus resp `shouldSatisfy` (== status200)
+                        let mJson = decode @Value (simpleBody resp)
+                        case mJson of
+                            Just (Object obj) -> do
+                                KM.lookup "access_token" obj `shouldSatisfy` isJust
+                                KM.lookup "refresh_token" obj `shouldSatisfy` isJust
+                            _ -> expectationFailure "Response was not a JSON object"
+
+        it "returns 400 for invalid PKCE verifier" $ do
+            withRegisteredClient config $ \clientId -> do
+                withAuthorizedUser config clientId $ \code _ -> do
+                    let body = tokenExchangeBody clientId code "wrong_verifier"
+                    post "/token" (LBS.fromStrict body) `shouldRespondWith` 400
+
+        it "returns 400 for invalid authorization code" $ do
+            withRegisteredClient config $ \clientId -> do
+                let body = tokenExchangeBody clientId (AuthCodeId "invalid") "verifier"
+                post "/token" (LBS.fromStrict body) `shouldRespondWith` 400
+
+{- | Helper to create application/x-www-form-urlencoded token exchange request body.
+
+Creates a properly-formatted form-urlencoded body for POST /token requests
+with grant_type=authorization_code.
+
+== Parameters
+
+- 'ClientId': The registered client ID
+- 'AuthCodeId': The authorization code from the OAuth flow
+- 'Text': The PKCE code verifier
+
+== Returns
+
+ByteString containing the form-urlencoded request body
+
+== Example
+
+@
+let body = tokenExchangeBody clientId code verifier
+post "/token" (LBS.fromStrict body)
+@
+-}
+tokenExchangeBody :: ClientId -> AuthCodeId -> Text -> ByteString
+tokenExchangeBody clientId code verifier =
+    renderSimpleQuery
+        False
+        [ ("grant_type", "authorization_code")
+        , ("code", TE.encodeUtf8 $ unAuthCodeId code)
+        , ("redirect_uri", "http://localhost/callback")
+        , ("client_id", TE.encodeUtf8 $ unClientId clientId)
+        , ("code_verifier", TE.encodeUtf8 verifier)
+        ]
