@@ -31,6 +31,9 @@ import Trace.GoldenSpec qualified as GoldenSpec
 import Trace.OAuthSpec qualified as OAuthSpec
 import Trace.RenderSpec qualified as RenderSpec
 
+-- Functional tests
+import Functional.OAuthFlowSpec qualified as OAuthFlowSpec
+
 main :: IO ()
 main = hspec spec
 
@@ -73,6 +76,9 @@ spec = do
 
     -- Boundary layer tests (Servant FromHttpApiData/ToHttpApiData)
     BoundarySpec.spec
+
+    -- Functional tests
+    describe "Functional" OAuthFlowSpec.spec
 
     -- Typeclass law tests (using TestM with controlled time)
     describe "TestM OAuthStateStore" $ do
