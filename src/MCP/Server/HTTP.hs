@@ -41,22 +41,16 @@ module MCP.Server.HTTP (
     renderErrorPage,
     scopeToDescription,
     formatScopeDescriptions,
-
-    -- * PROOF-OF-CONCEPT: AppM-based handlers (demonstrates typeclass architecture)
-    handleMetadataAppM,
-    demoHandleMetadataWithAppM,
 ) where
 
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Reader (ask, asks, runReaderT)
+import Control.Monad.Reader (ask)
 import Control.Monad.State.Strict (get, put)
 import Data.Aeson (encode, fromJSON, object, toJSON, (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as LBS
 import Data.Functor.Contravariant (contramap)
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -66,29 +60,29 @@ import Network.HTTP.Media ((//), (/:))
 import Network.Wai (Application)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
-import Servant (Context (..), Handler, Proxy (..), Server, serve, serveWithContext, throwError)
-import Servant.API (Accept (..), Header, Headers, JSON, MimeRender (..), NoContent (..), Post, ReqBody, (:<|>) (..), (:>))
-import Servant.Auth.Server (Auth, AuthResult (..), JWT, JWTSettings, defaultCookieSettings, defaultJWTSettings, generateKey)
+import Servant (Context (..), Handler, Proxy (..), Server, hoistServerWithContext, serve, serveWithContext, throwError)
+import Servant.API (Accept (..), JSON, MimeRender (..), Post, ReqBody, (:<|>) (..), (:>))
+import Servant.Auth.Server (Auth, AuthResult (..), CookieSettings, JWT, JWTSettings, defaultCookieSettings, defaultJWTSettings, generateKey)
 import Servant.Server (err400, err401, err500, errBody, errHeaders)
 
 import Control.Monad (when)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
-import MCP.Server.Auth (OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore)
+import MCP.Server.Auth (OAuthConfig (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore)
 
 -- Import AuthBackend instance for AppM
-import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..), runAppM)
+import MCP.Server.HTTP.AppEnv (AppEnv (..), HTTPServerConfig (..), runAppM)
 
 -- Import OAuthAPI from OAuth.Server (migration from duplication)
 
 import MCP.Server.Auth.Demo (DemoCredentialEnv (..))
-import MCP.Server.OAuth.InMemory (defaultExpiryConfig, newOAuthTVarEnv)
-import MCP.Server.OAuth.Server (ClientRegistrationRequest (..), ClientRegistrationResponse (..), LoginForm (..), OAuthAPI, TokenResponse (..))
+import MCP.Server.OAuth.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
+import MCP.Server.OAuth.Server (LoginForm (..), OAuthAPI)
 import MCP.Server.OAuth.Server qualified as OAuthServer
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
-import MCP.Server.OAuth.Types (AuthCodeId (..), AuthUser (..), AuthorizationCode (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), GrantType (..), PendingAuthorization (..), RedirectTarget (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), Scope (..), SessionCookie (..), SessionId (..), UserId (..), unUserId)
+import MCP.Server.OAuth.Types (AuthUser (..), ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Operation (OperationTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
@@ -104,17 +98,8 @@ instance Accept HTML where
 instance MimeRender HTML Text where
     mimeRender _ = LBS.fromStrict . TE.encodeUtf8
 
--- | OAuth server state
-data OAuthState = OAuthState
-    { authCodes :: Map AuthCodeId AuthorizationCode -- code -> AuthorizationCode
-    , accessTokens :: Map Text AuthUser -- token -> user (still Text, will be AccessTokenId later)
-    , refreshTokens :: Map RefreshTokenId (ClientId, AuthUser) -- refresh_token -> (client_id, user)
-    , registeredClients :: Map ClientId ClientInfo -- client_id -> ClientInfo
-    , pendingAuthorizations :: Map SessionId PendingAuthorization -- session_id -> pending authorization
-    }
-    deriving (Show, Generic)
-
 -- Note: LoginForm is now imported from MCP.Server.OAuth.Server
+-- Note: OAuthState is now replaced by OAuthTVarEnv from OAuth.InMemory
 
 -- | Login error types
 data LoginError
@@ -168,8 +153,8 @@ type UnprotectedMCPAPI = "mcp" :> ReqBody '[JSON] Aeson.Value :> Post '[JSON] Ae
 type CompleteAPI auths = OAuthAPI :<|> MCPAPI auths
 
 -- | Create a WAI Application for the MCP HTTP server
-mcpApp :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> TVar OAuthState -> JWTSettings -> Application
-mcpApp config tracer stateVar oauthStateVar jwtSettings =
+mcpApp :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> OAuthTVarEnv -> JWTSettings -> Application
+mcpApp config tracer stateVar oauthEnv jwtSettings =
     let cookieSettings = defaultCookieSettings
         authContext = cookieSettings :. jwtSettings :. EmptyContext
         baseApp = case httpOAuthConfig config of
@@ -178,21 +163,31 @@ mcpApp config tracer stateVar oauthStateVar jwtSettings =
                     serveWithContext
                         (Proxy :: Proxy (CompleteAPI '[JWT]))
                         authContext
-                        (oauthServer config tracer oauthStateVar :<|> mcpServerAuth config tracer stateVar)
+                        (oauthServerNew config tracer oauthEnv jwtSettings :<|> mcpServerAuth config tracer stateVar)
             _ ->
                 serve (Proxy :: Proxy UnprotectedMCPAPI) (mcpServerNoAuth config tracer stateVar)
      in if httpEnableLogging config
             then logStdoutDev baseApp
             else baseApp
   where
-    oauthServer :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> Server OAuthAPI
-    oauthServer cfg httpTracer oauthState =
-        handleProtectedResourceMetadata cfg
-            :<|> handleMetadata cfg
-            :<|> handleRegister cfg httpTracer oauthState
-            :<|> handleAuthorize cfg httpTracer oauthState
-            :<|> handleLogin cfg httpTracer oauthState jwtSettings
-            :<|> handleToken jwtSettings cfg httpTracer oauthState
+    -- NEW: Use polymorphic server via hoistServerWithContext
+    oauthServerNew :: HTTPServerConfig -> IOTracer HTTPTrace -> OAuthTVarEnv -> JWTSettings -> Server OAuthAPI
+    oauthServerNew cfg httpTracer oauth jwtSet =
+        let authEnv = DemoCredentialEnv defaultDemoCredentialStore
+            appEnv =
+                AppEnv
+                    { envOAuth = oauth
+                    , envAuth = authEnv
+                    , envConfig = cfg
+                    , envTracer = httpTracer
+                    , envJWT = jwtSet
+                    , envTimeProvider = Nothing -- Use real IO time for production
+                    }
+         in hoistServerWithContext
+                (Proxy :: Proxy OAuthAPI)
+                (Proxy :: Proxy '[CookieSettings, JWTSettings])
+                (runAppM appEnv)
+                OAuthServer.oauthServer
 
     mcpServerAuth :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> AuthResult AuthUser -> Aeson.Value -> Handler Aeson.Value
     mcpServerAuth httpConfig httpTracer stateTVar authResult requestValue =
@@ -531,264 +526,6 @@ extractCapabilityNames (ServerCapabilities res prpts tls comps logCap _exp) =
         , maybe [] (const ["logging"]) logCap
         ]
 
-{- | Handler for /.well-known/oauth-protected-resource endpoint (SHIM)
-Temporary shim - calls polymorphic handler, removed in mcp-di0.16.1.7
--}
-handleProtectedResourceMetadata :: HTTPServerConfig -> Handler ProtectedResourceMetadata
-handleProtectedResourceMetadata =
-    runReaderT OAuthServer.handleProtectedResourceMetadata
-
-{- | Handle OAuth metadata discovery endpoint (SHIM)
-Temporary shim - calls polymorphic handler, removed in mcp-di0.16.1.7
--}
-handleMetadata :: HTTPServerConfig -> Handler OAuthMetadata
-handleMetadata =
-    runReaderT OAuthServer.handleMetadata
-
-{- | PROOF-OF-CONCEPT: OAuth metadata endpoint using AppM with typeclass constraints.
-
-This handler demonstrates the new architecture pattern:
-
-* Uses 'AppM' monad instead of 'Handler'
-* Reads config via 'MonadReader AppEnv' (asks envConfig)
-* Uses typeclass constraints ('OAuthStateStore', 'AuthBackend')
-* Converted to Handler via 'runAppM' natural transformation
-
-This is functionally identical to 'handleMetadata' but proves the typeclass-based
-architecture works end-to-end. Future handlers can follow this pattern to gain
-access to the full typeclass abstraction layer.
-
-== Usage Pattern
-
-To use this handler in Servant:
-
-@
--- Create AppEnv combining all dependencies
-let appEnv = AppEnv
-      { envOAuth = oauthTVarEnv
-      , envAuth = demoCredEnv
-      , envConfig = config
-      , envTracer = tracer
-      }
-
--- Convert AppM handler to Servant Handler using runAppM
-handler :: Handler OAuthMetadata
-handler = runAppM appEnv handleMetadataAppM
-@
-
-Or use hoistServer for the entire API:
-
-@
-hoistServer (Proxy :: Proxy SomeAPI) (runAppM appEnv) serverInAppM
-@
-
-NOTE: This handler doesn't actually use the OAuthStateStore/AuthBackend yet
-(metadata is read-only config), but the constraints are present to demonstrate
-the pattern. For a fuller example using the typeclasses, see the planned
-refactoring of handleRegister or handleToken.
--}
-handleMetadataAppM :: AppM OAuthMetadata
-handleMetadataAppM = do
-    -- Access config via Reader
-    config <- asks envConfig
-    let baseUrl = httpBaseUrl config
-        oauthCfg = httpOAuthConfig config
-    return
-        OAuthMetadata
-            { issuer = baseUrl
-            , authorizationEndpoint = baseUrl <> "/authorize"
-            , tokenEndpoint = baseUrl <> "/token"
-            , registrationEndpoint = Just (baseUrl <> "/register")
-            , userInfoEndpoint = Nothing
-            , jwksUri = Nothing
-            , scopesSupported = fmap supportedScopes oauthCfg
-            , responseTypesSupported = maybe [ResponseCode] supportedResponseTypes oauthCfg
-            , grantTypesSupported = fmap supportedGrantTypes oauthCfg
-            , tokenEndpointAuthMethodsSupported = fmap supportedAuthMethods oauthCfg
-            , codeChallengeMethodsSupported = fmap supportedCodeChallengeMethods oauthCfg
-            }
-
-{- | PROOF-OF-CONCEPT: Demonstrate calling the AppM-based handler.
-
-This function shows how to integrate an AppM handler into the existing
-HTTP.hs infrastructure. It creates the AppEnv from existing components
-and uses runAppM for the natural transformation.
-
-This is NOT wired into the actual API (to avoid modifying the API type),
-but serves as a reference implementation showing the complete integration pattern.
--}
-demoHandleMetadataWithAppM ::
-    HTTPServerConfig ->
-    IOTracer HTTPTrace ->
-    TVar OAuthState -> -- Old-style OAuth state (HTTP.hs version)
-    Handler OAuthMetadata
-demoHandleMetadataWithAppM config _tracer _oauthStateVar = do
-    -- NOTE: This is a demonstration only. In a real integration, you would:
-    -- 1. Replace TVar OAuthState (HTTP.hs version) with OAuthTVarEnv (typeclass version)
-    -- 2. Add DemoCredentialEnv to function parameters
-    -- 3. Create AppEnv from all components
-    -- 4. Use: runAppM appEnv handleMetadataAppM
-    --
-    -- For now, we just call handleMetadata directly since we don't have
-    -- the typeclass-based state available in this context.
-    handleMetadata config
-
--- | Handle dynamic client registration
-
-{- | Handle client registration (SHIM).
-
-Maintains old signature for compatibility during migration.
-Calls polymorphic handler from OAuth.Server module.
-
-Temporary shim - will be removed in mcp-di0.16.1.4 when all call sites are migrated.
--}
-handleRegister :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> ClientRegistrationRequest -> Handler ClientRegistrationResponse
-handleRegister config tracer _oauthStateVar req = do
-    -- NOTE: This shim creates a fresh InMemory OAuthState for the polymorphic handler.
-    -- The registered client will not be visible to HTTP.hs code that uses the old TVar OAuthState.
-    -- This is a temporary limitation during migration - will be fixed when HTTP.hs is fully migrated.
-
-    -- Create fresh OAuth environment for polymorphic handler
-    oauthEnv <- liftIO $ newOAuthTVarEnv defaultExpiryConfig
-
-    -- Get auth environment (demo credentials)
-    let authEnv = DemoCredentialEnv defaultDemoCredentialStore
-
-    -- Create JWT settings (required by AppEnv, but not used by handleRegister)
-    jwtSettings <- liftIO $ case httpJWK config of
-        Just jwk -> return $ defaultJWTSettings jwk
-        Nothing -> defaultJWTSettings <$> generateKey
-
-    -- Construct AppEnv
-    let appEnv =
-            AppEnv
-                { envOAuth = oauthEnv
-                , envAuth = authEnv
-                , envConfig = config
-                , envTracer = tracer
-                , envJWT = jwtSettings
-                }
-
-    -- Call polymorphic handler via runAppM
-    runAppM appEnv (OAuthServer.handleRegister req)
-
-{- | Handle OAuth authorize endpoint - now returns login page HTML (SHIM)
-
-This is a temporary shim that maintains the old signature during the migration
-to typeclass-based architecture. It creates a fresh AppEnv and calls the
-polymorphic handler from OAuth.Server.
-
-The shim creates a fresh InMemory OAuthState for the polymorphic handler.
-Clients registered via this endpoint will not be visible to HTTP.hs code
-that uses the old TVar OAuthState.
-
-This is a temporary limitation during migration - will be fixed when HTTP.hs
-is fully migrated to use the polymorphic handlers throughout.
-
-Maintains old signature for compatibility during migration.
-Calls polymorphic handler from OAuth.Server module.
-
-Temporary shim - will be removed in mcp-di0.16.1.5 when all call sites are migrated.
--}
-handleAuthorize :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> ResponseType -> ClientId -> RedirectUri -> CodeChallenge -> CodeChallengeMethod -> Maybe Text -> Maybe Text -> Maybe Text -> Handler (Headers '[Header "Set-Cookie" SessionCookie] Text)
-handleAuthorize config tracer _oauthStateVar responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
-    -- NOTE: This shim creates a fresh InMemory OAuthState for the polymorphic handler.
-    -- The pending authorization will not be visible to HTTP.hs code that uses the old TVar OAuthState.
-    -- This is a temporary limitation during migration - will be fixed when HTTP.hs is fully migrated.
-
-    -- Create fresh OAuth environment for polymorphic handler
-    oauthEnv <- liftIO $ newOAuthTVarEnv defaultExpiryConfig
-
-    -- Get auth environment (demo credentials)
-    let authEnv = DemoCredentialEnv defaultDemoCredentialStore
-
-    -- Create JWT settings (required by AppEnv, but not used by handleAuthorize)
-    jwtSettings <- liftIO $ case httpJWK config of
-        Just jwk -> return $ defaultJWTSettings jwk
-        Nothing -> defaultJWTSettings <$> generateKey
-
-    -- Construct AppEnv
-    let appEnv =
-            AppEnv
-                { envOAuth = oauthEnv
-                , envAuth = authEnv
-                , envConfig = config
-                , envTracer = tracer
-                , envJWT = jwtSettings
-                }
-
-    -- Call polymorphic handler via runAppM
-    runAppM appEnv (OAuthServer.handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource)
-
--- | Handle login form submission
-handleLogin :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> JWTSettings -> Maybe Text -> LoginForm -> Handler (Headers '[Header "Location" RedirectTarget, Header "Set-Cookie" SessionCookie] NoContent)
-handleLogin config tracer _oauthStateVar jwtSettings mCookie loginForm = do
-    -- NOTE: This shim creates a fresh InMemory OAuthState for the polymorphic handler.
-    -- The authorization code will not be visible to HTTP.hs code that uses the old TVar OAuthState.
-    -- This is a temporary limitation during migration - will be fixed when HTTP.hs is fully migrated.
-
-    -- Create fresh OAuth environment for polymorphic handler
-    oauthEnv <- liftIO $ newOAuthTVarEnv defaultExpiryConfig
-
-    -- Get auth environment (demo credentials)
-    let authEnv = DemoCredentialEnv defaultDemoCredentialStore
-
-    -- Construct AppEnv (use the JWT settings passed in from the server)
-    let appEnv =
-            AppEnv
-                { envOAuth = oauthEnv
-                , envAuth = authEnv
-                , envConfig = config
-                , envTracer = tracer
-                , envJWT = jwtSettings
-                }
-
-    -- Call polymorphic handler
-    runAppM appEnv (OAuthServer.handleLogin mCookie loginForm)
-
-{- | Handle OAuth token endpoint (SHIM)
-
-This is a temporary shim that maintains the old signature during the migration
-to typeclass-based architecture. It creates a fresh AppEnv and calls the
-polymorphic handler from OAuth.Server.
-
-The shim creates a fresh InMemory OAuthState for the polymorphic handler.
-Tokens generated via this endpoint will not be visible to HTTP.hs code
-that uses the old TVar OAuthState.
-
-This is a temporary limitation during migration - will be fixed when HTTP.hs
-is fully migrated to use the polymorphic handlers throughout.
-
-Maintains old signature for compatibility during migration.
-Calls polymorphic handler from OAuth.Server module.
-
-Temporary shim - will be removed in mcp-di0.16.1.7 when all call sites are migrated.
--}
-handleToken :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> [(Text, Text)] -> Handler TokenResponse
-handleToken jwtSettings config tracer _oauthStateVar params = do
-    -- NOTE: This shim creates a fresh InMemory OAuthState for the polymorphic handler.
-    -- The tokens will not be visible to HTTP.hs code that uses the old TVar OAuthState.
-    -- This is a temporary limitation during migration - will be fixed when HTTP.hs is fully migrated.
-
-    -- Create fresh OAuth environment for polymorphic handler
-    oauthEnv <- liftIO $ newOAuthTVarEnv defaultExpiryConfig
-
-    -- Get auth environment (demo credentials)
-    let authEnv = DemoCredentialEnv defaultDemoCredentialStore
-
-    -- Construct AppEnv (use the JWT settings passed in from the server)
-    let appEnv =
-            AppEnv
-                { envOAuth = oauthEnv
-                , envAuth = authEnv
-                , envConfig = config
-                , envTracer = tracer
-                , envJWT = jwtSettings
-                }
-
-    -- Call polymorphic handler
-    runAppM appEnv (OAuthServer.handleToken params)
-
 -- | Default demo OAuth configuration for testing purposes
 defaultDemoOAuthConfig :: OAuthConfig
 defaultDemoOAuthConfig =
@@ -932,16 +669,8 @@ runServerHTTP config tracer = do
     -- Initialize the server state
     stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
 
-    -- Initialize OAuth state
-    oauthStateVar <-
-        newTVarIO $
-            OAuthState
-                { authCodes = Map.empty
-                , accessTokens = Map.empty
-                , refreshTokens = Map.empty
-                , registeredClients = Map.empty
-                , pendingAuthorizations = Map.empty
-                }
+    -- Initialize OAuth state (NEW: using typeclass-based OAuthTVarEnv)
+    oauthEnv <- newOAuthTVarEnv defaultExpiryConfig
 
     traceWith tracer $ HTTPServerStarting (httpPort config) (httpBaseUrl config)
 
@@ -956,4 +685,4 @@ runServerHTTP config tracer = do
             Nothing -> return ()
 
     traceWith tracer HTTPServerStarted
-    run (httpPort config) (mcpApp config tracer stateVar oauthStateVar jwtSettings)
+    run (httpPort config) (mcpApp config tracer stateVar oauthEnv jwtSettings)

@@ -78,14 +78,14 @@ import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (NominalDiffTime)
 import Data.UUID qualified as UUID
 import Data.UUID.V4 qualified as UUID
-import Network.HTTP.Types (hLocation, status200, status201)
+import Network.HTTP.Types (hContentType, hLocation, methodPost, status200, status201)
 import Network.HTTP.Types.URI (renderSimpleQuery)
 import Network.URI (URI (..), parseURI, uriQuery)
 import Network.Wai (Application)
 import Network.Wai.Test (SResponse, simpleBody, simpleHeaders, simpleStatus)
 import System.Random (newStdGen, randomRs)
 import Test.Hspec (Spec, describe, expectationFailure, it, runIO, shouldSatisfy)
-import Test.Hspec.Wai (WaiSession, get, liftIO, matchHeaders, post, postHtmlForm, shouldRespondWith, with, (<:>))
+import Test.Hspec.Wai (WaiSession, get, liftIO, postHtmlForm, request, shouldRespondWith, with)
 
 import MCP.Server.OAuth.Types (AuthCodeId (..), ClientId (..), mkAuthCodeId)
 
@@ -330,10 +330,14 @@ withRegisteredClient _config action = do
             object
                 [ "client_name" .= clientName
                 , "redirect_uris" .= (["http://localhost/callback"] :: [Text])
+                , "grant_types" .= (["authorization_code", "refresh_token"] :: [Text])
+                , "response_types" .= (["code"] :: [Text])
+                , "token_endpoint_auth_method" .= ("none" :: Text)
                 ]
 
-    -- POST to /register endpoint
-    resp <- post "/register" (encode body)
+    -- POST to /register endpoint with JSON content-type
+    -- Use request with explicit Content-Type header
+    resp <- request methodPost "/register" [(hContentType, "application/json")] (encode body)
 
     -- Verify 201 Created status
     let status = simpleStatus resp
@@ -563,8 +567,8 @@ withAccessToken config clientId action = do
                     , ("code_verifier", TE.encodeUtf8 verifier)
                     ]
 
-        -- POST to /token endpoint
-        resp <- post "/token" (LBS.fromStrict tokenBody)
+        -- POST to /token endpoint with form-urlencoded content-type
+        resp <- request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict tokenBody)
 
         -- Verify 200 OK status
         let status = simpleStatus resp
@@ -655,26 +659,41 @@ clientRegistrationSpec config = with (withFreshAppNoTime config) $ do
                         object
                             [ "client_name" .= ("test-client" :: Text)
                             , "redirect_uris" .= (["http://localhost/callback"] :: [Text])
+                            , "grant_types" .= (["authorization_code", "refresh_token"] :: [Text])
+                            , "response_types" .= (["code"] :: [Text])
+                            , "token_endpoint_auth_method" .= ("none" :: Text)
                             ]
-            post "/register" body
-                `shouldRespondWith` 201{matchHeaders = ["Content-Type" <:> "application/json"]}
+            resp <- request methodPost "/register" [(hContentType, "application/json")] body
+            liftIO $ do
+                let status = simpleStatus resp
+                status `shouldSatisfy` (== status201)
+                let mContentType = lookup hContentType (simpleHeaders resp)
+                case mContentType of
+                    Just ct -> TE.decodeUtf8 ct `shouldSatisfy` T.isPrefixOf "application/json"
+                    Nothing -> expectationFailure "Missing Content-Type header"
 
         it "returns client_id in response" $ do
             let body =
                     encode $
                         object
                             [ "client_name" .= ("test" :: Text)
-                            , "redirect_uris" .= (["http://x"] :: [Text])
+                            , "redirect_uris" .= (["http://localhost/cb"] :: [Text])
+                            , "grant_types" .= (["authorization_code", "refresh_token"] :: [Text])
+                            , "response_types" .= (["code"] :: [Text])
+                            , "token_endpoint_auth_method" .= ("none" :: Text)
                             ]
-            resp <- post "/register" body
+            resp <- request methodPost "/register" [(hContentType, "application/json")] body
             liftIO $ do
-                let mJson = decode @Value (simpleBody resp)
+                let status = simpleStatus resp
+                    bodyBytes = simpleBody resp
+                status `shouldSatisfy` (== status201)
+                let mJson = decode @Value bodyBytes
                 case mJson of
                     Just (Object obj) -> KM.lookup "client_id" obj `shouldSatisfy` isJust
-                    _ -> expectationFailure "Response was not a JSON object"
+                    other -> expectationFailure $ "Response was not a JSON object. Got: " <> show other <> ". Body: " <> show bodyBytes
 
         it "returns 400 for invalid JSON" $ do
-            post "/register" "not json" `shouldRespondWith` 400
+            request methodPost "/register" [(hContentType, "application/json")] "not json" `shouldRespondWith` 400
 
         it "returns 400 for empty redirect_uris" $ do
             let body =
@@ -683,7 +702,7 @@ clientRegistrationSpec config = with (withFreshAppNoTime config) $ do
                             [ "client_name" .= ("test" :: Text)
                             , "redirect_uris" .= ([] :: [Text])
                             ]
-            post "/register" body `shouldRespondWith` 400
+            request methodPost "/register" [(hContentType, "application/json")] body `shouldRespondWith` 400
 
 {- | Test specification for OAuth login flow.
 
@@ -725,8 +744,14 @@ loginFlowSpec config = with (withFreshAppNoTime config) $ do
                             <> "&code_challenge="
                             <> challenge
                             <> "&code_challenge_method=S256"
-                get (TE.encodeUtf8 authUrl)
-                    `shouldRespondWith` 200{matchHeaders = ["Content-Type" <:> "text/html"]}
+                resp <- get (TE.encodeUtf8 authUrl)
+                liftIO $ do
+                    let status = simpleStatus resp
+                    status `shouldSatisfy` (== status200)
+                    let mContentType = lookup hContentType (simpleHeaders resp)
+                    case mContentType of
+                        Just ct -> TE.decodeUtf8 ct `shouldSatisfy` T.isPrefixOf "text/html"
+                        Nothing -> expectationFailure "Missing Content-Type header"
 
         it "redirects with code on successful login" $ do
             withRegisteredClient config $ \clientId -> do
@@ -812,7 +837,7 @@ tokenExchangeSpec config = with (withFreshAppNoTime config) $ do
             withRegisteredClient config $ \clientId -> do
                 withAuthorizedUser config clientId $ \code verifier -> do
                     let body = tokenExchangeBody clientId code verifier
-                    resp <- post "/token" (LBS.fromStrict body)
+                    resp <- request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict body)
                     liftIO $ do
                         simpleStatus resp `shouldSatisfy` (== status200)
                         let mJson = decode @Value (simpleBody resp)
@@ -826,12 +851,12 @@ tokenExchangeSpec config = with (withFreshAppNoTime config) $ do
             withRegisteredClient config $ \clientId -> do
                 withAuthorizedUser config clientId $ \code _ -> do
                     let body = tokenExchangeBody clientId code "wrong_verifier"
-                    post "/token" (LBS.fromStrict body) `shouldRespondWith` 400
+                    request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict body) `shouldRespondWith` 400
 
         it "returns 400 for invalid authorization code" $ do
             withRegisteredClient config $ \clientId -> do
                 let body = tokenExchangeBody clientId (AuthCodeId "invalid") "verifier"
-                post "/token" (LBS.fromStrict body) `shouldRespondWith` 400
+                request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict body) `shouldRespondWith` 400
 
 {- | Helper to create application/x-www-form-urlencoded token exchange request body.
 
@@ -908,7 +933,7 @@ expirySpec config = describe "Expiry behavior" $ do
                         -- Advance time past the 10-minute authorization code expiry
                         liftIO $ advanceTime (11 * 60) -- 11 minutes = 660 seconds
                         let body = tokenExchangeBody clientId code verifier
-                        post "/token" (LBS.fromStrict body) `shouldRespondWith` 400
+                        request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict body) `shouldRespondWith` 400
 
     describe "with fresh app for expired login session test" $ do
         (app, advanceTime) <- runIO $ tcMakeApp config

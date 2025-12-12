@@ -65,14 +65,18 @@ module MCP.Server.HTTP.AppEnv (
     toServerError,
 ) where
 
+import Control.Concurrent.STM (TVar, atomically, readTVar)
+import Control.Concurrent.STM.TVar (readTVarIO)
 import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Reader (MonadReader, ReaderT, asks, runReaderT)
+import Control.Monad.Reader (MonadReader, ReaderT (..), asks, runReaderT)
 import Control.Monad.Time (MonadTime (..))
 import Crypto.JOSE (JWK)
 import Data.ByteString.Lazy qualified as LBS
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text.Encoding qualified as TE
+import Data.Time.Clock (UTCTime, addUTCTime)
 import GHC.Generics (Generic)
 import Network.Wai.Handler.Warp (Port)
 import Servant (Handler, ServerError, err400, err401, err500, errBody)
@@ -81,8 +85,19 @@ import Servant.Auth.Server (JWTSettings)
 import MCP.Server.Auth (OAuthConfig, ProtectedResourceMetadata)
 import MCP.Server.Auth.Backend (AuthBackend (..))
 import MCP.Server.Auth.Demo (DemoAuthError (..), DemoCredentialEnv)
-import MCP.Server.OAuth.InMemory (OAuthStoreError (..), OAuthTVarEnv)
+import MCP.Server.OAuth.InMemory (
+    ExpiryConfig (..),
+    OAuthState (..),
+    OAuthStoreError (..),
+    OAuthTVarEnv (..),
+ )
 import MCP.Server.OAuth.Store (OAuthStateStore (..))
+import MCP.Server.OAuth.Types (
+    AuthCodeId (..),
+    AuthorizationCode (..),
+    PendingAuthorization (..),
+    SessionId (..),
+ )
 import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types (Implementation, ServerCapabilities)
 import Plow.Logging (IOTracer)
@@ -138,6 +153,8 @@ data AppEnv = AppEnv
     -- ^ Tracer for HTTP and OAuth events
     , envJWT :: JWTSettings
     -- ^ JWT settings for token signing and validation
+    , envTimeProvider :: Maybe (TVar UTCTime)
+    -- ^ Optional time provider for testing (Nothing = use IO time)
     }
     deriving (Generic)
 
@@ -289,10 +306,15 @@ toLBS = LBS.fromStrict . TE.encodeUtf8
 
 {- | MonadTime instance for AppM.
 
-Delegates to IO's MonadTime instance to get real system time.
+Delegates to IO's MonadTime instance to get real system time, unless
+a test time provider (TVar UTCTime) is present in the environment.
 -}
 instance MonadTime AppM where
-    currentTime = liftIO currentTime
+    currentTime = do
+        mTimeProvider <- asks envTimeProvider
+        case mTimeProvider of
+            Just tvar -> liftIO $ readTVarIO tvar
+            Nothing -> liftIO currentTime
     monotonicTime = liftIO monotonicTime
 
 {- | OAuthStateStore instance for AppM.
@@ -311,7 +333,17 @@ instance OAuthStateStore AppM where
 
     lookupAuthCode codeId = do
         oauthEnv <- asks envOAuth
-        liftIO $ runReaderT (lookupAuthCode codeId) oauthEnv
+        -- lookupAuthCode uses MonadTime - run in AppM context
+        now <- currentTime
+        liftIO $ atomically $ do
+            state <- readTVar (oauthStateVar oauthEnv)
+            let key = unAuthCodeId codeId
+            case Map.lookup key (authCodes state) of
+                Nothing -> pure Nothing
+                Just authCode ->
+                    if now >= authExpiry authCode
+                        then pure Nothing
+                        else pure (Just authCode)
 
     deleteAuthCode codeId = do
         oauthEnv <- asks envOAuth
@@ -351,7 +383,19 @@ instance OAuthStateStore AppM where
 
     lookupPendingAuth sessionId = do
         oauthEnv <- asks envOAuth
-        liftIO $ runReaderT (lookupPendingAuth sessionId) oauthEnv
+        -- lookupPendingAuth uses MonadTime - run in AppM context
+        now <- currentTime
+        let config = oauthExpiryConfig oauthEnv
+        liftIO $ atomically $ do
+            state <- readTVar (oauthStateVar oauthEnv)
+            let key = unSessionId sessionId
+            case Map.lookup key (pendingAuthorizations state) of
+                Nothing -> pure Nothing
+                Just auth ->
+                    let expiryTime = addUTCTime (loginSessionExpiry config) (pendingCreatedAt auth)
+                     in if now >= expiryTime
+                            then pure Nothing
+                            else pure (Just auth)
 
     deletePendingAuth sessionId = do
         oauthEnv <- asks envOAuth

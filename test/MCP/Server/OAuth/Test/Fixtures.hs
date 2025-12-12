@@ -1,6 +1,8 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeApplications #-}
 
 {- |
 Module      : MCP.Server.OAuth.Test.Fixtures
@@ -47,12 +49,14 @@ import Control.Monad.Reader (MonadReader, ReaderT, ask)
 import Data.Time.Clock (UTCTime, addUTCTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeOrError)
 import Plow.Logging (IOTracer (..), Tracer (..))
-import Servant.Auth.Server (defaultJWTSettings, generateKey)
+import Servant (Context (..), Proxy (..), hoistServerWithContext, serveWithContext)
+import Servant.Auth.Server (CookieSettings, JWTSettings, defaultCookieSettings, defaultJWTSettings, generateKey)
 
 import MCP.Server.Auth.Demo (DemoCredentialEnv (..), defaultDemoCredentialStore)
 import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata)
-import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM)
+import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, runAppM)
 import MCP.Server.OAuth.InMemory (defaultExpiryConfig, newOAuthTVarEnv)
+import MCP.Server.OAuth.Server (OAuthAPI, oauthServer)
 import MCP.Server.OAuth.Test.Internal (TestConfig (..), TestCredentials (..))
 import MCP.Server.Time (MonadTime (..))
 import MCP.Types (Implementation (..), ServerCapabilities (..), ToolsCapability (..))
@@ -86,7 +90,7 @@ The TVar enables time manipulation for expiry testing via the
 advanceTime callback returned by 'referenceTestConfig'.
 -}
 mkTestEnv :: TVar UTCTime -> IO AppEnv
-mkTestEnv _timeTVar = do
+mkTestEnv timeTVar = do
     -- Create fresh OAuth state with default expiry config
     oauthEnv <- newOAuthTVarEnv defaultExpiryConfig
 
@@ -130,6 +134,7 @@ mkTestEnv _timeTVar = do
             , envConfig = serverConfig
             , envTracer = tracer
             , envJWT = jwtSettings
+            , envTimeProvider = Just timeTVar -- Use controllable time for tests
             }
 
 -- -----------------------------------------------------------------------------
@@ -189,35 +194,27 @@ spec = do
 -}
 referenceTestConfig :: IO (TestConfig AppM)
 referenceTestConfig = do
-    -- Generate JWT key once for all tests
-    _jwk <- generateKey
-
     let makeApp = do
             -- Create fresh time TVar for this test
             timeTVar <- newTVarIO defaultTestTime
 
             -- Create fresh environment
-            _env <- mkTestEnv timeTVar
+            env <- mkTestEnv timeTVar
 
-            -- TODO: Build actual WAI Application
-            -- Once HTTP.hs is migrated to AppM, this will be:
-            --
-            -- let jwtSettings = defaultJWTSettings jwk
-            --     cookieSettings = defaultCookieSettings
-            --     ctx = cookieSettings :. jwtSettings :. EmptyContext
-            --     app = serveWithContext
-            --             (Proxy @(CompleteAPI '[JWT]))
-            --             ctx
-            --             (hoistServerWithContext
-            --               (Proxy @(CompleteAPI '[JWT]))
-            --               (Proxy @'[CookieSettings, JWTSettings])
-            --               (runAppM env)
-            --               oauthServerInAppM)
-            --
-            -- Where oauthServerInAppM :: Server OAuthAPI AppM
-            --       uses the typeclass instances directly
-
-            let app = error "referenceTestConfig: Application not yet implemented - HTTP.hs migration to AppM pending"
+            -- Build actual WAI Application using the migrated architecture
+            let jwtSettings = envJWT env
+                cookieSettings = defaultCookieSettings
+                ctx = cookieSettings :. jwtSettings :. EmptyContext
+                app =
+                    serveWithContext
+                        (Proxy @OAuthAPI)
+                        ctx
+                        ( hoistServerWithContext
+                            (Proxy @OAuthAPI)
+                            (Proxy @'[CookieSettings, JWTSettings])
+                            (runAppM env)
+                            oauthServer
+                        )
 
             -- Time advancement callback - modifies the TVar that controls currentTime
             let advanceTime dt = atomically $ modifyTVar' timeTVar (addUTCTime dt)

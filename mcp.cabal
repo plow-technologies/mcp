@@ -154,7 +154,8 @@ library
         network-uri >= 2.6 && < 2.7,
         monad-time >= 0.4 && < 0.5,
         hspec >= 2.10 && < 2.12,
-        hspec-wai >= 0.11 && < 0.12
+        hspec-wai >= 0.11 && < 0.12,
+        hspec-wai-json >= 0.11 && < 0.12
 
     -- Directories containing source files.
     hs-source-dirs:   src
