@@ -70,6 +70,7 @@ import MCP.Server.OAuth.Types (
     ClientInfo (..),
     CodeChallenge (..),
     CodeChallengeMethod (..),
+    CodeVerifier (..),
     GrantType (..),
     PendingAuthorization (..),
     RedirectUri (..),
@@ -79,6 +80,7 @@ import MCP.Server.OAuth.Types (
     SessionId (..),
     UserId (..),
     mkCodeChallenge,
+    mkCodeVerifier,
     mkScope,
  )
 
@@ -182,6 +184,16 @@ instance Arbitrary CodeChallenge where
         let base64urlChars = ['A' .. 'Z'] ++ ['a' .. 'z'] ++ ['0' .. '9'] ++ ['-', '_']
         challengeText <- T.pack <$> vectorOf len (elements base64urlChars)
         maybe arbitrary pure (mkCodeChallenge challengeText) -- Retry if validation fails
+    shrink _ = [] -- Don't shrink (must maintain length constraints)
+
+-- CodeVerifier: unreserved chars per RFC 7636, 43-128 chars
+instance Arbitrary CodeVerifier where
+    arbitrary = do
+        len <- chooseInt (43, 128) -- PKCE spec: 43-128 characters
+        -- RFC 7636: unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
+        let unreservedChars = ['A' .. 'Z'] ++ ['a' .. 'z'] ++ ['0' .. '9'] ++ ['-', '.', '_', '~']
+        verifierText <- T.pack <$> vectorOf len (elements unreservedChars)
+        maybe arbitrary pure (mkCodeVerifier verifierText) -- Retry if validation fails
     shrink _ = [] -- Don't shrink (must maintain length constraints)
 
 -- ============================================================================

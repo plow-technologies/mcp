@@ -34,6 +34,7 @@ This guarantees:
 * 'ClientId' - OAuth client identifier
 * 'AuthCodeId' - Authorization code identifier
 * 'SessionId' - Session identifier (UUID format)
+* 'AccessTokenId' - Access token identifier
 * 'UserId' - User identifier
 * 'RefreshTokenId' - Refresh token identifier
 
@@ -41,6 +42,8 @@ This guarantees:
 
 * 'RedirectUri' - OAuth redirect URI (https:// or http://localhost)
 * 'Scope' - OAuth scope value (non-empty, no whitespace)
+* 'CodeChallenge' - PKCE code challenge (base64url, 43-128 chars)
+* 'CodeVerifier' - PKCE code verifier (unreserved chars, 43-128 chars)
 
 === ADTs
 
@@ -75,10 +78,13 @@ import Generators ()
 
 -- OAuth domain types
 import MCP.Server.OAuth.Types (
+    AccessTokenId,
     AuthCodeId,
     ClientAuthMethod,
     ClientId,
+    CodeChallenge,
     CodeChallengeMethod,
+    CodeVerifier,
     GrantType,
     RedirectUri,
     RefreshTokenId,
@@ -95,12 +101,15 @@ spec = describe "Servant Boundary Round-trip Laws" $ do
         identityRoundTrip "ClientId" (undefined :: ClientId)
         identityRoundTrip "AuthCodeId" (undefined :: AuthCodeId)
         identityRoundTrip "SessionId" (undefined :: SessionId)
+        identityRoundTrip "AccessTokenId" (undefined :: AccessTokenId)
         identityRoundTrip "UserId" (undefined :: UserId)
         identityRoundTrip "RefreshTokenId" (undefined :: RefreshTokenId)
 
     describe "Value Newtypes" $ do
         identityRoundTrip "RedirectUri" (undefined :: RedirectUri)
         identityRoundTrip "Scope" (undefined :: Scope)
+        identityRoundTrip "CodeChallenge" (undefined :: CodeChallenge)
+        identityRoundTrip "CodeVerifier" (undefined :: CodeVerifier)
 
     describe "ADTs" $ do
         identityRoundTrip "CodeChallengeMethod" (undefined :: CodeChallengeMethod)
