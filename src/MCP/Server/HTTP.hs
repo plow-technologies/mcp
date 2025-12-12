@@ -53,18 +53,16 @@ import Control.Monad.Reader (ask, asks, runReaderT)
 import Control.Monad.State.Strict (get, put)
 import Data.Aeson (encode, fromJSON, object, toJSON, (.=))
 import Data.Aeson qualified as Aeson
-import Data.ByteArray qualified as BA
-import Data.ByteString (ByteString)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Functor.Contravariant (contramap)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Data.Time.Clock (addUTCTime, getCurrentTime)
+import Data.Time.Clock (getCurrentTime)
 import Data.UUID qualified as UUID
 import Data.UUID.V4 qualified as UUID
 import GHC.Generics (Generic)
@@ -73,16 +71,15 @@ import Network.Wai (Application)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant (Context (..), Handler, Proxy (..), Server, serve, serveWithContext, throwError)
-import Servant.API (Accept (..), Header, Headers, JSON, MimeRender (..), NoContent (..), Post, ReqBody, addHeader, (:<|>) (..), (:>))
+import Servant.API (Accept (..), Header, Headers, JSON, MimeRender (..), NoContent (..), Post, ReqBody, (:<|>) (..), (:>))
 import Servant.Auth.Server (Auth, AuthResult (..), JWT, JWTSettings, defaultCookieSettings, defaultJWTSettings, generateKey, makeJWT)
 import Servant.Server (err400, err401, err500, errBody, errHeaders)
-import Web.HttpApiData (parseUrlPiece, toUrlPiece)
+import Web.HttpApiData (parseUrlPiece)
 
 import Control.Monad (unless, when)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
-import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), Salt (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
-import MCP.Server.Auth.Backend (PlaintextPassword (..), unUsername)
+import MCP.Server.Auth (OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore, validateCodeVerifier)
 
 -- Import AuthBackend instance for AppM
 import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..), runAppM)
@@ -96,7 +93,7 @@ import MCP.Server.OAuth.Server qualified as OAuthServer
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
-import MCP.Server.OAuth.Types (AuthCodeId (..), AuthUser (..), AuthorizationCode (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), PendingAuthorization (..), RedirectTarget (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), Scope (..), SessionCookie (..), SessionId (..), UserId (..), mkSessionId, mkUserId, unClientId, unCodeChallenge, unScope, unSessionId, unUserId)
+import MCP.Server.OAuth.Types (AuthCodeId (..), AuthUser (..), AuthorizationCode (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), PendingAuthorization (..), RedirectTarget (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), Scope (..), SessionCookie (..), SessionId (..), UserId (..), unCodeChallenge, unScope, unUserId)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import MCP.Trace.Operation (OperationTrace (..))
@@ -717,134 +714,30 @@ handleAuthorize config tracer _oauthStateVar responseType clientId redirectUri c
     -- Call polymorphic handler via runAppM
     runAppM appEnv (OAuthServer.handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource)
 
--- | Extract session ID from cookie header
-extractSessionFromCookie :: Text -> Maybe SessionId
-extractSessionFromCookie cookieHeader =
-    let cookies = T.splitOn ";" cookieHeader
-        sessionCookies = filter (T.isInfixOf "mcp_session=") cookies
-     in case sessionCookies of
-            (cookie : _) ->
-                let parts = T.splitOn "=" cookie
-                 in case parts of
-                        [_, value] -> mkSessionId (T.strip value)
-                        _ -> Nothing
-            [] -> Nothing
-
 -- | Handle login form submission
 handleLogin :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> JWTSettings -> Maybe Text -> LoginForm -> Handler (Headers '[Header "Location" RedirectTarget, Header "Set-Cookie" SessionCookie] NoContent)
-handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
-    let oauthTracer = contramap HTTPOAuth tracer
+handleLogin config tracer _oauthStateVar _jwtSettings mCookie loginForm = do
+    -- NOTE: This shim creates a fresh InMemory OAuthState for the polymorphic handler.
+    -- The authorization code will not be visible to HTTP.hs code that uses the old TVar OAuthState.
+    -- This is a temporary limitation during migration - will be fixed when HTTP.hs is fully migrated.
 
-    -- Extract session ID from form
-    let sessionId = formSessionId loginForm
+    -- Create fresh OAuth environment for polymorphic handler
+    oauthEnv <- liftIO $ newOAuthTVarEnv defaultExpiryConfig
 
-    -- T039: Handle cookies disabled - check if cookie matches form session_id
-    case mCookie of
-        Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "No cookie header present"
-            throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Cookies Required" "Your browser must have cookies enabled to sign in. Please enable cookies and try again.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
-        Just cookie ->
-            -- Parse session cookie and verify it matches form session_id
-            let cookieSessionId = extractSessionFromCookie cookie
-             in unless (cookieSessionId == Just sessionId) $ do
-                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "Session cookie mismatch"
-                    throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Cookies Required" "Session cookie mismatch. Please enable cookies and try again.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
+    -- Get auth environment (demo credentials)
+    let authEnv = DemoCredentialEnv defaultDemoCredentialStore
 
-    -- Look up pending authorization
-    oauthState <- liftIO $ readTVarIO oauthStateVar
-    pending <- case Map.lookup sessionId (pendingAuthorizations oauthState) of
-        Just p -> return p
-        Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "session" ("Session not found: " <> unSessionId sessionId)
-            throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Invalid Session" "Session not found or has expired. Please restart the authorization flow.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
+    -- Construct AppEnv
+    let appEnv =
+            AppEnv
+                { envOAuth = oauthEnv
+                , envAuth = authEnv
+                , envConfig = config
+                , envTracer = tracer
+                }
 
-    -- T038: Handle expired sessions
-    currentTime <- liftIO getCurrentTime
-    let sessionExpirySeconds = maybe 600 (fromIntegral . loginSessionExpirySeconds) (httpOAuthConfig config)
-        expiryTime = addUTCTime sessionExpirySeconds (pendingCreatedAt pending)
-    when (currentTime > expiryTime) $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthSessionExpired (unSessionId sessionId)
-        throwError err400{errBody = LBS.fromStrict $ TE.encodeUtf8 $ renderErrorPage "Session Expired" "Your login session has expired. Please restart the authorization flow.", errHeaders = [("Content-Type", "text/html; charset=utf-8")]}
-
-    -- Check if user denied access
-    if formAction loginForm == "deny"
-        then do
-            -- Emit denial trace
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationDenied (unClientId $ pendingClientId pending) "User denied authorization"
-
-            -- Clear session and redirect with error
-            let clearCookie = SessionCookie "mcp_session=; Max-Age=0; Path=/"
-                errorParams = "error=access_denied&error_description=User%20denied%20access"
-                stateParam = case pendingState pending of
-                    Just s -> "&state=" <> s
-                    Nothing -> ""
-                redirectUrl = RedirectTarget $ toUrlPiece (pendingRedirectUri pending) <> "?" <> errorParams <> stateParam
-
-            -- Remove pending authorization
-            liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
-                s{pendingAuthorizations = Map.delete sessionId (pendingAuthorizations s)}
-
-            return $ addHeader redirectUrl $ addHeader clearCookie NoContent
-        else do
-            -- Validate credentials
-            let oauthCfg = httpOAuthConfig config
-                -- Create empty store if no OAuth config (shouldn't happen, but defensive)
-                emptySalt = MCP.Server.Auth.Salt (BA.convert ("" :: ByteString) :: BA.ScrubbedBytes)
-                emptyStore = CredentialStore Map.empty emptySalt
-                store = maybe emptyStore MCP.Server.Auth.credentialStore oauthCfg
-                username = formUsername loginForm
-                password = formPassword loginForm
-
-            -- validateCredential expects Text, so unwrap newtypes
-            let credentialsValid = validateCredential store (unUsername username) (TE.decodeUtf8 $ BA.convert $ unPlaintextPassword password)
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt (unUsername username) credentialsValid
-            if credentialsValid
-                then do
-                    -- Emit authorization granted trace
-                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (unClientId $ pendingClientId pending) (unUsername username)
-
-                    -- Generate authorization code
-                    code <- liftIO $ generateAuthCodeWithConfig config
-                    codeGenerationTime <- liftIO getCurrentTime
-                    let expirySeconds = maybe 600 (fromIntegral . authCodeExpirySeconds) oauthCfg
-                        expiry = addUTCTime expirySeconds codeGenerationTime
-                        -- Convert pendingScope from Maybe (Set Scope) to Set Scope
-                        scopes = fromMaybe Set.empty (pendingScope pending)
-                        -- Create UserId from username
-                        userId = case mkUserId (unUsername username) of
-                            Just uid -> uid
-                            Nothing -> Prelude.error "Invalid user ID" -- This shouldn't happen as username is already validated
-                        authCode =
-                            AuthorizationCode
-                                { authCodeId = AuthCodeId code
-                                , authClientId = pendingClientId pending
-                                , authRedirectUri = pendingRedirectUri pending
-                                , authCodeChallenge = pendingCodeChallenge pending
-                                , authCodeChallengeMethod = pendingCodeChallengeMethod pending
-                                , authScopes = scopes
-                                , authUserId = userId
-                                , authExpiry = expiry
-                                }
-
-                    -- Store authorization code and remove pending authorization
-                    let authCodeId = AuthCodeId code
-                    liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
-                        s
-                            { authCodes = Map.insert authCodeId authCode (authCodes s)
-                            , pendingAuthorizations = Map.delete sessionId (pendingAuthorizations s)
-                            }
-
-                    -- Build redirect URL with code
-                    let stateParam = case pendingState pending of
-                            Just s -> "&state=" <> s
-                            Nothing -> ""
-                        redirectUrl = RedirectTarget $ toUrlPiece (pendingRedirectUri pending) <> "?code=" <> code <> stateParam
-                        clearCookie = SessionCookie "mcp_session=; Max-Age=0; Path=/"
-
-                    return $ addHeader redirectUrl $ addHeader clearCookie NoContent
-                else
-                    -- Invalid credentials - return error (validateCredential already emitted OAuthLoginAttempt trace)
-                    throwError err401{errBody = encode $ object ["error" .= ("authentication_failed" :: Text), "error_description" .= ("Invalid username or password" :: Text)]}
+    -- Call polymorphic handler
+    runAppM appEnv (OAuthServer.handleLogin mCookie loginForm)
 
 -- | Handle OAuth token endpoint
 handleToken :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> [(Text, Text)] -> Handler TokenResponse
@@ -1005,11 +898,6 @@ handleRefreshTokenGrant jwtSettings config tracer oauthStateVar params = do
 {- | Generate random authorization code
 | Generate authorization code with configurable prefix
 -}
-generateAuthCodeWithConfig :: HTTPServerConfig -> IO Text
-generateAuthCodeWithConfig config = do
-    uuid <- UUID.nextRandom
-    let prefix = maybe "code_" authCodePrefix (httpOAuthConfig config)
-    return $ prefix <> UUID.toText uuid
 
 -- | Generate JWT access token for user
 generateJWTAccessToken :: AuthUser -> JWTSettings -> Handler Text

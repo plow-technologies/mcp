@@ -76,6 +76,7 @@ module MCP.Server.OAuth.Server (
     handleProtectedResourceMetadata,
     handleRegister,
     handleAuthorize,
+    handleLogin,
 ) where
 
 import Control.Monad (unless, when)
@@ -93,7 +94,7 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Data.Time.Clock (getCurrentTime)
+import Data.Time.Clock (addUTCTime)
 import Data.UUID.V4 qualified as UUID
 import GHC.Generics (Generic)
 import Network.HTTP.Media ((//), (/:))
@@ -104,7 +105,7 @@ import Servant (
     Header,
     Headers,
     JSON,
-    NoContent,
+    NoContent (..),
     Post,
     QueryParam,
     QueryParam',
@@ -126,12 +127,15 @@ import MCP.Server.Auth (
     OAuthConfig (..),
     OAuthMetadata (..),
     ProtectedResourceMetadata (..),
+    authCodePrefix,
     clientIdPrefix,
  )
-import MCP.Server.Auth.Backend (AuthBackend, PlaintextPassword, Username, mkPlaintextPassword, mkUsername)
+import MCP.Server.Auth.Backend (AuthBackend (..), PlaintextPassword, Username (..), mkPlaintextPassword, mkUsername)
 import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
 import MCP.Server.OAuth.Store (OAuthStateStore (..))
 import MCP.Server.OAuth.Types (
+    AuthCodeId (..),
+    AuthorizationCode (..),
     ClientAuthMethod,
     ClientId (..),
     ClientInfo (..),
@@ -139,7 +143,7 @@ import MCP.Server.OAuth.Types (
     CodeChallengeMethod (..),
     GrantType,
     PendingAuthorization (..),
-    RedirectTarget,
+    RedirectTarget (..),
     RedirectUri,
     ResponseType (..),
     Scope (..),
@@ -147,7 +151,11 @@ import MCP.Server.OAuth.Types (
     SessionId (..),
     mkScope,
     mkSessionId,
+    mkUserId,
+    unClientId,
+    unSessionId,
  )
+import MCP.Server.Time (MonadTime (..))
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import Plow.Logging (IOTracer, traceWith)
@@ -677,7 +685,7 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
     let sessionId = case mkSessionId sessionIdText of
             Just sid -> sid
             Nothing -> error "Generated invalid session UUID"
-    currentTime <- liftIO getCurrentTime
+    now <- currentTime
 
     -- Convert mScope from Maybe Text to Maybe (Set Scope)
     let scopesSet =
@@ -698,7 +706,7 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
                 , pendingScope = scopesSet
                 , pendingState = mState
                 , pendingResource = resourceUri
-                , pendingCreatedAt = currentTime
+                , pendingCreatedAt = now
                 }
 
     -- Store pending authorization
@@ -715,9 +723,212 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
 
     return $ addHeader cookieValue loginHtml
 
+{- | Login form submission handler (polymorphic).
+
+Handles user credential validation and authorization code generation.
+
+This handler is polymorphic over the monad @m@, requiring:
+
+* 'OAuthStateStore m': Storage for pending authorizations and authorization codes
+* 'AuthBackend m': Credential validation backend
+* 'MonadTime m': Access to current time for expiry checks
+* 'MonadIO m': Ability to generate UUIDs and perform IO
+* 'MonadReader env m': Access to environment containing config and tracer
+* 'HasType HTTPServerConfig env': Config can be extracted via generic-lens
+* 'HasType (IOTracer HTTPTrace) env': Tracer can be extracted via generic-lens
+
+The handler:
+
+1. Validates session cookie matches form session_id
+2. Looks up pending authorization by session ID
+3. Checks if session has expired
+4. Handles "deny" action by redirecting with error
+5. Validates credentials via AuthBackend
+6. Generates authorization code and stores it
+7. Redirects with authorization code or error
+
+== Usage
+
+@
+-- In AppM (with AppEnv)
+response <- handleLogin mCookie form
+
+-- In custom monad
+response <- handleLogin mCookie form
+@
+
+== Migration Note
+
+This is ported from HTTP.hs as part of the typeclass-based architecture
+migration. The shim pattern is used: HTTP.hs maintains the old signature
+by calling this handler via runAppM.
+-}
+handleLogin ::
+    ( OAuthStateStore m
+    , AuthBackend m
+    , MonadTime m
+    , MonadIO m
+    , MonadReader env m
+    , HasType HTTPServerConfig env
+    , HasType (IOTracer HTTPTrace) env
+    ) =>
+    Maybe Text ->
+    LoginForm ->
+    m (Headers '[Header "Location" RedirectTarget, Header "Set-Cookie" SessionCookie] NoContent)
+handleLogin mCookie loginForm = do
+    config <- asks (getTyped @HTTPServerConfig)
+    tracer <- asks (getTyped @(IOTracer HTTPTrace))
+
+    let oauthTracer = contramap HTTPOAuth tracer
+        sessionId = formSessionId loginForm
+
+    -- T039: Handle cookies disabled - check if cookie matches form session_id
+    case mCookie of
+        Nothing -> do
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "No cookie header present"
+            error $ T.unpack $ renderErrorPage "Cookies Required" "Your browser must have cookies enabled to sign in. Please enable cookies and try again."
+        Just cookie ->
+            -- Parse session cookie and verify it matches form session_id
+            let cookieSessionId = extractSessionFromCookie cookie
+             in unless (cookieSessionId == Just sessionId) $ do
+                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "Session cookie mismatch"
+                    error $ T.unpack $ renderErrorPage "Cookies Required" "Session cookie mismatch. Please enable cookies and try again."
+
+    -- Look up pending authorization
+    mPending <- lookupPendingAuth sessionId
+    pending <- case mPending of
+        Just p -> return p
+        Nothing -> do
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "session" ("Session not found: " <> unSessionId sessionId)
+            error $ T.unpack $ renderErrorPage "Invalid Session" "Session not found or has expired. Please restart the authorization flow."
+
+    -- T038: Handle expired sessions
+    now <- currentTime
+    let sessionExpirySeconds = fromIntegral $ maybe 600 loginSessionExpirySeconds (httpOAuthConfig config)
+        expiryTime = addUTCTime sessionExpirySeconds (pendingCreatedAt pending)
+    when (now > expiryTime) $ do
+        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthSessionExpired (unSessionId sessionId)
+        error $ T.unpack $ renderErrorPage "Session Expired" "Your login session has expired. Please restart the authorization flow."
+
+    -- Check if user denied access
+    if formAction loginForm == "deny"
+        then do
+            -- Emit denial trace
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationDenied (unClientId $ pendingClientId pending) "User denied authorization"
+
+            -- Clear session and redirect with error
+            let clearCookie = SessionCookie "mcp_session=; Max-Age=0; Path=/"
+                errorParams = "error=access_denied&error_description=User%20denied%20access"
+                stateParam = case pendingState pending of
+                    Just s -> "&state=" <> s
+                    Nothing -> ""
+                redirectUrl = RedirectTarget $ toUrlPiece (pendingRedirectUri pending) <> "?" <> errorParams <> stateParam
+
+            -- Remove pending authorization
+            deletePendingAuth sessionId
+
+            return $ addHeader redirectUrl $ addHeader clearCookie NoContent
+        else do
+            -- Validate credentials via AuthBackend
+            let username = formUsername loginForm
+                password = formPassword loginForm
+
+            credentialsValid <- validateCredentials username password
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt (unUsername username) credentialsValid
+            if credentialsValid
+                then do
+                    -- Emit authorization granted trace
+                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (unClientId $ pendingClientId pending) (unUsername username)
+
+                    -- Generate authorization code
+                    code <- liftIO $ generateAuthCode config
+                    codeGenerationTime <- currentTime
+                    let oauthCfg = httpOAuthConfig config
+                        expirySeconds = fromIntegral $ maybe 600 authCodeExpirySeconds oauthCfg
+                        expiry = addUTCTime expirySeconds codeGenerationTime
+                        -- Convert pendingScope from Maybe (Set Scope) to Set Scope
+                        scopes = fromMaybe Set.empty (pendingScope pending)
+                        -- Create UserId from username
+                        userId = case mkUserId (unUsername username) of
+                            Just uid -> uid
+                            Nothing -> error "Invalid user ID" -- This shouldn't happen as username is already validated
+                        codeId = AuthCodeId code
+                        authCode =
+                            AuthorizationCode
+                                { authCodeId = codeId
+                                , authClientId = pendingClientId pending
+                                , authRedirectUri = pendingRedirectUri pending
+                                , authCodeChallenge = pendingCodeChallenge pending
+                                , authCodeChallengeMethod = pendingCodeChallengeMethod pending
+                                , authScopes = scopes
+                                , authUserId = userId
+                                , authExpiry = expiry
+                                }
+
+                    -- Store authorization code and remove pending authorization
+                    storeAuthCode authCode
+                    deletePendingAuth sessionId
+
+                    -- Build redirect URL with code
+                    let stateParam = case pendingState pending of
+                            Just s -> "&state=" <> s
+                            Nothing -> ""
+                        redirectUrl = RedirectTarget $ toUrlPiece (pendingRedirectUri pending) <> "?code=" <> code <> stateParam
+                        clearCookie = SessionCookie "mcp_session=; Max-Age=0; Path=/"
+
+                    return $ addHeader redirectUrl $ addHeader clearCookie NoContent
+                else
+                    -- Invalid credentials - return error (validateCredentials already emitted trace)
+                    error "authentication_failed: Invalid username or password"
+
 -- -----------------------------------------------------------------------------
 -- Helper Functions
 -- -----------------------------------------------------------------------------
+
+-- | Extract session ID from cookie header
+extractSessionFromCookie :: Text -> Maybe SessionId
+extractSessionFromCookie cookieHeader =
+    let cookies = T.splitOn ";" cookieHeader
+        sessionCookies = filter (T.isInfixOf "mcp_session=") cookies
+     in case sessionCookies of
+            (cookie : _) ->
+                let parts = T.splitOn "=" cookie
+                 in case parts of
+                        [_, value] -> mkSessionId (T.strip value)
+                        _ -> Nothing
+            [] -> Nothing
+
+-- | Generate authorization code with config prefix
+generateAuthCode :: HTTPServerConfig -> IO Text
+generateAuthCode config = do
+    uuid <- UUID.nextRandom
+    let prefix = maybe "code_" authCodePrefix (httpOAuthConfig config)
+    return $ prefix <> UUID.toText uuid
+
+-- | Render error page HTML
+renderErrorPage :: Text -> Text -> Text
+renderErrorPage errorTitle errorMessage =
+    T.unlines
+        [ "<!DOCTYPE html>"
+        , "<html>"
+        , "<head>"
+        , "  <meta charset=\"utf-8\">"
+        , "  <title>Error - MCP Server</title>"
+        , "  <style>"
+        , "    body { font-family: system-ui, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; }"
+        , "    h1 { color: #d32f2f; }"
+        , "    .error { background: #ffebee; padding: 15px; border-radius: 5px; border-left: 4px solid #d32f2f; }"
+        , "  </style>"
+        , "</head>"
+        , "<body>"
+        , "  <h1>" <> escapeHtml errorTitle <> "</h1>"
+        , "  <div class=\"error\">"
+        , "    <p>" <> escapeHtml errorMessage <> "</p>"
+        , "  </div>"
+        , "  <p>Please contact the application developer.</p>"
+        , "</body>"
+        , "</html>"
+        ]
 
 -- | Map scope to human-readable description
 scopeToDescription :: Text -> Text
