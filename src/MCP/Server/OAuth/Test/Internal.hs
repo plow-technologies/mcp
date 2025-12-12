@@ -56,6 +56,7 @@ module MCP.Server.OAuth.Test.Internal (
     clientRegistrationSpec,
     loginFlowSpec,
     tokenExchangeSpec,
+    expirySpec,
 ) where
 
 import Control.Monad (when)
@@ -81,7 +82,7 @@ import Network.URI (URI (..), parseURI, uriQuery)
 import Network.Wai (Application)
 import Network.Wai.Test (SResponse, simpleBody, simpleHeaders, simpleStatus)
 import System.Random (newStdGen, randomRs)
-import Test.Hspec (Spec, describe, expectationFailure, it, shouldSatisfy)
+import Test.Hspec (Spec, describe, expectationFailure, it, runIO, shouldSatisfy)
 import Test.Hspec.Wai (WaiSession, get, liftIO, matchHeaders, post, postHtmlForm, shouldRespondWith, with, (<:>))
 
 import MCP.Server.OAuth.Types (AuthCodeId (..), ClientId (..), mkAuthCodeId)
@@ -606,15 +607,14 @@ withAccessToken config clientId action = do
 -- Test Specs
 -- -----------------------------------------------------------------------------
 
-{- | Helper to create a fresh Application for each test.
+{- | Helper to create a fresh Application for each test (without time control).
 
-Uses tcMakeApp to create the application and discards the time advancement function
-since it's not needed for basic client registration tests.
+Discards the time advancement function for tests that don't need time control.
 
 Returns the IO Application for use with hspec-wai's 'with' combinator.
 -}
-withFreshApp :: TestConfig m -> IO Application
-withFreshApp config = do
+withFreshAppNoTime :: TestConfig m -> IO Application
+withFreshAppNoTime config = do
     (app, _advanceTime) <- tcMakeApp config
     return app
 
@@ -645,7 +645,7 @@ Each test uses 'withFreshApp' to get a fresh Application instance, ensuring
 complete isolation between tests (no shared state).
 -}
 clientRegistrationSpec :: TestConfig m -> Spec
-clientRegistrationSpec config = with (withFreshApp config) $ do
+clientRegistrationSpec config = with (withFreshAppNoTime config) $ do
     describe "Client Registration" $ do
         it "registers a new client with valid request" $ do
             let body =
@@ -710,7 +710,7 @@ Each test uses 'withFreshApp' to get a fresh Application instance, ensuring
 complete isolation between tests (no shared state).
 -}
 loginFlowSpec :: TestConfig m -> Spec
-loginFlowSpec config = with (withFreshApp config) $ do
+loginFlowSpec config = with (withFreshAppNoTime config) $ do
     describe "Login Flow" $ do
         it "shows login page on authorization request" $ do
             withRegisteredClient config $ \clientId -> do
@@ -804,7 +804,7 @@ Each test uses 'withFreshApp' to get a fresh Application instance, ensuring
 complete isolation between tests (no shared state).
 -}
 tokenExchangeSpec :: TestConfig m -> Spec
-tokenExchangeSpec config = with (withFreshApp config) $ do
+tokenExchangeSpec config = with (withFreshAppNoTime config) $ do
     describe "Token Exchange" $ do
         it "exchanges valid code for tokens" $ do
             withRegisteredClient config $ \clientId -> do
@@ -863,3 +863,91 @@ tokenExchangeBody clientId code verifier =
         , ("client_id", TE.encodeUtf8 $ unClientId clientId)
         , ("code_verifier", TE.encodeUtf8 verifier)
         ]
+
+{- | Test specification for OAuth expiry behavior.
+
+Tests time-sensitive OAuth flows using controllable time advancement.
+
+Covers:
+- Expired authorization codes (10+ minute old codes rejected)
+- Expired login sessions (10+ minute old session cookies rejected)
+
+== Usage
+
+@
+import MCP.Server.OAuth.Test.Internal (expirySpec)
+
+spec :: Spec
+spec = do
+  let config = TestConfig { ... }
+  expirySpec config
+@
+
+== Test Isolation
+
+Each test uses 'withFreshApp' to get a fresh Application instance with
+independent time control, ensuring complete isolation between tests.
+
+== Time Control
+
+The 'advanceTime' callback takes NominalDiffTime (seconds as a rational number).
+For example:
+- @advanceTime 60@ advances time by 1 minute
+- @advanceTime (11 * 60)@ advances time by 11 minutes
+-}
+expirySpec :: TestConfig m -> Spec
+expirySpec config = describe "Expiry behavior" $ do
+    describe "with fresh app for expired authorization code test" $ do
+        (app, advanceTime) <- runIO $ tcMakeApp config
+        with (return app) $ do
+            it "rejects expired authorization codes" $ do
+                withRegisteredClient config $ \clientId -> do
+                    withAuthorizedUser config clientId $ \code verifier -> do
+                        -- Advance time past the 10-minute authorization code expiry
+                        liftIO $ advanceTime (11 * 60) -- 11 minutes = 660 seconds
+                        let body = tokenExchangeBody clientId code verifier
+                        post "/token" (LBS.fromStrict body) `shouldRespondWith` 400
+
+    describe "with fresh app for expired login session test" $ do
+        (app, advanceTime) <- runIO $ tcMakeApp config
+        with (return app) $ do
+            it "rejects expired login sessions" $ do
+                withRegisteredClient config $ \clientId -> do
+                    -- Generate PKCE for authorization request
+                    (_, challenge) <- liftIO generatePKCE
+
+                    -- Step 1: GET /authorize to create login session
+                    let authUrl =
+                            "/authorize?client_id="
+                                <> unClientId clientId
+                                <> "&redirect_uri=http://localhost/callback"
+                                <> "&response_type=code"
+                                <> "&code_challenge="
+                                <> challenge
+                                <> "&code_challenge_method=S256"
+
+                    resp <- get (TE.encodeUtf8 authUrl)
+
+                    -- Extract session cookie
+                    sessionCookie <- case extractSessionCookie resp of
+                        Just cookie -> pure cookie
+                        Nothing ->
+                            liftIO $
+                                error $
+                                    "Failed to extract session cookie for expiry test. "
+                                        <> "Response headers: "
+                                        <> show (simpleHeaders resp)
+
+                    -- Advance time past the 10-minute login session expiry
+                    liftIO $ advanceTime (11 * 60) -- 11 minutes = 660 seconds
+
+                    -- Step 2: POST /login with expired session cookie
+                    let loginForm =
+                            [ ("username", T.unpack $ tcUsername (tcCredentials config))
+                            , ("password", T.unpack $ tcPassword (tcCredentials config))
+                            , ("session_id", T.unpack sessionCookie)
+                            , ("action", "approve")
+                            ]
+
+                    -- Should get 400 for expired session
+                    postHtmlForm "/login" loginForm `shouldRespondWith` 400
