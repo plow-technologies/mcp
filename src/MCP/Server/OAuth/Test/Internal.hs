@@ -58,6 +58,7 @@ module MCP.Server.OAuth.Test.Internal (
     tokenExchangeSpec,
     expirySpec,
     headerSpec,
+    oauthConformanceSpec,
 ) where
 
 import Control.Monad (when)
@@ -1098,3 +1099,51 @@ headerSpec config = with (withFreshAppNoTime config) $ do
                         liftIO $ setCookieText `shouldSatisfy` T.isInfixOf "mcp_session="
                         -- Should contain Max-Age=0 to clear the cookie
                         liftIO $ setCookieText `shouldSatisfy` T.isInfixOf "Max-Age=0"
+
+{- | Polymorphic OAuth conformance test suite.
+
+Run against any OAuthStateStore/AuthBackend implementation to verify complete
+OAuth 2.0 compliance including:
+
+- Client registration (RFC 7591)
+- Authorization code flow with PKCE (RFC 7636)
+- Token exchange and refresh (RFC 6749)
+- Expiry handling for codes and sessions
+- HTTP header correctness (Location, Set-Cookie)
+
+== Usage
+
+@
+import MCP.Server.OAuth.Test.Internal (oauthConformanceSpec)
+
+spec :: Spec
+spec = do
+  let config = TestConfig { ... }
+  oauthConformanceSpec config
+@
+
+== Test Coverage
+
+This suite composes all available OAuth test specs:
+
+1. **Client Registration** - Dynamic client registration protocol
+2. **Login Flow** - Interactive authorization with credentials
+3. **Token Exchange** - Authorization code to access token conversion
+4. **Expiry Behavior** - Time-based validation of codes and sessions
+5. **HTTP Headers** - Regression tests for header correctness
+
+== Implementation Requirements
+
+The TestConfig must provide:
+
+- 'tcMakeApp': Create Application with time control
+- 'tcRunM': Execute monad stack in IO
+- 'tcCredentials': Valid test credentials matching configured AuthBackend
+-}
+oauthConformanceSpec :: TestConfig m -> Spec
+oauthConformanceSpec config = describe "OAuth Conformance Suite" $ do
+    clientRegistrationSpec config
+    loginFlowSpec config
+    tokenExchangeSpec config
+    expirySpec config
+    headerSpec config
