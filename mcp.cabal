@@ -281,7 +281,6 @@ test-suite mcp-test
         Trace.RenderSpec
         Functional.OAuthFlowSpec
         MCP.Server.OAuth.Test.Fixtures
-        MCP.Server.OAuth.Test.Internal
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
