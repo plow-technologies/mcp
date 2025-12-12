@@ -271,3 +271,121 @@ mcp-51r (epic): Unify OAuth state types between HTTP.hs and OAuth.Types
 | VI. Property-Based Testing | ✅ | FR-019 requires round-trip property tests |
 
 **Gate Status**: PASS - Phase 3 planning complete.
+
+---
+
+## Phase 4: Type-Safe HTTP Response Headers (mcp-nyr.18)
+
+**Added**: 2025-12-12 | **Blocker**: mcp-nyr.18 | **Status**: Planning
+
+### Problem Statement
+
+A critical bug was discovered via git bisect: commit 1d882149 accidentally swapped `addHeader` call order in `handleLogin`, causing successful OAuth logins to redirect to a malformed URL containing the cookie value instead of the callback URI.
+
+**Root cause**: Both `Location` and `Set-Cookie` headers are typed as `Text`, providing no compile-time protection against position swaps. This is the same class of bug that newtypes are designed to prevent.
+
+```haskell
+-- Current type signature (vulnerable):
+Headers '[Header "Location" Text, Header "Set-Cookie" Text] NoContent
+
+-- Bug: compiler accepts both orderings since both are Text
+return $ addHeader clearCookie $ addHeader redirectUrl NoContent  -- WRONG
+return $ addHeader redirectUrl $ addHeader clearCookie NoContent  -- RIGHT
+```
+
+### Blessed Solution (from spec clarifications 2025-12-12)
+
+Add semantic newtypes for HTTP response header values in `OAuth.Types`:
+
+| Newtype | Purpose | Usage |
+|---------|---------|-------|
+| `RedirectTarget` | OAuth callback/redirect URL | `Header "Location" RedirectTarget` |
+| `SessionCookie` | Session cookie value | `Header "Set-Cookie" SessionCookie` |
+
+**Design principle**: Names describe the value's semantic purpose, not the header name. All OAuth domain types belong in `OAuth.Types` to keep OAuth combinators framework-agnostic.
+
+### Type-Safe Signature
+
+```haskell
+-- Fixed type signature (compile-time protection):
+Headers '[Header "Location" RedirectTarget, Header "Set-Cookie" SessionCookie] NoContent
+
+-- Now compiler rejects wrong order:
+return $ addHeader clearCookie $ addHeader redirectUrl NoContent  -- TYPE ERROR
+return $ addHeader redirectUrl $ addHeader clearCookie NoContent  -- OK
+```
+
+### Implementation Approach
+
+#### Step 1: Add Newtypes to OAuth.Types
+
+```haskell
+-- | Target URL for HTTP 3xx redirects in OAuth flows.
+-- Semantic name describes purpose, not header name.
+newtype RedirectTarget = RedirectTarget { unRedirectTarget :: Text }
+  deriving (Show, Eq)
+  deriving newtype (ToHttpApiData)
+
+-- | Session cookie value for OAuth login flow.
+-- Distinct type from RedirectTarget prevents position-swap bugs.
+newtype SessionCookie = SessionCookie { unSessionCookie :: Text }
+  deriving (Show, Eq)
+  deriving newtype (ToHttpApiData)
+```
+
+#### Step 2: Update Handler Type Signatures
+
+```haskell
+-- handleLogin return type (HTTP.hs)
+handleLogin :: ... -> Handler (Headers '[Header "Location" RedirectTarget, Header "Set-Cookie" SessionCookie] NoContent)
+
+-- handleAuthorize return type (also uses Set-Cookie)
+handleAuthorize :: ... -> Handler (Headers '[Header "Set-Cookie" SessionCookie] Text)
+```
+
+#### Step 3: Update addHeader Call Sites
+
+```haskell
+-- Approve branch (line ~1003)
+let redirectUrl = RedirectTarget $ toUrlPiece (pendingRedirectUri pending) <> "?code=" <> code <> stateParam
+    clearCookie = SessionCookie "mcp_session=; Max-Age=0; Path=/"
+return $ addHeader redirectUrl $ addHeader clearCookie NoContent
+
+-- Deny branch (line ~946) - same pattern
+let redirectUrl = RedirectTarget $ toUrlPiece (pendingRedirectUri pending) <> "?" <> errorParams <> stateParam
+    clearCookie = SessionCookie "mcp_session=; Max-Age=0; Path=/"
+return $ addHeader redirectUrl $ addHeader clearCookie NoContent
+```
+
+#### Step 4: Add Regression Test
+
+```haskell
+-- Verify Location header contains expected redirect URL pattern
+it "redirects to callback URI with authorization code on successful login" $ do
+  resp <- postLogin validCredentials validSession
+  let locationHeader = lookup "Location" (responseHeaders resp)
+  locationHeader `shouldSatisfy` \case
+    Just loc -> "?code=" `isInfixOf` loc && not ("mcp_session" `isInfixOf` loc)
+    Nothing -> False
+```
+
+### Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/MCP/Server/OAuth/Types.hs` | Add `RedirectTarget`, `SessionCookie` newtypes with `ToHttpApiData` |
+| `src/MCP/Server/HTTP.hs` | Update type signatures and `addHeader` call sites |
+| `test/HTTP/OAuthSpec.hs` | Add regression test for Location header content |
+
+### Constitution Compliance (Phase 4)
+
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. Type-Driven Design | ✅ | Distinct newtypes make position-swap bugs a compile error |
+| II. Deep Module Architecture | ✅ | Types in OAuth.Types; HTTP.hs only changes signatures |
+| III. Denotational Semantics | ✅ | Newtypes have clear semantic meaning in their names |
+| IV. Total Functions | ✅ | No change to function totality |
+| V. Pure Core, Impure Shell | ✅ | Types are pure; framework-agnostic per design principle |
+| VI. Property-Based Testing | ✅ | Regression test added; type safety is compile-time |
+
+**Gate Status**: PASS - Phase 4 planning complete.
