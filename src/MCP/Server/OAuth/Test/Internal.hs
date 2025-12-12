@@ -54,6 +54,7 @@ module MCP.Server.OAuth.Test.Internal (
 
     -- * Test Specs
     clientRegistrationSpec,
+    loginFlowSpec,
 ) where
 
 import Control.Monad (when)
@@ -680,3 +681,97 @@ clientRegistrationSpec config = with (withFreshApp config) $ do
                             , "redirect_uris" .= ([] :: [Text])
                             ]
             post "/register" body `shouldRespondWith` 400
+
+{- | Test specification for OAuth login flow.
+
+Tests the interactive login flow including authorization page and credential submission.
+
+Covers:
+- Authorization endpoint shows login page (200 OK with text/html)
+- Successful login redirects with authorization code
+- Session cookie is set on authorization request
+- Invalid credentials return 401
+
+== Usage
+
+@
+import MCP.Server.OAuth.Test.Internal (loginFlowSpec)
+
+spec :: Spec
+spec = do
+  let config = TestConfig { ... }
+  loginFlowSpec config
+@
+
+== Test Isolation
+
+Each test uses 'withFreshApp' to get a fresh Application instance, ensuring
+complete isolation between tests (no shared state).
+-}
+loginFlowSpec :: TestConfig m -> Spec
+loginFlowSpec config = with (withFreshApp config) $ do
+    describe "Login Flow" $ do
+        it "shows login page on authorization request" $ do
+            withRegisteredClient config $ \clientId -> do
+                (_, challenge) <- liftIO generatePKCE
+                let authUrl =
+                        "/authorize?client_id="
+                            <> unClientId clientId
+                            <> "&redirect_uri=http://localhost/callback"
+                            <> "&response_type=code"
+                            <> "&code_challenge="
+                            <> challenge
+                            <> "&code_challenge_method=S256"
+                get (TE.encodeUtf8 authUrl)
+                    `shouldRespondWith` 200{matchHeaders = ["Content-Type" <:> "text/html"]}
+
+        it "redirects with code on successful login" $ do
+            withRegisteredClient config $ \clientId -> do
+                withAuthorizedUser config clientId $ \code _verifier -> do
+                    -- withAuthorizedUser validates the entire flow internally
+                    -- If we got here, code is valid and non-empty
+                    liftIO $ unAuthCodeId code `shouldSatisfy` (not . T.null)
+
+        it "sets session cookie on authorization" $ do
+            withRegisteredClient config $ \clientId -> do
+                (_, challenge) <- liftIO generatePKCE
+                let authUrl =
+                        "/authorize?client_id="
+                            <> unClientId clientId
+                            <> "&redirect_uri=http://localhost/callback"
+                            <> "&response_type=code"
+                            <> "&code_challenge="
+                            <> challenge
+                            <> "&code_challenge_method=S256"
+                resp <- get (TE.encodeUtf8 authUrl)
+                liftIO $ extractSessionCookie resp `shouldSatisfy` isJust
+
+        it "returns 401 for invalid credentials" $ do
+            withRegisteredClient config $ \clientId -> do
+                (_, challenge) <- liftIO generatePKCE
+                -- Step 1: GET /authorize to get session cookie
+                let authUrl =
+                        "/authorize?client_id="
+                            <> unClientId clientId
+                            <> "&redirect_uri=http://localhost/callback"
+                            <> "&response_type=code"
+                            <> "&code_challenge="
+                            <> challenge
+                            <> "&code_challenge_method=S256"
+                resp1 <- get (TE.encodeUtf8 authUrl)
+
+                -- Extract session cookie
+                sessionCookie <- case extractSessionCookie resp1 of
+                    Just cookie -> pure cookie
+                    Nothing ->
+                        liftIO $
+                            error "Failed to extract session cookie for invalid credentials test"
+
+                -- Step 2: POST /login with invalid credentials
+                let loginForm =
+                        [ ("username", "invalid-user")
+                        , ("password", "wrong-password")
+                        , ("session_id", T.unpack sessionCookie)
+                        , ("action", "approve")
+                        ]
+                postHtmlForm "/login" loginForm `shouldRespondWith` 401
