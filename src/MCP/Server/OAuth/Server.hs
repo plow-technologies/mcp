@@ -398,7 +398,19 @@ data ClientRegistrationRequest = ClientRegistrationRequest
     deriving (Show, Generic)
 
 instance Aeson.FromJSON ClientRegistrationRequest where
-    parseJSON = Aeson.genericParseJSON Aeson.defaultOptions
+    parseJSON = Aeson.withObject "ClientRegistrationRequest" $ \v -> do
+        name <- v Aeson..: "client_name"
+        uris <- v Aeson..: "redirect_uris"
+        when (null uris) $
+            fail "redirect_uris must contain at least one URI"
+        grants <- v Aeson..: "grant_types"
+        when (null grants) $
+            fail "grant_types must not be empty"
+        responses <- v Aeson..: "response_types"
+        when (null responses) $
+            fail "response_types must not be empty"
+        authMethod <- v Aeson..: "token_endpoint_auth_method"
+        pure $ ClientRegistrationRequest name uris grants responses authMethod
 
 -- | Client registration response
 data ClientRegistrationResponse = ClientRegistrationResponse

@@ -537,7 +537,13 @@ instance FromJSON ClientInfo where
             Just ne -> pure ne
 
         grantTypes <- v .: "client_grant_types"
+        when (Set.null grantTypes) $
+            fail "client_grant_types must not be empty"
+
         responseTypes <- v .: "client_response_types"
+        when (Set.null responseTypes) $
+            fail "client_response_types must not be empty"
+
         authMethod <- v .: "client_auth_method"
 
         pure $ ClientInfo name uris grantTypes responseTypes authMethod
