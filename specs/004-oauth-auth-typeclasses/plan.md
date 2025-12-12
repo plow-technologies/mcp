@@ -120,6 +120,7 @@ test/
 | OAuthStateStore Contract | `specs/004-oauth-auth-typeclasses/contracts/OAuthStateStore.hs` | Typeclass interface specification |
 | AuthBackend Contract | `specs/004-oauth-auth-typeclasses/contracts/AuthBackend.hs` | Typeclass interface specification |
 | Quickstart | `specs/004-oauth-auth-typeclasses/quickstart.md` | Usage examples and integration guide |
+| TestConfig Contract | `specs/004-oauth-auth-typeclasses/contracts/TestConfig.hs` | Conformance test interface (Phase 5) |
 
 ---
 
@@ -389,3 +390,307 @@ it "redirects to callback URI with authorization code on successful login" $ do
 | VI. Property-Based Testing | ✅ | Regression test added; type safety is compile-time |
 
 **Gate Status**: PASS - Phase 4 planning complete.
+
+---
+
+## Phase 5: Functional Test Harness (mcp-di0)
+
+**Added**: 2025-12-12 | **Epic**: mcp-di0 | **Status**: Planning
+
+### Problem Statement
+
+The OAuth typeclass refactoring requires HTTP-level black-box testing to verify:
+1. Reference implementations work correctly at the HTTP boundary
+2. Third-party implementations can run the same conformance suite
+3. Type-safe headers (Phase 4) correctly set Location/Set-Cookie values
+4. Full OAuth flows work end-to-end through the Servant API
+
+Currently, tests are unit-level. We need hspec-wai-based functional tests that:
+- Run in-process (no separate HTTP server)
+- Are polymorphic over `OAuthStateStore` and `AuthBackend` implementations
+- Support deterministic time control for expiry testing
+- Provide helper combinators for common setup patterns
+
+### Clarified Decisions (from spec session 2025-12-12)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Test scope | Full OAuth flow coverage | Registration, authorization, login, token exchange, refresh, all error cases |
+| State management | Per-test isolation with helper combinators | Each test isolated; combinators handle common setup |
+| Implementation testing | Polymorphic specs with `runM` | Library users can test their own implementations |
+| Module location | `MCP.Server.OAuth.Test.Internal` | Internal until OAuth extracted to separate library |
+| hspec-wai pattern | Native DSL | `get`, `post`, `shouldRespondWith`, `matchHeaders` directly |
+| Time control | `MonadTime` + abstract `advanceTime` callback | Controllable clock via `runM`; reference uses TVar |
+| Application construction | `makeTestApp` with type coherence | Same `m` flows to both app and spec |
+| Helper implementation | HTTP-based setup | Combinators issue real HTTP requests within `WaiSession` |
+| Time advancement | Shared TVar for reference impl | Tests call `advanceTime` between HTTP requests |
+| Polymorphic time interface | Abstract callback | Third-party impls provide their own mechanism |
+| Test isolation | Dual strategy | Fresh app via `around` OR unique identifiers |
+| Test credentials | `TestCredentials` in config | Users provide; responsible for `AuthBackend` setup |
+| Invalid credentials | Obvious invalids | Empty password, nonexistent user |
+
+### New Requirements (FR-023 through FR-035)
+
+- **FR-023**: hspec-wai-based functional test harness, in-process via `with`
+- **FR-024**: Full OAuth flow coverage (registration, authorization, login, token, refresh)
+- **FR-025**: Verify HTTP-level correctness (status, headers, content types, bodies)
+- **FR-026**: Error cases with obviously invalid credentials for auth failures
+- **FR-027**: Per-test isolation with dual strategy (fresh app / unique IDs)
+- **FR-028**: Polymorphic specs over `OAuthStateStore` and `AuthBackend`
+- **FR-029**: Located in `MCP.Server.OAuth.Test.Internal`
+- **FR-030**: Reference implementations tested via conformance suite
+- **FR-031**: Native hspec-wai DSL, no custom wrappers
+- **FR-032**: `MonadTime` constraint for controllable clock
+- **FR-033**: `makeTestApp` with type-coherent `m`
+- **FR-034**: Abstract `advanceTime` callback in polymorphic interface
+- **FR-035**: `TestCredentials` in test configuration
+
+### Implementation Approach
+
+#### Step 1: Define TestConfig Record
+
+```haskell
+-- In MCP.Server.OAuth.Test.Internal
+module MCP.Server.OAuth.Test.Internal
+  ( TestConfig(..)
+  , TestCredentials(..)
+  , oauthConformanceSpec
+  , withRegisteredClient
+  , withAuthorizedUser
+  , advanceTestTime
+  ) where
+
+-- | Configuration for polymorphic conformance test suite.
+-- Implementations provide this to test their OAuthStateStore/AuthBackend.
+data TestConfig m = TestConfig
+  { tcMakeApp       :: IO (Application, NominalDiffTime -> IO ())
+    -- ^ Create WAI Application and time control handle
+  , tcRunM          :: forall a. m a -> IO a
+    -- ^ Natural transformation to run polymorphic monad
+  , tcCredentials   :: TestCredentials
+    -- ^ Valid credentials for login tests
+  }
+
+-- | Test credentials for OAuth login flow.
+data TestCredentials = TestCredentials
+  { tcUsername :: Text
+  , tcPassword :: Text
+  }
+```
+
+#### Step 2: Create Polymorphic Conformance Spec
+
+```haskell
+-- | Polymorphic conformance test suite.
+-- Run against any OAuthStateStore/AuthBackend implementation.
+oauthConformanceSpec
+  :: forall m. (OAuthStateStore m, AuthBackend m, MonadTime m)
+  => TestConfig m
+  -> Spec
+oauthConformanceSpec config = do
+  describe "OAuth Conformance Suite" $ do
+    clientRegistrationSpec config
+    authorizationSpec config
+    loginFlowSpec config
+    tokenExchangeSpec config
+    tokenRefreshSpec config
+    errorCasesSpec config
+    expirySpec config
+```
+
+#### Step 3: Implement Helper Combinators
+
+```haskell
+-- | Register a test client and return its ID.
+-- Issues real POST /register request within WaiSession.
+withRegisteredClient
+  :: TestConfig m
+  -> (ClientId -> WaiSession st a)
+  -> WaiSession st a
+withRegisteredClient config action = do
+  -- Generate unique client name to avoid collisions
+  uuid <- liftIO UUID.nextRandom
+  let clientName = "test-client-" <> UUID.toText uuid
+      body = object
+        [ "client_name" .= clientName
+        , "redirect_uris" .= ["http://localhost/callback" :: Text]
+        ]
+  resp <- post "/register" (encode body)
+  liftIO $ statusCode (simpleStatus resp) `shouldBe` 201
+  let Just clientId = decode (simpleBody resp) >>= (.: "client_id")
+  action (ClientId clientId)
+
+-- | Complete authorization flow up to obtaining an auth code.
+withAuthorizedUser
+  :: TestConfig m
+  -> ClientId
+  -> (AuthCodeId -> WaiSession st a)
+  -> WaiSession st a
+withAuthorizedUser config clientId action = do
+  -- Generate PKCE verifier/challenge
+  let (verifier, challenge) = generatePKCE
+  -- Start authorization
+  let authUrl = "/authorize?client_id=" <> unClientId clientId
+             <> "&redirect_uri=http://localhost/callback"
+             <> "&response_type=code"
+             <> "&code_challenge=" <> challenge
+             <> "&code_challenge_method=S256"
+  resp1 <- get authUrl
+  -- Extract session cookie
+  let Just sessionCookie = extractSessionCookie resp1
+  -- Submit login form
+  let loginBody = "username=" <> tcUsername (tcCredentials config)
+               <> "&password=" <> tcPassword (tcCredentials config)
+               <> "&session_id=" <> sessionCookie
+               <> "&action=approve"
+  resp2 <- postHtmlForm "/login" loginBody
+  -- Extract auth code from Location header
+  let Just location = lookup "Location" (simpleHeaders resp2)
+      Just code = extractCodeFromRedirect location
+  action (AuthCodeId code)
+```
+
+#### Step 4: Reference Implementation TestConfig
+
+```haskell
+-- | TestConfig for reference in-memory implementation.
+-- Used by our own tests; serves as example for third-party implementers.
+referenceTestConfig :: IO (TestConfig AppM)
+referenceTestConfig = do
+  timeTVar <- newTVarIO defaultTestTime
+  env <- mkTestEnv timeTVar
+  let makeApp = do
+        let app = serveWithContext api ctx (hoistServer api (runAppM env) server)
+        return (app, \dt -> atomically $ modifyTVar timeTVar (addUTCTime dt))
+  return TestConfig
+    { tcMakeApp = makeApp
+    , tcRunM = runReaderT (runAppM env)
+    , tcCredentials = TestCredentials "demo" "demo123"
+    }
+```
+
+#### Step 5: Test Isolation Strategies
+
+```haskell
+-- Strategy 1: Fresh Application per test (strict isolation)
+isolatedSpec :: TestConfig m -> Spec
+isolatedSpec config =
+  around (withFreshApp config) $ do
+    it "test with fresh state" $ \app -> do
+      with (return app) $ do
+        -- Each test gets clean state
+        ...
+
+-- Strategy 2: Shared Application with unique IDs (performance)
+sharedSpec :: TestConfig m -> Spec
+sharedSpec config = do
+  (app, advanceTime) <- runIO (tcMakeApp config)
+  with (return app) $ do
+    it "test with unique IDs" $ do
+      withRegisteredClient config $ \clientId -> do
+        -- Uses UUID-based client ID, no collision
+        ...
+```
+
+#### Step 6: Expiry Testing with Time Control
+
+```haskell
+expirySpec :: TestConfig m -> Spec
+expirySpec config = describe "Expiry behavior" $ do
+  around (withFreshApp config) $ \app -> do
+    it "rejects expired authorization codes" $ \(app, advanceTime) -> do
+      with (return app) $ do
+        withRegisteredClient config $ \clientId -> do
+          withAuthorizedUser config clientId $ \code -> do
+            -- Advance time past auth code expiry (default 10 min)
+            liftIO $ advanceTime (11 * 60)
+            -- Attempt token exchange
+            let tokenBody = tokenExchangeRequest clientId code
+            post "/token" tokenBody `shouldRespondWith` 400
+
+    it "rejects expired login sessions" $ \(app, advanceTime) -> do
+      with (return app) $ do
+        -- Start authorization but don't complete login
+        resp <- get "/authorize?client_id=test&..."
+        let sessionCookie = extractSessionCookie resp
+        -- Advance time past session expiry
+        liftIO $ advanceTime (11 * 60)
+        -- Attempt to submit login
+        post "/login" (loginForm sessionCookie) `shouldRespondWith` 400
+```
+
+#### Step 7: Error Case Testing
+
+```haskell
+errorCasesSpec :: TestConfig m -> Spec
+errorCasesSpec config = describe "Error cases" $ do
+  it "returns 400 for invalid client" $ do
+    get "/authorize?client_id=nonexistent&..." `shouldRespondWith` 400
+
+  it "returns 401 for invalid credentials" $ do
+    -- Use obviously invalid credentials
+    post "/login" (loginForm "__invalid_user__" "") `shouldRespondWith` 401
+
+  it "returns 400 for invalid PKCE verifier" $ do
+    withRegisteredClient config $ \clientId -> do
+      withAuthorizedUser config clientId $ \code -> do
+        let badVerifier = "wrong_verifier_that_doesnt_match_challenge"
+        post "/token" (tokenRequest clientId code badVerifier) `shouldRespondWith` 400
+
+  it "returns 400 for malformed request" $ do
+    post "/register" "not json" `shouldRespondWith` 400
+```
+
+### Updated Module Organization
+
+```text
+src/MCP/Server/OAuth/
+├── Types.hs              # Newtypes, ADTs, domain entities
+├── Store.hs              # OAuthStateStore typeclass
+├── InMemory.hs           # TVar-based implementation
+└── Test/
+    └── Internal.hs       # NEW: Polymorphic conformance suite
+
+test/
+├── Main.hs               # Modified: import and run conformance specs
+├── Laws/
+│   ├── OAuthStateStoreSpec.hs
+│   ├── AuthBackendSpec.hs
+│   └── BoundarySpec.hs
+├── Functional/
+│   └── OAuthFlowSpec.hs  # NEW: Runs conformance suite with reference impl
+├── Generators.hs
+└── TestMonad.hs          # Extended: MonadTime with TVar time control
+```
+
+### Dependencies to Add
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `hspec-wai` | ^0.11 | WAI application testing in hspec |
+| `hspec-wai-json` | ^0.11 | JSON matchers for hspec-wai |
+| `wai-extra` | ^3.1 | Request body parsing utilities |
+
+### Test Coverage Matrix
+
+| Flow | Happy Path | Error Cases | Expiry |
+|------|------------|-------------|--------|
+| Client Registration | ✅ POST /register 201 | ✅ Invalid JSON 400 | N/A |
+| Authorization | ✅ GET /authorize 200 | ✅ Invalid client 400 | N/A |
+| Login | ✅ POST /login 302 | ✅ Invalid creds 401 | ✅ Expired session |
+| Token Exchange | ✅ POST /token 200 | ✅ Invalid PKCE 400 | ✅ Expired code |
+| Token Refresh | ✅ POST /token 200 | ✅ Invalid token 400 | ✅ Expired refresh |
+| Headers | ✅ Location correct | ✅ WWW-Authenticate | N/A |
+
+### Constitution Compliance (Phase 5)
+
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. Type-Driven Design | ✅ | `TestConfig m` parameterized over implementation monad; type coherence enforced |
+| II. Deep Module Architecture | ✅ | Single `Internal` module exports minimal API; complexity hidden in combinators |
+| III. Denotational Semantics | ✅ | Test helpers have clear semantics; `advanceTime` has obvious meaning |
+| IV. Total Functions | ✅ | All helpers return in `WaiSession`; no partial functions |
+| V. Pure Core, Impure Shell | ✅ | Test logic is pure over abstract interface; IO at boundaries |
+| VI. Property-Based Testing | ✅ | Conformance suite verifies algebraic properties via HTTP; expiry laws tested |
+
+**Gate Status**: PASS - Phase 5 planning complete.
