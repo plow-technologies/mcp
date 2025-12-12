@@ -74,17 +74,22 @@ module MCP.Server.OAuth.Server (
     -- * Polymorphic Handlers
     handleMetadata,
     handleProtectedResourceMetadata,
+    handleRegister,
 ) where
 
-import Control.Monad.IO.Class (MonadIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, asks)
 import Data.Aeson ((.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as LBS
+import Data.Functor.Contravariant (contramap)
 import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
+import Data.List.NonEmpty qualified as NE
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text.Encoding qualified as TE
+import Data.UUID.V4 qualified as UUID
 import GHC.Generics (Generic)
 import Network.HTTP.Media ((//), (/:))
 import Servant (
@@ -108,17 +113,20 @@ import Servant (
 import Servant.API (Accept (..), MimeRender (..))
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
 
+import Data.UUID qualified as UUID
 import MCP.Server.Auth (
     OAuthConfig (..),
     OAuthMetadata (..),
     ProtectedResourceMetadata (..),
+    clientIdPrefix,
  )
 import MCP.Server.Auth.Backend (AuthBackend, PlaintextPassword, Username, mkPlaintextPassword, mkUsername)
 import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
-import MCP.Server.OAuth.Store (OAuthStateStore)
+import MCP.Server.OAuth.Store (OAuthStateStore (storeClient))
 import MCP.Server.OAuth.Types (
     ClientAuthMethod,
-    ClientId,
+    ClientId (..),
+    ClientInfo (..),
     CodeChallenge,
     CodeChallengeMethod,
     GrantType,
@@ -130,6 +138,9 @@ import MCP.Server.OAuth.Types (
     SessionId,
     mkSessionId,
  )
+import MCP.Trace.HTTP (HTTPTrace (..))
+import MCP.Trace.OAuth qualified as OAuthTrace
+import Plow.Logging (IOTracer, traceWith)
 
 -- -----------------------------------------------------------------------------
 -- HTML Content Type (imported from HTTP.hs for now)
@@ -467,3 +478,91 @@ defaultProtectedResourceMetadata baseUrl =
         , resourceName = Nothing
         , resourceDocumentation = Nothing
         }
+
+{- | Dynamic client registration endpoint (polymorphic).
+
+Handles client registration per RFC 7591 and MCP OAuth specification.
+
+This handler is polymorphic over the monad @m@, requiring:
+
+* 'OAuthStateStore m': Storage for registered clients
+* 'MonadIO m': Ability to generate UUIDs
+* 'MonadReader env m': Access to environment containing config and tracer
+* 'HasType HTTPServerConfig env': Config can be extracted via generic-lens
+* 'HasType (IOTracer HTTPTrace) env': Tracer can be extracted via generic-lens
+
+The handler:
+
+1. Generates a client ID with configurable prefix
+2. Stores the client information via OAuthStateStore
+3. Emits structured trace for registration
+4. Returns client credentials (empty secret for public clients)
+
+== Usage
+
+@
+-- In AppM (with AppEnv)
+response <- handleRegister request
+
+-- In custom monad
+response <- handleRegister request
+@
+
+== Migration Note
+
+This is ported from HTTP.hs as part of the typeclass-based architecture
+migration. The shim pattern is used: HTTP.hs maintains the old signature
+by calling this handler via runAppM.
+-}
+handleRegister ::
+    ( OAuthStateStore m
+    , MonadIO m
+    , MonadReader env m
+    , HasType HTTPServerConfig env
+    , HasType (IOTracer HTTPTrace) env
+    ) =>
+    ClientRegistrationRequest ->
+    m ClientRegistrationResponse
+handleRegister (ClientRegistrationRequest reqName reqRedirects reqGrants reqResponses reqAuth) = do
+    config <- asks (getTyped @HTTPServerConfig)
+    tracer <- asks (getTyped @(IOTracer HTTPTrace))
+
+    -- Generate client ID
+    let prefix = maybe "client_" clientIdPrefix (httpOAuthConfig config)
+    uuid <- liftIO UUID.nextRandom
+    let clientIdText = prefix <> UUID.toText uuid
+        clientId = ClientId clientIdText
+
+    -- Convert lists to NonEmpty and Set for ClientInfo
+    -- Note: ClientInfo from OAuth.Types requires NonEmpty and Set
+    redirectsNE <- case NE.nonEmpty reqRedirects of
+        Just ne -> pure ne
+        Nothing -> error "ClientRegistrationRequest must have at least one redirect_uri"
+
+    let grantsSet = Set.fromList reqGrants
+        responsesSet = Set.fromList reqResponses
+        clientInfo =
+            ClientInfo
+                { clientName = reqName
+                , clientRedirectUris = redirectsNE
+                , clientGrantTypes = grantsSet
+                , clientResponseTypes = responsesSet
+                , clientAuthMethod = reqAuth
+                }
+
+    storeClient clientId clientInfo
+
+    -- Emit trace
+    let oauthTracer = contramap HTTPOAuth tracer
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthClientRegistration clientIdText reqName
+
+    return
+        ClientRegistrationResponse
+            { client_id = clientIdText
+            , client_secret = "" -- Empty string for public clients
+            , client_name = reqName
+            , redirect_uris = reqRedirects
+            , grant_types = reqGrants
+            , response_types = reqResponses
+            , token_endpoint_auth_method = reqAuth
+            }

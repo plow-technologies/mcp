@@ -86,9 +86,12 @@ import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (.
 import MCP.Server.Auth.Backend (PlaintextPassword (..), unUsername)
 
 -- Import AuthBackend instance for AppM
-import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
+import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..), runAppM)
 
 -- Import OAuthAPI from OAuth.Server (migration from duplication)
+
+import MCP.Server.Auth.Demo (DemoCredentialEnv (..))
+import MCP.Server.OAuth.InMemory (defaultExpiryConfig, newOAuthTVarEnv)
 import MCP.Server.OAuth.Server (ClientRegistrationRequest (..), ClientRegistrationResponse (..), LoginForm (..), OAuthAPI, TokenResponse (..))
 import MCP.Server.OAuth.Server qualified as OAuthServer
 import MCP.Server.OAuth.Store ()
@@ -641,40 +644,37 @@ demoHandleMetadataWithAppM config _tracer _oauthStateVar = do
     handleMetadata config
 
 -- | Handle dynamic client registration
-handleRegister :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> ClientRegistrationRequest -> Handler ClientRegistrationResponse
-handleRegister config tracer oauthStateVar (ClientRegistrationRequest reqName reqRedirects reqGrants reqResponses reqAuth) = do
-    -- Generate client ID
-    let prefix = maybe "client_" clientIdPrefix (httpOAuthConfig config)
-    clientIdText <- liftIO $ (prefix <>) <$> generateAuthCode
-    let clientId = ClientId clientIdText
 
-    -- Store client info
-    let clientInfo =
-            ClientInfo
-                { clientName = reqName
-                , clientRedirectUris = reqRedirects
-                , clientGrantTypes = reqGrants
-                , clientResponseTypes = reqResponses
-                , clientAuthMethod = reqAuth
+{- | Handle client registration (SHIM).
+
+Maintains old signature for compatibility during migration.
+Calls polymorphic handler from OAuth.Server module.
+
+Temporary shim - will be removed in mcp-di0.16.1.4 when all call sites are migrated.
+-}
+handleRegister :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> ClientRegistrationRequest -> Handler ClientRegistrationResponse
+handleRegister config tracer _oauthStateVar req = do
+    -- NOTE: This shim creates a fresh InMemory OAuthState for the polymorphic handler.
+    -- The registered client will not be visible to HTTP.hs code that uses the old TVar OAuthState.
+    -- This is a temporary limitation during migration - will be fixed when HTTP.hs is fully migrated.
+
+    -- Create fresh OAuth environment for polymorphic handler
+    oauthEnv <- liftIO $ newOAuthTVarEnv defaultExpiryConfig
+
+    -- Get auth environment (demo credentials)
+    let authEnv = DemoCredentialEnv defaultDemoCredentialStore
+
+    -- Construct AppEnv
+    let appEnv =
+            AppEnv
+                { envOAuth = oauthEnv
+                , envAuth = authEnv
+                , envConfig = config
+                , envTracer = tracer
                 }
 
-    liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
-        s{registeredClients = Map.insert clientId clientInfo (registeredClients s)}
-
-    -- Emit trace
-    let oauthTracer = contramap HTTPOAuth tracer
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthClientRegistration clientIdText reqName
-
-    return
-        ClientRegistrationResponse
-            { client_id = clientIdText
-            , client_secret = "" -- Empty string for public clients
-            , client_name = reqName
-            , redirect_uris = reqRedirects
-            , grant_types = reqGrants
-            , response_types = reqResponses
-            , token_endpoint_auth_method = reqAuth
-            }
+    -- Call polymorphic handler via runAppM
+    runAppM appEnv (OAuthServer.handleRegister req)
 
 -- | Handle OAuth authorize endpoint - now returns login page HTML
 handleAuthorize :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> ResponseType -> ClientId -> RedirectUri -> CodeChallenge -> CodeChallengeMethod -> Maybe Text -> Maybe Text -> Maybe Text -> Handler (Headers '[Header "Set-Cookie" SessionCookie] Text)
@@ -1047,13 +1047,9 @@ handleRefreshTokenGrant jwtSettings config tracer oauthStateVar params = do
             , scope = Nothing
             }
 
--- | Generate random authorization code
-generateAuthCode :: IO Text
-generateAuthCode = do
-    uuid <- UUID.nextRandom
-    return $ "code_" <> UUID.toText uuid
-
--- | Generate authorization code with configurable prefix
+{- | Generate random authorization code
+| Generate authorization code with configurable prefix
+-}
 generateAuthCodeWithConfig :: HTTPServerConfig -> IO Text
 generateAuthCodeWithConfig config = do
     uuid <- UUID.nextRandom
