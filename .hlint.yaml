@@ -100,8 +100,8 @@
   - {name: forkIOWithUnmask, within: [], message: "Use Control.Concurrent.Async.withAsyncWithUnmask (or asyncWithUnmask if withAsyncWithUnmask not possible) from async package instead"}
   - {name: forkOnWithUnmask, within: [], message: "Use Control.Concurrent.Async.withAsyncOnWithUnmask (or asyncOnWithUnmask if withAsyncOnWithUnmask not possible) from async package instead"}
 
-  # decodeUtf8 allowed in MCP.Server.Auth and MCP.Server.HTTP for base64url/JWT output (always valid UTF-8)
-  - {name: decodeUtf8, within: [MCP.Server.Auth, MCP.Server.HTTP], message: "Use decodeUtf8' and handle the error case"}
+  # decodeUtf8 allowed in MCP.Server.Auth, MCP.Server.HTTP, and MCP.Server.OAuth.Test.Internal for base64url/JWT output (always valid UTF-8)
+  - {name: decodeUtf8, within: [MCP.Server.Auth, MCP.Server.HTTP, MCP.Server.OAuth.Test.Internal], message: "Use decodeUtf8' and handle the error case"}
 
   - {name: threadDelay, within: [], message: "May easily overflow in 32 bit systems. Use Control.Concurrent.Thread.Delay.delay from unbounded-delays package instead"}
 

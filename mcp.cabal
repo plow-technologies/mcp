@@ -100,6 +100,7 @@ library
         MCP.Server.OAuth.Store
         MCP.Server.OAuth.InMemory
         MCP.Server.OAuth.Boundary
+        MCP.Server.OAuth.Test.Internal
         MCP.Trace.Types
         MCP.Trace.HTTP
         MCP.Trace.OAuth
