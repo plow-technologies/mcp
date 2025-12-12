@@ -47,6 +47,9 @@ module MCP.Server.OAuth.Test.Internal (
 
     -- * Client Registration Helpers
     withRegisteredClient,
+
+    -- * Authorization Flow Helpers
+    withAuthorizedUser,
 ) where
 
 import Control.Monad (when)
@@ -70,9 +73,9 @@ import Network.URI (URI (..), parseURI, uriQuery)
 import Network.Wai (Application)
 import Network.Wai.Test (SResponse, simpleBody, simpleHeaders, simpleStatus)
 import System.Random (newStdGen, randomRs)
-import Test.Hspec.Wai (WaiSession, liftIO, post)
+import Test.Hspec.Wai (WaiSession, get, liftIO, post, postHtmlForm)
 
-import MCP.Server.OAuth.Types (ClientId (..))
+import MCP.Server.OAuth.Types (AuthCodeId (..), ClientId (..), mkAuthCodeId)
 
 -- -----------------------------------------------------------------------------
 -- Test Configuration Types
@@ -360,3 +363,120 @@ withRegisteredClient _config action = do
                         Left "client_id field not found in response"
             _ ->
                 Left $ "Response was not a JSON object: " <> show val
+
+-- -----------------------------------------------------------------------------
+-- Authorization Flow Helpers
+-- -----------------------------------------------------------------------------
+
+{- | Complete OAuth authorization flow and run action with authorization code.
+
+Issues real HTTP requests to complete the full OAuth authorization flow:
+
+1. Generate PKCE verifier and challenge
+2. GET /authorize with OAuth parameters (triggers login page)
+3. Extract session cookie from response
+4. POST /login with credentials and session cookie
+5. Extract authorization code from redirect Location header
+6. Pass code and verifier to the continuation action
+
+The function:
+1. Generates cryptographically secure PKCE pair (verifier, challenge)
+2. Constructs /authorize URL with client_id, redirect_uri, response_type, and PKCE
+3. GETs /authorize to initiate flow (server returns login page with session cookie)
+4. Extracts mcp_session cookie from Set-Cookie header
+5. POSTs /login with username, password, session_id (from cookie), and action=approve
+6. Follows redirect to extract authorization code from Location header query params
+7. Passes AuthCodeId and CodeVerifier to the continuation
+
+Returns:
+- The result of the continuation action
+- Fails with error if any step fails (missing headers, invalid responses, etc.)
+
+== Example
+
+@
+it "can complete full OAuth flow" $ do
+  withRegisteredClient config $ \\clientId -> do
+    withAuthorizedUser config clientId $ \\code verifier -> do
+      -- code and verifier are now available for token exchange
+      post "/token" (encode tokenRequest) \`shouldRespondWith\` 200
+@
+
+== Error Handling
+
+Uses `error` for failures since this is a test helper combinator. The caller
+expects valid AuthCodeId and verifier or test failure. Common failure modes:
+
+- Missing Set-Cookie header → session cookie extraction fails
+- Missing Location header → code extraction fails
+- Invalid OAuth parameters → server returns error page (no redirect)
+- Invalid credentials → server returns login page again (no redirect)
+
+== Security Note
+
+This helper uses the demo credentials from TestConfig. For production testing,
+ensure TestCredentials match the configured CredentialStore.
+-}
+withAuthorizedUser ::
+    TestConfig m ->
+    ClientId ->
+    (AuthCodeId -> Text -> WaiSession st a) ->
+    WaiSession st a
+withAuthorizedUser config clientId action = do
+    -- Generate PKCE verifier and challenge
+    (verifier, challenge) <- liftIO generatePKCE
+
+    -- Step 1: GET /authorize to initiate OAuth flow
+    let authUrl =
+            "/authorize?client_id="
+                <> unClientId clientId
+                <> "&redirect_uri=http://localhost/callback"
+                <> "&response_type=code"
+                <> "&code_challenge="
+                <> challenge
+                <> "&code_challenge_method=S256"
+
+    resp1 <- get (TE.encodeUtf8 authUrl)
+
+    -- Extract session cookie from Set-Cookie header
+    sessionCookie <- case extractSessionCookie resp1 of
+        Just cookie -> pure cookie
+        Nothing ->
+            liftIO $
+                error $
+                    "Failed to extract session cookie from /authorize response. "
+                        <> "Response headers: "
+                        <> show (simpleHeaders resp1)
+
+    -- Step 2: POST /login with credentials and session cookie
+    let loginForm =
+            [ ("username", T.unpack $ tcUsername (tcCredentials config))
+            , ("password", T.unpack $ tcPassword (tcCredentials config))
+            , ("session_id", T.unpack sessionCookie)
+            , ("action", "approve")
+            ]
+
+    resp2 <- postHtmlForm "/login" loginForm
+
+    -- Extract authorization code from Location redirect header
+    code <- case extractCodeFromRedirect resp2 of
+        Just codeText ->
+            case mkAuthCodeId codeText of
+                Just authCodeId -> pure authCodeId
+                Nothing ->
+                    liftIO $
+                        error $
+                            "Failed to construct AuthCodeId from code: " <> T.unpack codeText
+        Nothing ->
+            liftIO $
+                error $
+                    "Failed to extract authorization code from /login redirect. "
+                        <> "Response status: "
+                        <> show (simpleStatus resp2)
+                        <> ". Response headers: "
+                        <> show (simpleHeaders resp2)
+                        <> ". Response body: "
+                        <> show (simpleBody resp2)
+
+    -- Pass code and verifier to continuation
+    action code verifier
