@@ -154,6 +154,14 @@ newtype AccessTokenId = AccessTokenId {unAccessTokenId :: Text}
     deriving stock (Eq, Ord, Show, Generic)
     deriving newtype (FromJSON, ToJSON)
 
+instance FromHttpApiData AccessTokenId where
+    parseUrlPiece t
+        | T.null t = Left "AccessTokenId cannot be empty"
+        | otherwise = Right (AccessTokenId t)
+
+instance ToHttpApiData AccessTokenId where
+    toUrlPiece = unAccessTokenId
+
 -- | Refresh token identifier
 newtype RefreshTokenId = RefreshTokenId {unRefreshTokenId :: Text}
     deriving stock (Eq, Ord, Show, Generic)
