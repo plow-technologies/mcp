@@ -92,7 +92,7 @@ import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
-import MCP.Server.OAuth.Types (AuthCodeId (..), AuthUser (..), AuthorizationCode (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), PendingAuthorization (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), Scope (..), SessionId (..), UserId (..), mkScope, mkSessionId, mkUserId, unClientId, unCodeChallenge, unScope, unSessionId, unUserId)
+import MCP.Server.OAuth.Types (AuthCodeId (..), AuthUser (..), AuthorizationCode (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), PendingAuthorization (..), RedirectTarget (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), Scope (..), SessionCookie (..), SessionId (..), UserId (..), mkScope, mkSessionId, mkUserId, unClientId, unCodeChallenge, unScope, unSessionId, unUserId)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import MCP.Trace.Operation (OperationTrace (..))
@@ -247,7 +247,7 @@ type LoginAPI =
     "login"
         :> Header "Cookie" Text
         :> ReqBody '[FormUrlEncoded] LoginForm
-        :> Verb 'POST 302 '[HTML] (Headers '[Header "Location" Text, Header "Set-Cookie" Text] NoContent)
+        :> Verb 'POST 302 '[HTML] (Headers '[Header "Location" RedirectTarget, Header "Set-Cookie" SessionCookie] NoContent)
 
 -- | OAuth endpoints
 type OAuthAPI =
@@ -265,7 +265,7 @@ type OAuthAPI =
             :> QueryParam "scope" Text
             :> QueryParam "state" Text
             :> QueryParam "resource" Text
-            :> Get '[HTML] (Headers '[Header "Set-Cookie" Text] Text)
+            :> Get '[HTML] (Headers '[Header "Set-Cookie" SessionCookie] Text)
         :<|> LoginAPI
         :<|> "token"
             :> ReqBody '[FormUrlEncoded] [(Text, Text)]
@@ -791,7 +791,7 @@ handleRegister config tracer oauthStateVar (ClientRegistrationRequest reqName re
             }
 
 -- | Handle OAuth authorize endpoint - now returns login page HTML
-handleAuthorize :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> ResponseType -> ClientId -> RedirectUri -> CodeChallenge -> CodeChallengeMethod -> Maybe Text -> Maybe Text -> Maybe Text -> Handler (Headers '[Header "Set-Cookie" Text] Text)
+handleAuthorize :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> ResponseType -> ClientId -> RedirectUri -> CodeChallenge -> CodeChallengeMethod -> Maybe Text -> Maybe Text -> Maybe Text -> Handler (Headers '[Header "Set-Cookie" SessionCookie] Text)
 handleAuthorize config tracer oauthStateVar responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
     let oauthTracer = contramap HTTPOAuth tracer
         responseTypeText = toUrlPiece responseType
@@ -870,7 +870,7 @@ handleAuthorize config tracer oauthStateVar responseType clientId redirectUri co
 
     -- Build session cookie
     let sessionExpirySeconds = maybe 600 loginSessionExpirySeconds (httpOAuthConfig config)
-        cookieValue = "mcp_session=" <> sessionIdText <> "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" <> T.pack (show sessionExpirySeconds)
+        cookieValue = SessionCookie $ "mcp_session=" <> sessionIdText <> "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" <> T.pack (show sessionExpirySeconds)
         scopes = fromMaybe "default access" mScope
         loginHtml = renderLoginPage displayName scopes mResource sessionIdText
 
@@ -890,7 +890,7 @@ extractSessionFromCookie cookieHeader =
             [] -> Nothing
 
 -- | Handle login form submission
-handleLogin :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> JWTSettings -> Maybe Text -> LoginForm -> Handler (Headers '[Header "Location" Text, Header "Set-Cookie" Text] NoContent)
+handleLogin :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> JWTSettings -> Maybe Text -> LoginForm -> Handler (Headers '[Header "Location" RedirectTarget, Header "Set-Cookie" SessionCookie] NoContent)
 handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
     let oauthTracer = contramap HTTPOAuth tracer
 
@@ -932,12 +932,12 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationDenied (unClientId $ pendingClientId pending) "User denied authorization"
 
             -- Clear session and redirect with error
-            let clearCookie = "mcp_session=; Max-Age=0; Path=/"
+            let clearCookie = SessionCookie "mcp_session=; Max-Age=0; Path=/"
                 errorParams = "error=access_denied&error_description=User%20denied%20access"
                 stateParam = case pendingState pending of
                     Just s -> "&state=" <> s
                     Nothing -> ""
-                redirectUrl = toUrlPiece (pendingRedirectUri pending) <> "?" <> errorParams <> stateParam
+                redirectUrl = RedirectTarget $ toUrlPiece (pendingRedirectUri pending) <> "?" <> errorParams <> stateParam
 
             -- Remove pending authorization
             liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
@@ -997,10 +997,10 @@ handleLogin config tracer oauthStateVar _jwtSettings mCookie loginForm = do
                     let stateParam = case pendingState pending of
                             Just s -> "&state=" <> s
                             Nothing -> ""
-                        redirectUrl = toUrlPiece (pendingRedirectUri pending) <> "?code=" <> code <> stateParam
-                        clearCookie = "mcp_session=; Max-Age=0; Path=/"
+                        redirectUrl = RedirectTarget $ toUrlPiece (pendingRedirectUri pending) <> "?code=" <> code <> stateParam
+                        clearCookie = SessionCookie "mcp_session=; Max-Age=0; Path=/"
 
-                    return $ addHeader clearCookie $ addHeader redirectUrl NoContent
+                    return $ addHeader redirectUrl $ addHeader clearCookie NoContent
                 else
                     -- Invalid credentials - return error (validateCredential already emitted OAuthLoginAttempt trace)
                     throwError err401{errBody = encode $ object ["error" .= ("authentication_failed" :: Text), "error_description" .= ("Invalid username or password" :: Text)]}
