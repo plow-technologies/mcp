@@ -51,18 +51,22 @@ module MCP.Server.OAuth.Test.Internal (
     -- * Authorization Flow Helpers
     withAuthorizedUser,
     withAccessToken,
+
+    -- * Test Specs
+    clientRegistrationSpec,
 ) where
 
 import Control.Monad (when)
 import Crypto.Hash (hashWith)
 import Crypto.Hash.Algorithms (SHA256 (..))
-import Data.Aeson (Value (Object, String), eitherDecode, encode, object, (.=))
+import Data.Aeson (Value (Object, String), decode, eitherDecode, encode, object, (.=))
 import Data.Aeson.KeyMap qualified as KM
 import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
 import Data.ByteString.Base64.URL qualified as B64URL
 import Data.ByteString.Lazy qualified as LBS
 import Data.Kind (Type)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
@@ -75,7 +79,8 @@ import Network.URI (URI (..), parseURI, uriQuery)
 import Network.Wai (Application)
 import Network.Wai.Test (SResponse, simpleBody, simpleHeaders, simpleStatus)
 import System.Random (newStdGen, randomRs)
-import Test.Hspec.Wai (WaiSession, get, liftIO, post, postHtmlForm)
+import Test.Hspec (Spec, describe, expectationFailure, it, shouldSatisfy)
+import Test.Hspec.Wai (WaiSession, get, liftIO, matchHeaders, post, postHtmlForm, shouldRespondWith, with, (<:>))
 
 import MCP.Server.OAuth.Types (AuthCodeId (..), ClientId (..), mkAuthCodeId)
 
@@ -594,3 +599,84 @@ withAccessToken config clientId action = do
                         Left "access_token field not found in response"
             _ ->
                 Left $ "Response was not a JSON object: " <> show val
+
+-- -----------------------------------------------------------------------------
+-- Test Specs
+-- -----------------------------------------------------------------------------
+
+{- | Helper to create a fresh Application for each test.
+
+Uses tcMakeApp to create the application and discards the time advancement function
+since it's not needed for basic client registration tests.
+
+Returns the IO Application for use with hspec-wai's 'with' combinator.
+-}
+withFreshApp :: TestConfig m -> IO Application
+withFreshApp config = do
+    (app, _advanceTime) <- tcMakeApp config
+    return app
+
+{- | Test specification for client registration endpoint.
+
+Tests the /register endpoint according to OAuth 2.0 Dynamic Client Registration Protocol.
+
+Covers:
+- Successful registration with valid request (201 Created)
+- Response includes client_id field
+- Invalid JSON handling (400 Bad Request)
+- Empty redirect_uris validation (400 Bad Request)
+
+== Usage
+
+@
+import MCP.Server.OAuth.Test.Internal (clientRegistrationSpec)
+
+spec :: Spec
+spec = do
+  let config = TestConfig { ... }
+  clientRegistrationSpec config
+@
+
+== Test Isolation
+
+Each test uses 'withFreshApp' to get a fresh Application instance, ensuring
+complete isolation between tests (no shared state).
+-}
+clientRegistrationSpec :: TestConfig m -> Spec
+clientRegistrationSpec config = with (withFreshApp config) $ do
+    describe "Client Registration" $ do
+        it "registers a new client with valid request" $ do
+            let body =
+                    encode $
+                        object
+                            [ "client_name" .= ("test-client" :: Text)
+                            , "redirect_uris" .= (["http://localhost/callback"] :: [Text])
+                            ]
+            post "/register" body
+                `shouldRespondWith` 201{matchHeaders = ["Content-Type" <:> "application/json"]}
+
+        it "returns client_id in response" $ do
+            let body =
+                    encode $
+                        object
+                            [ "client_name" .= ("test" :: Text)
+                            , "redirect_uris" .= (["http://x"] :: [Text])
+                            ]
+            resp <- post "/register" body
+            liftIO $ do
+                let mJson = decode @Value (simpleBody resp)
+                case mJson of
+                    Just (Object obj) -> KM.lookup "client_id" obj `shouldSatisfy` isJust
+                    _ -> expectationFailure "Response was not a JSON object"
+
+        it "returns 400 for invalid JSON" $ do
+            post "/register" "not json" `shouldRespondWith` 400
+
+        it "returns 400 for empty redirect_uris" $ do
+            let body =
+                    encode $
+                        object
+                            [ "client_name" .= ("test" :: Text)
+                            , "redirect_uris" .= ([] :: [Text])
+                            ]
+            post "/register" body `shouldRespondWith` 400
