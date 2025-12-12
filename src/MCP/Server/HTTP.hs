@@ -47,7 +47,7 @@ module MCP.Server.HTTP (
     demoHandleMetadataWithAppM,
 ) where
 
-import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO, writeTVar)
+import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (ask, asks, runReaderT)
 import Control.Monad.State.Strict (get, put)
@@ -58,13 +58,9 @@ import Data.Functor.Contravariant (contramap)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (isJust)
-import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Data.Time.Clock (getCurrentTime)
-import Data.UUID qualified as UUID
-import Data.UUID.V4 qualified as UUID
 import GHC.Generics (Generic)
 import Network.HTTP.Media ((//), (/:))
 import Network.Wai (Application)
@@ -72,14 +68,13 @@ import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant (Context (..), Handler, Proxy (..), Server, serve, serveWithContext, throwError)
 import Servant.API (Accept (..), Header, Headers, JSON, MimeRender (..), NoContent (..), Post, ReqBody, (:<|>) (..), (:>))
-import Servant.Auth.Server (Auth, AuthResult (..), JWT, JWTSettings, defaultCookieSettings, defaultJWTSettings, generateKey, makeJWT)
+import Servant.Auth.Server (Auth, AuthResult (..), JWT, JWTSettings, defaultCookieSettings, defaultJWTSettings, generateKey)
 import Servant.Server (err400, err401, err500, errBody, errHeaders)
-import Web.HttpApiData (parseUrlPiece)
 
-import Control.Monad (unless, when)
+import Control.Monad (when)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
-import MCP.Server.Auth (OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore, validateCodeVerifier)
+import MCP.Server.Auth (OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoCredentialStore)
 
 -- Import AuthBackend instance for AppM
 import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..), runAppM)
@@ -93,9 +88,8 @@ import MCP.Server.OAuth.Server qualified as OAuthServer
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
-import MCP.Server.OAuth.Types (AuthCodeId (..), AuthUser (..), AuthorizationCode (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), CodeVerifier (..), GrantType (..), PendingAuthorization (..), RedirectTarget (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), Scope (..), SessionCookie (..), SessionId (..), UserId (..), unCodeChallenge, unScope, unUserId)
+import MCP.Server.OAuth.Types (AuthCodeId (..), AuthUser (..), AuthorizationCode (..), ClientAuthMethod (..), ClientId (..), CodeChallenge (..), CodeChallengeMethod (..), GrantType (..), PendingAuthorization (..), RedirectTarget (..), RedirectUri (..), RefreshTokenId (..), ResponseType (..), Scope (..), SessionCookie (..), SessionId (..), UserId (..), unUserId)
 import MCP.Trace.HTTP (HTTPTrace (..))
-import MCP.Trace.OAuth qualified as OAuthTrace
 import MCP.Trace.Operation (OperationTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
 import MCP.Types
@@ -660,6 +654,11 @@ handleRegister config tracer _oauthStateVar req = do
     -- Get auth environment (demo credentials)
     let authEnv = DemoCredentialEnv defaultDemoCredentialStore
 
+    -- Create JWT settings (required by AppEnv, but not used by handleRegister)
+    jwtSettings <- liftIO $ case httpJWK config of
+        Just jwk -> return $ defaultJWTSettings jwk
+        Nothing -> defaultJWTSettings <$> generateKey
+
     -- Construct AppEnv
     let appEnv =
             AppEnv
@@ -667,6 +666,7 @@ handleRegister config tracer _oauthStateVar req = do
                 , envAuth = authEnv
                 , envConfig = config
                 , envTracer = tracer
+                , envJWT = jwtSettings
                 }
 
     -- Call polymorphic handler via runAppM
@@ -702,6 +702,11 @@ handleAuthorize config tracer _oauthStateVar responseType clientId redirectUri c
     -- Get auth environment (demo credentials)
     let authEnv = DemoCredentialEnv defaultDemoCredentialStore
 
+    -- Create JWT settings (required by AppEnv, but not used by handleAuthorize)
+    jwtSettings <- liftIO $ case httpJWK config of
+        Just jwk -> return $ defaultJWTSettings jwk
+        Nothing -> defaultJWTSettings <$> generateKey
+
     -- Construct AppEnv
     let appEnv =
             AppEnv
@@ -709,6 +714,7 @@ handleAuthorize config tracer _oauthStateVar responseType clientId redirectUri c
                 , envAuth = authEnv
                 , envConfig = config
                 , envTracer = tracer
+                , envJWT = jwtSettings
                 }
 
     -- Call polymorphic handler via runAppM
@@ -716,7 +722,7 @@ handleAuthorize config tracer _oauthStateVar responseType clientId redirectUri c
 
 -- | Handle login form submission
 handleLogin :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> JWTSettings -> Maybe Text -> LoginForm -> Handler (Headers '[Header "Location" RedirectTarget, Header "Set-Cookie" SessionCookie] NoContent)
-handleLogin config tracer _oauthStateVar _jwtSettings mCookie loginForm = do
+handleLogin config tracer _oauthStateVar jwtSettings mCookie loginForm = do
     -- NOTE: This shim creates a fresh InMemory OAuthState for the polymorphic handler.
     -- The authorization code will not be visible to HTTP.hs code that uses the old TVar OAuthState.
     -- This is a temporary limitation during migration - will be fixed when HTTP.hs is fully migrated.
@@ -727,192 +733,61 @@ handleLogin config tracer _oauthStateVar _jwtSettings mCookie loginForm = do
     -- Get auth environment (demo credentials)
     let authEnv = DemoCredentialEnv defaultDemoCredentialStore
 
-    -- Construct AppEnv
+    -- Construct AppEnv (use the JWT settings passed in from the server)
     let appEnv =
             AppEnv
                 { envOAuth = oauthEnv
                 , envAuth = authEnv
                 , envConfig = config
                 , envTracer = tracer
+                , envJWT = jwtSettings
                 }
 
     -- Call polymorphic handler
     runAppM appEnv (OAuthServer.handleLogin mCookie loginForm)
 
--- | Handle OAuth token endpoint
+{- | Handle OAuth token endpoint (SHIM)
+
+This is a temporary shim that maintains the old signature during the migration
+to typeclass-based architecture. It creates a fresh AppEnv and calls the
+polymorphic handler from OAuth.Server.
+
+The shim creates a fresh InMemory OAuthState for the polymorphic handler.
+Tokens generated via this endpoint will not be visible to HTTP.hs code
+that uses the old TVar OAuthState.
+
+This is a temporary limitation during migration - will be fixed when HTTP.hs
+is fully migrated to use the polymorphic handlers throughout.
+
+Maintains old signature for compatibility during migration.
+Calls polymorphic handler from OAuth.Server module.
+
+Temporary shim - will be removed in mcp-di0.16.1.7 when all call sites are migrated.
+-}
 handleToken :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> [(Text, Text)] -> Handler TokenResponse
-handleToken jwtSettings config tracer oauthStateVar params = do
-    let paramMap = Map.fromList params
-    -- Parse grant_type from Text to GrantType newtype
-    case Map.lookup "grant_type" paramMap of
-        Nothing -> throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text), "error_description" .= ("Missing grant_type" :: Text)]}
-        Just grantTypeText -> case parseUrlPiece grantTypeText of
-            Left _err -> throwError err400{errBody = encode $ object ["error" .= ("unsupported_grant_type" :: Text)]}
-            Right grantType -> case grantType of
-                GrantAuthorizationCode -> handleAuthCodeGrant jwtSettings config tracer oauthStateVar paramMap
-                GrantRefreshToken -> handleRefreshTokenGrant jwtSettings config tracer oauthStateVar paramMap
-                GrantClientCredentials -> throwError err400{errBody = encode $ object ["error" .= ("unsupported_grant_type" :: Text)]}
+handleToken jwtSettings config tracer _oauthStateVar params = do
+    -- NOTE: This shim creates a fresh InMemory OAuthState for the polymorphic handler.
+    -- The tokens will not be visible to HTTP.hs code that uses the old TVar OAuthState.
+    -- This is a temporary limitation during migration - will be fixed when HTTP.hs is fully migrated.
 
--- | Handle authorization code grant
-handleAuthCodeGrant :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> Map Text Text -> Handler TokenResponse
-handleAuthCodeGrant jwtSettings config tracer oauthStateVar params = do
-    let oauthTracer = contramap HTTPOAuth tracer
+    -- Create fresh OAuth environment for polymorphic handler
+    oauthEnv <- liftIO $ newOAuthTVarEnv defaultExpiryConfig
 
-    -- Extract and log resource parameter (RFC8707)
-    let mResource = Map.lookup "resource" params
-    liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "token request (auth code)"
+    -- Get auth environment (demo credentials)
+    let authEnv = DemoCredentialEnv defaultDemoCredentialStore
 
-    -- Parse code from Text to AuthCodeId
-    code <- case Map.lookup "code" params of
-        Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing authorization code"
-            throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
-        Just codeText -> case parseUrlPiece codeText of
-            Left err -> do
-                liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" ("Invalid authorization code: " <> err)
-                throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
-            Right authCodeId -> return authCodeId
-
-    -- Parse code_verifier from Text to CodeVerifier
-    codeVerifier <- case Map.lookup "code_verifier" params of
-        Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing code_verifier"
-            throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
-        Just verifierText -> case parseUrlPiece verifierText of
-            Left err -> do
-                liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" ("Invalid code_verifier: " <> err)
-                throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
-            Right verifier -> return verifier
-
-    -- Look up authorization code
-    oauthState <- liftIO $ readTVarIO oauthStateVar
-    authCode <- case Map.lookup code (authCodes oauthState) of
-        Just ac -> return ac
-        Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
-            throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text)]}
-
-    -- Verify code hasn't expired
-    currentTime <- liftIO getCurrentTime
-    when (currentTime > authExpiry authCode) $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "auth_code" "Authorization code expired"
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
-        throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Authorization code expired" :: Text)]}
-
-    -- Verify PKCE (authCodeChallenge is already CodeChallenge from AuthorizationCode)
-    let authChallenge = authCodeChallenge authCode
-        pkceValid = validateCodeVerifier codeVerifier authChallenge
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthPKCEValidation (unCodeVerifier codeVerifier) (unCodeChallenge authChallenge) pkceValid
-    unless pkceValid $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
-        throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text), "error_description" .= ("Invalid code verifier" :: Text)]}
-
-    -- Create user for JWT
-    let oauthCfg = httpOAuthConfig config
-        emailDomain = maybe "example.com" demoEmailDomain oauthCfg
-        userName = maybe "User" demoUserName oauthCfg
-        userId = authUserId authCode
-        user =
-            AuthUser
-                { userUserId = userId
-                , userUserEmail = Just $ unUserId userId <> "@" <> emailDomain
-                , userUserName = Just userName
+    -- Construct AppEnv (use the JWT settings passed in from the server)
+    let appEnv =
+            AppEnv
+                { envOAuth = oauthEnv
+                , envAuth = authEnv
+                , envConfig = config
+                , envTracer = tracer
+                , envJWT = jwtSettings
                 }
 
-    -- Generate tokens
-    accessTokenText <- generateJWTAccessToken user jwtSettings
-    refreshTokenText <- liftIO $ generateRefreshTokenWithConfig config
-    let refreshToken = RefreshTokenId refreshTokenText
-        clientId = authClientId authCode
-
-    -- Store tokens
-    liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
-        s
-            { authCodes = Map.delete code (authCodes s)
-            , accessTokens = Map.insert accessTokenText user (accessTokens s)
-            , refreshTokens = Map.insert refreshToken (clientId, user) (refreshTokens s)
-            }
-
-    -- Emit successful token exchange trace
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" True
-
-    return
-        TokenResponse
-            { access_token = accessTokenText
-            , token_type = "Bearer"
-            , expires_in = Just $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
-            , refresh_token = Just refreshTokenText
-            , scope = if Set.null (authScopes authCode) then Nothing else Just (T.intercalate " " (map unScope $ Set.toList $ authScopes authCode))
-            }
-
--- | Handle refresh token grant
-handleRefreshTokenGrant :: JWTSettings -> HTTPServerConfig -> IOTracer HTTPTrace -> TVar OAuthState -> Map Text Text -> Handler TokenResponse
-handleRefreshTokenGrant jwtSettings config tracer oauthStateVar params = do
-    let oauthTracer = contramap HTTPOAuth tracer
-
-    -- Extract and log resource parameter (RFC8707)
-    let mResource = Map.lookup "resource" params
-    liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "token request (refresh token)"
-
-    -- Parse refresh_token from Text to RefreshTokenId
-    refreshTokenId <- case Map.lookup "refresh_token" params of
-        Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing refresh_token"
-            throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
-        Just tokenText -> case parseUrlPiece tokenText of
-            Left err -> do
-                liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" ("Invalid refresh_token: " <> err)
-                throwError err400{errBody = encode $ object ["error" .= ("invalid_request" :: Text)]}
-            Right rtId -> return rtId
-
-    -- Look up refresh token
-    oauthState <- liftIO $ readTVarIO oauthStateVar
-    (clientId, user) <- case Map.lookup refreshTokenId (refreshTokens oauthState) of
-        Just info -> return info
-        Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenRefresh False
-            throwError err400{errBody = encode $ object ["error" .= ("invalid_grant" :: Text)]}
-
-    -- Generate new JWT access token
-    newAccessTokenText <- generateJWTAccessToken user jwtSettings
-
-    -- Update tokens (keep same refresh token, update with new client/user association)
-    liftIO $ atomically $ modifyTVar' oauthStateVar $ \s ->
-        s
-            { accessTokens = Map.insert newAccessTokenText user (accessTokens s)
-            , refreshTokens = Map.insert refreshTokenId (clientId, user) (refreshTokens s)
-            }
-
-    -- Emit successful token refresh trace
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenRefresh True
-
-    return
-        TokenResponse
-            { access_token = newAccessTokenText
-            , token_type = "Bearer"
-            , expires_in = Just $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
-            , refresh_token = Just (unRefreshTokenId refreshTokenId)
-            , scope = Nothing
-            }
-
-{- | Generate random authorization code
-| Generate authorization code with configurable prefix
--}
-
--- | Generate JWT access token for user
-generateJWTAccessToken :: AuthUser -> JWTSettings -> Handler Text
-generateJWTAccessToken user jwtSettings = do
-    accessTokenResult <- liftIO $ makeJWT user jwtSettings Nothing
-    case accessTokenResult of
-        Left _err -> throwError err500{errBody = encode $ object ["error" .= ("Token generation failed" :: Text)]}
-        Right accessToken -> return $ TE.decodeUtf8 $ LBS.toStrict accessToken
-
--- | Generate refresh token with configurable prefix
-generateRefreshTokenWithConfig :: HTTPServerConfig -> IO Text
-generateRefreshTokenWithConfig config = do
-    uuid <- UUID.nextRandom
-    let prefix = maybe "rt_" refreshTokenPrefix (httpOAuthConfig config)
-    return $ prefix <> UUID.toText uuid
+    -- Call polymorphic handler
+    runAppM appEnv (OAuthServer.handleToken params)
 
 -- | Default demo OAuth configuration for testing purposes
 defaultDemoOAuthConfig :: OAuthConfig

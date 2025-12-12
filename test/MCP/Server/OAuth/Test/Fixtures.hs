@@ -47,7 +47,7 @@ import Control.Monad.Reader (MonadReader, ReaderT, ask)
 import Data.Time.Clock (UTCTime, addUTCTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeOrError)
 import Plow.Logging (IOTracer (..), Tracer (..))
-import Servant.Auth.Server (generateKey)
+import Servant.Auth.Server (defaultJWTSettings, generateKey)
 
 import MCP.Server.Auth.Demo (DemoCredentialEnv (..), defaultDemoCredentialStore)
 import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata)
@@ -118,12 +118,18 @@ mkTestEnv _timeTVar = do
     -- Null tracer for tests (discards all traces)
     let tracer = IOTracer (Tracer (\_ -> pure ()))
 
+    -- Create JWT settings for tests
+    jwtSettings <- case httpJWK serverConfig of
+        Just jwk -> return $ defaultJWTSettings jwk
+        Nothing -> defaultJWTSettings <$> generateKey
+
     return
         AppEnv
             { envOAuth = oauthEnv
             , envAuth = demoEnv
             , envConfig = serverConfig
             , envTracer = tracer
+            , envJWT = jwtSettings
             }
 
 -- -----------------------------------------------------------------------------

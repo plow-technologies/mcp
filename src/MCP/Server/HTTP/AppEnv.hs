@@ -76,6 +76,7 @@ import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
 import Network.Wai.Handler.Warp (Port)
 import Servant (Handler, ServerError, err400, err401, err500, errBody)
+import Servant.Auth.Server (JWTSettings)
 
 import MCP.Server.Auth (OAuthConfig, ProtectedResourceMetadata)
 import MCP.Server.Auth.Backend (AuthBackend (..))
@@ -122,6 +123,7 @@ Combines all dependencies needed by HTTP handlers:
 * 'envAuth': Credential authentication backend
 * 'envConfig': HTTP server configuration (port, base URL, OAuth settings)
 * 'envTracer': Structured tracing for HTTP and OAuth events
+* 'envJWT': JWT settings for token signing and validation
 
 Derives 'Generic' to enable @generic-lens@ access via 'HasType'.
 -}
@@ -134,6 +136,8 @@ data AppEnv = AppEnv
     -- ^ HTTP server configuration
     , envTracer :: IOTracer HTTPTrace
     -- ^ Tracer for HTTP and OAuth events
+    , envJWT :: JWTSettings
+    -- ^ JWT settings for token signing and validation
     }
     deriving (Generic)
 
