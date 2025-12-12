@@ -240,9 +240,25 @@ REMINDER: You CANNOT analyze code to understand it. Every technical question nee
 
    c. **Handle discoveries** (CRITICAL - see Proactive Discovery Protocol below)
 
-   d. **Complete task when done**:
+   d. **Verify before closing** (CRITICAL - prevents false completion):
+
+      For test-related tasks, delegate verification to a subagent:
+      ```
+      VERIFY CHECKLIST (delegate to analyzer/test subagent):
+      □ Tests RUN (not just compile) - check actual test output
+      □ Pending count is 0 - reject "X examples, Y failures, Z pending" where Z > 0
+      □ Expected test names appear in output - not shadowed by stubs
+      □ No `undefined` or `pendingWith` in new test code
+      ```
+
+      **STOP conditions** (do NOT close bead):
+      - Test output shows `pending` > 0 without explicit justification
+      - Expected spec functions don't appear in test run output
+      - Module exists in both `src/` and `test/` with same name (shadowing)
+
+      Only after verification passes:
       ```bash
-      bd close <task-id> --reason "Implemented: <brief summary>" --json
+      bd close <task-id> --reason "Implemented: <brief summary>. Verified: X tests pass, 0 pending." --json
       ```
 
    e. **Find next ready task**:
