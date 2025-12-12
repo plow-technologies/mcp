@@ -121,6 +121,7 @@ test/
 | AuthBackend Contract | `specs/004-oauth-auth-typeclasses/contracts/AuthBackend.hs` | Typeclass interface specification |
 | Quickstart | `specs/004-oauth-auth-typeclasses/quickstart.md` | Usage examples and integration guide |
 | TestConfig Contract | `specs/004-oauth-auth-typeclasses/contracts/TestConfig.hs` | Conformance test interface (Phase 5) |
+| OAuthServer Contract | `specs/004-oauth-auth-typeclasses/contracts/OAuthServer.hs` | Polymorphic server interface (Phase 6) |
 
 ---
 
@@ -694,3 +695,319 @@ test/
 | VI. Property-Based Testing | ✅ | Conformance suite verifies algebraic properties via HTTP; expiry laws tested |
 
 **Gate Status**: PASS - Phase 5 planning complete.
+
+---
+
+## Phase 6: Polymorphic Handler Migration (mcp-di0.16.1)
+
+**Added**: 2025-12-12 | **Blocker**: mcp-di0.16.1 | **Status**: Planning
+
+### Problem Statement
+
+The conformance test harness (Phase 5) requires building a WAI `Application` from polymorphic handlers. Currently, HTTP.hs handlers use the concrete `Handler` monad directly, preventing:
+
+1. Reuse of handlers outside Servant (e.g., Yesod, CLI tools)
+2. Testing handlers against arbitrary `OAuthStateStore`/`AuthBackend` implementations
+3. Proper three-layer cake architecture with delayed monomorphization
+
+**Critical Architectural Decision** (from spec clarifications 2025-12-12):
+> Handlers MUST be polymorphic over `m` with typeclass constraints. `AppM` is ONE instantiation at Servant boundary, not the handler definition. Design principle: delay monomorphization until the last possible moment.
+
+### Clarified Decisions (from spec session 2025-12-12)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Handler signatures | Polymorphic over `m` | FR-036: Enable framework-agnostic reuse |
+| Concrete types | Only at boundaries | `AppM`/`Handler` are instantiations, not definitions |
+| Constraint selection | Judicious | FR-037: `MonadIO` for mundane IO, new typeclasses only when beneficial |
+| Servant's role | Reference implementation + typed API spec | Handlers are constructive proofs, usable standalone |
+| Future reuse | Yesod application | Handlers will be reused; Servant provides dev/test infrastructure |
+
+### New Requirements (FR-036, FR-037)
+
+- **FR-036**: OAuth HTTP handler functions MUST be polymorphic over monad `m`, constrained by typeclass requirements. Concrete types like `AppM` or `Handler` are instantiations at the Servant boundary via `hoistServer`, NOT the handler definitions.
+- **FR-037**: Constraint selection MUST be judicious. Use existing abstractions when available. For mundane IO library calls, add `MonadIO` directly. Create new typeclasses only when swappability or testability genuinely benefits.
+
+### Implementation Approach
+
+#### Step 1: Define Handler Constraints Pattern
+
+```haskell
+-- Common constraint bundle for OAuth handlers
+type OAuthHandler m env e =
+  ( OAuthStateStore m
+  , AuthBackend m
+  , MonadTime m
+  , MonadIO m  -- For JWT signing, UUID generation
+  , MonadReader env m
+  , MonadError e m
+  , HasType OAuthConfig env
+  , HasType (OAuthStateEnv m) env
+  , HasType (AuthBackendEnv m) env
+  , AsType (OAuthStateError m) e
+  , AsType (AuthBackendError m) e
+  )
+
+-- Alternative: type family for cleaner signatures
+type family OAuthConstraints m :: Constraint where
+  OAuthConstraints m = (OAuthStateStore m, AuthBackend m, MonadTime m, MonadIO m)
+```
+
+#### Step 2: Migrate Handler Signatures
+
+**Before** (concrete `Handler`):
+```haskell
+handleClientRegistration
+  :: OAuthState
+  -> OAuthConfig
+  -> ClientRegistrationRequest
+  -> Handler ClientRegistrationResponse
+handleClientRegistration state config req = do
+  clientId <- liftIO $ generateClientId
+  atomically $ modifyTVar (oauthClients state) (Map.insert clientId info)
+  return response
+```
+
+**After** (polymorphic `m`):
+```haskell
+handleClientRegistration
+  :: (OAuthStateStore m, MonadIO m, MonadReader env m, HasType OAuthConfig env)
+  => ClientRegistrationRequest
+  -> m ClientRegistrationResponse
+handleClientRegistration req = do
+  config <- asks (view (typed @OAuthConfig))
+  clientId <- liftIO generateClientId  -- MonadIO for UUID generation
+  let info = mkClientInfo req clientId
+  storeClient clientId info            -- OAuthStateStore method
+  return $ mkResponse clientId info
+```
+
+#### Step 3: Create Polymorphic Server Definition
+
+```haskell
+-- In MCP.Server.OAuth.Server (NEW module)
+module MCP.Server.OAuth.Server
+  ( oauthServer
+  , OAuthAPI
+  ) where
+
+-- | Polymorphic OAuth server. Framework-agnostic.
+-- Instantiate with hoistServer at framework boundary.
+oauthServer
+  :: forall m env e.
+     ( OAuthStateStore m
+     , AuthBackend m
+     , MonadTime m
+     , MonadIO m
+     , MonadReader env m
+     , MonadError e m
+     , HasType OAuthConfig env
+     , HasType JWTSettings env
+     , HasType (OAuthStateEnv m) env
+     , HasType (AuthBackendEnv m) env
+     , AsType (OAuthStateError m) e
+     , AsType (AuthBackendError m) e
+     , AsType ServerError e  -- For Servant error passthrough
+     )
+  => ServerT OAuthAPI m
+oauthServer =
+       handleMetadata
+  :<|> handleProtectedResourceMetadata
+  :<|> handleClientRegistration
+  :<|> handleAuthorize
+  :<|> handleLogin
+  :<|> handleToken
+  :<|> handleMCP
+```
+
+#### Step 4: Servant Boundary Translation
+
+```haskell
+-- In MCP.Server.HTTP (modified)
+module MCP.Server.HTTP where
+
+import MCP.Server.OAuth.Server (oauthServer, OAuthAPI)
+
+-- | Concrete application monad for Servant runtime
+type AppM = ReaderT AppEnv (ExceptT AppError IO)
+
+-- | Run polymorphic handlers in Servant's Handler monad
+runAppM :: AppEnv -> AppM a -> Handler a
+runAppM env action = do
+  result <- liftIO $ runExceptT $ runReaderT action env
+  case result of
+    Left err -> throwError (toServerError err)
+    Right a  -> return a
+
+-- | Construct WAI Application from polymorphic server
+mkApplication :: AppEnv -> Context '[JWTSettings, CookieSettings] -> Application
+mkApplication env ctx =
+  serveWithContext
+    (Proxy @OAuthAPI)
+    ctx
+    (hoistServerWithContext
+      (Proxy @OAuthAPI)
+      (Proxy @'[JWTSettings, CookieSettings])
+      (runAppM env)
+      oauthServer)  -- Polymorphic server instantiated here
+```
+
+#### Step 5: Test Harness Integration
+
+```haskell
+-- In MCP.Server.OAuth.Test.Fixtures
+module MCP.Server.OAuth.Test.Fixtures where
+
+import MCP.Server.OAuth.Server (oauthServer, OAuthAPI)
+
+-- | Test monad with controllable time
+type TestM = ReaderT TestEnv (ExceptT TestError IO)
+
+-- | Reference test configuration using polymorphic server
+referenceTestConfig :: IO TestConfig
+referenceTestConfig = do
+  timeTVar <- newTVarIO defaultTestTime
+  env <- mkTestEnv timeTVar
+  let makeApp = do
+        let ctx = defaultCookieSettings :. jwtSettings :. EmptyContext
+        let app = serveWithContext
+              (Proxy @OAuthAPI)
+              ctx
+              (hoistServerWithContext
+                (Proxy @OAuthAPI)
+                (Proxy @'[JWTSettings, CookieSettings])
+                (runTestM env)   -- TestM instantiation
+                oauthServer)     -- SAME polymorphic server!
+        return (app, \dt -> atomically $ modifyTVar timeTVar (addUTCTime dt))
+  return TestConfig
+    { tcMakeApp = makeApp
+    , tcCredentials = TestCredentials "demo" "demo123"
+    }
+```
+
+### Migration Order
+
+Handlers should be migrated incrementally. Order by dependency (least dependent first):
+
+| Order | Handler | Dependencies | Complexity |
+|-------|---------|--------------|------------|
+| 1 | `handleMetadata` | None (pure) | Low |
+| 2 | `handleProtectedResourceMetadata` | None (pure) | Low |
+| 3 | `handleClientRegistration` | `OAuthStateStore.storeClient` | Medium |
+| 4 | `handleAuthorize` | `OAuthStateStore.lookupClient`, `storePendingAuth` | Medium |
+| 5 | `handleLogin` | `AuthBackend.validateCredentials`, `OAuthStateStore.*` | High |
+| 6 | `handleToken` | `OAuthStateStore.*`, JWT signing | High |
+| 7 | `handleMCP` | All (protected endpoint) | Medium |
+
+### Constraint Selection Guidelines (FR-037)
+
+| Capability | Use Typeclass? | Rationale |
+|------------|----------------|-----------|
+| OAuth state persistence | ✅ `OAuthStateStore` | Core swappability requirement |
+| Credential validation | ✅ `AuthBackend` | Core swappability requirement |
+| Time access | ✅ `MonadTime` | Testability (deterministic expiry tests) |
+| JWT signing | ❌ `MonadIO` | jose library just needs IO; not worth abstracting |
+| UUID generation | ❌ `MonadIO` | Standard library; not worth abstracting |
+| Random bytes | ❌ `MonadIO` | cryptonite just needs IO; not worth abstracting |
+| Tracing | ❌ `MonadIO` | Wired via environment; not handler concern |
+
+### Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/MCP/Server/OAuth/Server.hs` | NEW: Polymorphic `oauthServer` definition |
+| `src/MCP/Server/HTTP.hs` | Modify: Remove handler definitions, add `hoistServer` boundary |
+| `src/MCP/Server/OAuth/Handlers/*.hs` | NEW: Individual polymorphic handler modules |
+| `test/MCP/Server/OAuth/Test/Fixtures.hs` | Modify: Implement `referenceTestConfig` with polymorphic server |
+
+### Updated Module Organization
+
+```text
+src/MCP/Server/OAuth/
+├── Types.hs              # Newtypes, ADTs, domain entities
+├── Store.hs              # OAuthStateStore typeclass
+├── InMemory.hs           # TVar-based implementation
+├── Server.hs             # NEW: Polymorphic oauthServer, OAuthAPI
+├── Handlers/             # NEW: Individual polymorphic handlers
+│   ├── Metadata.hs       # handleMetadata, handleProtectedResourceMetadata
+│   ├── Registration.hs   # handleClientRegistration
+│   ├── Authorization.hs  # handleAuthorize
+│   ├── Login.hs          # handleLogin
+│   ├── Token.hs          # handleToken
+│   └── MCP.hs            # handleMCP
+└── Test/
+    └── Internal.hs       # Polymorphic conformance suite
+
+src/MCP/Server/
+├── HTTP.hs               # MODIFIED: Servant boundary only, uses OAuth.Server
+└── HTTP/
+    └── AppM.hs           # NEW: AppM type, AppEnv, AppError, runAppM
+```
+
+### Constitution Compliance (Phase 6)
+
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. Type-Driven Design | ✅ | Polymorphic handler signatures encode constraints at type level; type coherence enforced across boundary |
+| II. Deep Module Architecture | ✅ | Handlers hide complexity; Servant boundary is thin translation layer |
+| III. Denotational Semantics | ✅ | Handlers are "constructive proofs of correct implementability" — clear semantic meaning |
+| IV. Total Functions | ✅ | All handlers return in monadic context; errors via `MonadError` |
+| V. Pure Core, Impure Shell | ✅ | Handlers pure over abstract interface; `MonadIO` only for library calls; boundary does instantiation |
+| VI. Property-Based Testing | ✅ | Polymorphic server enables testing against arbitrary implementations |
+
+**Gate Status**: PASS - Phase 6 planning complete.
+
+---
+
+## Design Principles Summary (2025-12-12 Clarifications)
+
+These principles were clarified during spec review and apply across all phases:
+
+### 1. Delay Monomorphization Until Last Possible Moment
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    POLYMORPHIC CORE                             │
+│  oauthServer :: (OAuthStateStore m, ...) => ServerT OAuthAPI m  │
+│  handlers :: (constraints) => ... -> m Response                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+         ┌────────────────────┼────────────────────┐
+         │                    │                    │
+         ▼                    ▼                    ▼
+   ┌──────────┐        ┌──────────┐        ┌──────────┐
+   │ Servant  │        │  Tests   │        │  Yesod   │
+   │ (AppM)   │        │ (TestM)  │        │ (future) │
+   └──────────┘        └──────────┘        └──────────┘
+   hoistServer         hoistServer         custom runner
+```
+
+### 2. Handlers as Constructive Proofs
+
+Handlers are NOT Servant-specific code. They are:
+- **Constructive proofs** of correct implementability
+- **Framework-agnostic** — usable wherever constraints can be discharged
+- **Specified and tested** here with Servant's help
+- **Reusable** in Yesod app (planned future use)
+
+### 3. Judicious Constraint Selection
+
+| Worth Abstracting | Not Worth Abstracting |
+|-------------------|----------------------|
+| OAuth state persistence (swappable backends) | JWT signing (jose needs IO) |
+| Credential validation (enterprise SSO) | UUID generation (standard library) |
+| Time access (deterministic testing) | Random bytes (cryptonite needs IO) |
+
+Rule: Create typeclass only when swappability or testability genuinely benefits.
+
+### 4. Servant's Role
+
+Servant provides:
+1. **Typed API specification** — compile-time route verification
+2. **Production-ready reference implementation** — battle-tested HTTP layer
+3. **Test infrastructure** — hspec-wai integration via WAI Application
+
+Servant is NOT:
+- The only framework for these handlers
+- The place where handler logic lives
+- Required for handlers to be useful
