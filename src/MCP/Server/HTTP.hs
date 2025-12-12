@@ -49,7 +49,7 @@ module MCP.Server.HTTP (
 
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO, writeTVar)
 import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Reader (ask, asks)
+import Control.Monad.Reader (ask, asks, runReaderT)
 import Control.Monad.State.Strict (get, put)
 import Data.Aeson (encode, fromJSON, object, toJSON, (.=))
 import Data.Aeson qualified as Aeson
@@ -90,6 +90,7 @@ import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
 
 -- Import OAuthAPI from OAuth.Server (migration from duplication)
 import MCP.Server.OAuth.Server (ClientRegistrationRequest (..), ClientRegistrationResponse (..), LoginForm (..), OAuthAPI, TokenResponse (..))
+import MCP.Server.OAuth.Server qualified as OAuthServer
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
@@ -537,33 +538,19 @@ extractCapabilityNames (ServerCapabilities res prpts tls comps logCap _exp) =
         , maybe [] (const ["logging"]) logCap
         ]
 
--- | Handler for /.well-known/oauth-protected-resource endpoint
+{- | Handler for /.well-known/oauth-protected-resource endpoint (SHIM)
+Temporary shim - calls polymorphic handler, removed in mcp-di0.16.1.7
+-}
 handleProtectedResourceMetadata :: HTTPServerConfig -> Handler ProtectedResourceMetadata
-handleProtectedResourceMetadata config = do
-    let metadata = case httpProtectedResourceMetadata config of
-            Just m -> m
-            Nothing -> defaultProtectedResourceMetadata (httpBaseUrl config)
-    return metadata
+handleProtectedResourceMetadata =
+    runReaderT OAuthServer.handleProtectedResourceMetadata
 
--- | Handle OAuth metadata discovery endpoint
+{- | Handle OAuth metadata discovery endpoint (SHIM)
+Temporary shim - calls polymorphic handler, removed in mcp-di0.16.1.7
+-}
 handleMetadata :: HTTPServerConfig -> Handler OAuthMetadata
-handleMetadata config = do
-    let baseUrl = httpBaseUrl config
-        oauthCfg = httpOAuthConfig config
-    return
-        OAuthMetadata
-            { issuer = baseUrl
-            , authorizationEndpoint = baseUrl <> "/authorize"
-            , tokenEndpoint = baseUrl <> "/token"
-            , registrationEndpoint = Just (baseUrl <> "/register")
-            , userInfoEndpoint = Nothing
-            , jwksUri = Nothing
-            , scopesSupported = fmap supportedScopes oauthCfg
-            , responseTypesSupported = maybe [ResponseCode] supportedResponseTypes oauthCfg
-            , grantTypesSupported = fmap supportedGrantTypes oauthCfg
-            , tokenEndpointAuthMethodsSupported = fmap supportedAuthMethods oauthCfg
-            , codeChallengeMethodsSupported = fmap supportedCodeChallengeMethods oauthCfg
-            }
+handleMetadata =
+    runReaderT OAuthServer.handleMetadata
 
 {- | PROOF-OF-CONCEPT: OAuth metadata endpoint using AppM with typeclass constraints.
 
