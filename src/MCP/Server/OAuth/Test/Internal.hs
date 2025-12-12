@@ -1,4 +1,6 @@
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 
 {- |
 Module      : MCP.Server.OAuth.Test.Internal
@@ -32,6 +34,10 @@ These utilities are for testing only. They generate cryptographically secure
 random values but should NEVER be used in production code.
 -}
 module MCP.Server.OAuth.Test.Internal (
+    -- * Test Configuration
+    TestConfig (..),
+    TestCredentials (..),
+
     -- * PKCE Utilities
     generatePKCE,
 
@@ -45,13 +51,73 @@ import Crypto.Hash.Algorithms (SHA256 (..))
 import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
 import Data.ByteString.Base64.URL qualified as B64URL
+import Data.Kind (Type)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
+import Data.Time.Clock (NominalDiffTime)
 import Network.HTTP.Types (hLocation)
 import Network.URI (URI (..), parseURI, uriQuery)
+import Network.Wai (Application)
 import Network.Wai.Test (SResponse, simpleHeaders)
 import System.Random (newStdGen, randomRs)
+
+-- -----------------------------------------------------------------------------
+-- Test Configuration Types
+-- -----------------------------------------------------------------------------
+
+{- | Polymorphic test configuration for OAuth tests.
+
+This type packages all the necessary components for running OAuth tests:
+
+- 'tcMakeApp': Creates the test application and time advancement function
+- 'tcRunM': Runs the monad stack in IO for test execution
+- 'tcCredentials': Test user credentials for authentication flows
+
+The type is polymorphic over the monad 'm' to support different implementations
+(e.g., in-memory TVar-based, mock database, etc.).
+
+== Example
+
+@
+let testConfig = TestConfig
+      { tcMakeApp = createTestApp
+      , tcRunM = runReaderT \`flip\` testEnv
+      , tcCredentials = TestCredentials "demo" "demo123"
+      }
+@
+-}
+data TestConfig (m :: Type -> Type) = TestConfig
+    { tcMakeApp :: IO (Application, NominalDiffTime -> IO ())
+    -- ^ Create test application and time advancement function
+    , tcRunM :: forall a. m a -> IO a
+    -- ^ Run the monad stack in IO
+    , tcCredentials :: TestCredentials
+    -- ^ Test credentials for authentication
+    }
+
+{- | Test user credentials for OAuth authentication flows.
+
+Contains username and password for test user accounts.
+
+== Example
+
+@
+let testCreds = TestCredentials
+      { tcUsername = "demo"
+      , tcPassword = "demo123"
+      }
+@
+-}
+data TestCredentials = TestCredentials
+    { tcUsername :: Text
+    , tcPassword :: Text
+    }
+    deriving (Eq, Show)
+
+-- -----------------------------------------------------------------------------
+-- PKCE Utilities
+-- -----------------------------------------------------------------------------
 
 {- | Generate PKCE code verifier and challenge pair.
 
