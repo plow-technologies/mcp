@@ -1,0 +1,232 @@
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+{- |
+Module      : MCP.Server.OAuth.Test.Fixtures
+Description : Test fixtures for OAuth HTTP-level testing
+Copyright   : (C) 2025 Matthias Pall Gissurarson
+License     : MIT
+Maintainer  : mpg@mpg.is
+Stability   : experimental
+Portability : GHC
+
+This module provides test fixtures for OAuth conformance testing using hspec-wai.
+
+= Usage
+
+@
+import Test.Hspec
+import MCP.Server.OAuth.Test.Fixtures
+
+spec :: Spec
+spec = do
+  config <- runIO referenceTestConfig
+  oauthConformanceSpec config
+@
+
+= Design
+
+The fixtures wire up the reference TVar-based implementation with time advancement
+capability for expiry testing. This provides:
+
+* Fresh OAuth state per test
+* Demo credentials (demo/demo123)
+* Controllable time via TVar manipulation
+-}
+module MCP.Server.OAuth.Test.Fixtures (
+    -- * Test Configuration
+    referenceTestConfig,
+    defaultTestTime,
+    mkTestEnv,
+) where
+
+import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Reader (MonadReader, ReaderT, ask)
+import Data.Time.Clock (UTCTime, addUTCTime)
+import Data.Time.Format (defaultTimeLocale, parseTimeOrError)
+import Plow.Logging (IOTracer (..), Tracer (..))
+import Servant.Auth.Server (generateKey)
+
+import MCP.Server.Auth.Demo (DemoCredentialEnv (..), defaultDemoCredentialStore)
+import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata)
+import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM)
+import MCP.Server.OAuth.InMemory (defaultExpiryConfig, newOAuthTVarEnv)
+import MCP.Server.OAuth.Test.Internal (TestConfig (..), TestCredentials (..))
+import MCP.Server.Time (MonadTime (..))
+import MCP.Types (Implementation (..), ServerCapabilities (..), ToolsCapability (..))
+
+-- -----------------------------------------------------------------------------
+-- Default Test Values
+-- -----------------------------------------------------------------------------
+
+{- | Default test time for deterministic testing.
+
+Set to 2020-01-01 00:00:00 UTC to match the law test expectations.
+-}
+defaultTestTime :: UTCTime
+defaultTestTime = parseTimeOrError True defaultTimeLocale "%Y-%m-%d %H:%M:%S" "2020-01-01 00:00:00"
+
+-- -----------------------------------------------------------------------------
+-- Test Environment Construction
+-- -----------------------------------------------------------------------------
+
+{- | Create a test environment with controllable time.
+
+The returned AppEnv uses:
+
+* Fresh TVar-based OAuth state (empty)
+* Demo credentials (demo/demo123, admin/admin456)
+* Minimal HTTP server config
+* Null tracer (no output during tests)
+* Time from the provided TVar (controllable)
+
+The TVar enables time manipulation for expiry testing via the
+advanceTime callback returned by 'referenceTestConfig'.
+-}
+mkTestEnv :: TVar UTCTime -> IO AppEnv
+mkTestEnv _timeTVar = do
+    -- Create fresh OAuth state with default expiry config
+    oauthEnv <- newOAuthTVarEnv defaultExpiryConfig
+
+    -- Demo credentials environment
+    let demoEnv = DemoCredentialEnv defaultDemoCredentialStore
+
+    -- Minimal HTTP server config
+    let serverConfig =
+            HTTPServerConfig
+                { httpPort = 8080 -- Not actually used in tests
+                , httpBaseUrl = "http://localhost:8080"
+                , httpServerInfo = Implementation "test-server" (Just "1.0.0") ""
+                , httpCapabilities =
+                    ServerCapabilities
+                        { resources = Nothing
+                        , prompts = Nothing
+                        , tools = Just (ToolsCapability Nothing)
+                        , completions = Nothing
+                        , logging = Nothing
+                        , experimental = Nothing
+                        }
+                , httpEnableLogging = False
+                , httpOAuthConfig = Just defaultDemoOAuthConfig
+                , httpJWK = Nothing -- Will be generated
+                , httpProtocolVersion = "2025-06-18"
+                , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata "http://localhost:8080")
+                }
+
+    -- Null tracer for tests (discards all traces)
+    let tracer = IOTracer (Tracer (\_ -> pure ()))
+
+    return
+        AppEnv
+            { envOAuth = oauthEnv
+            , envAuth = demoEnv
+            , envConfig = serverConfig
+            , envTracer = tracer
+            }
+
+-- -----------------------------------------------------------------------------
+-- MonadTime Instance for TVar-Based Testing
+-- -----------------------------------------------------------------------------
+
+{- | TestTimeM monad that reads time from a TVar.
+
+This allows tests to control time by modifying the TVar, enabling
+deterministic testing of time-dependent behavior (expiry, etc.).
+-}
+
+{- | NOTE: TestTimeM is currently unused but demonstrates how to wire up
+controllable time for the AppM monad. Once HTTP.hs is fully migrated to
+AppM, this pattern can replace the TVar-based time control.
+-}
+newtype TestTimeM a = TestTimeM (ReaderT (TVar UTCTime) IO a)
+    deriving newtype (Functor, Applicative, Monad, MonadIO, MonadReader (TVar UTCTime))
+
+instance MonadTime TestTimeM where
+    currentTime = TestTimeM $ do
+        tvar <- ask
+        liftIO $ readTVarIO tvar
+
+    monotonicTime = liftIO monotonicTime -- Delegate to IO for monotonic time
+
+-- -----------------------------------------------------------------------------
+-- Reference Test Configuration
+-- -----------------------------------------------------------------------------
+
+{- | Reference test configuration for the TVar-based implementation.
+
+This wires up the reference in-memory OAuth implementation with time
+advancement capability. Use this configuration to run the conformance
+suite against the reference implementation.
+
+== Usage
+
+@
+import Test.Hspec
+import MCP.Server.OAuth.Test.Fixtures
+import MCP.Server.OAuth.Test.Internal (oauthConformanceSpec)
+
+spec :: Spec
+spec = do
+  config <- runIO referenceTestConfig
+  describe "Reference OAuth Implementation" $
+    oauthConformanceSpec config
+@
+
+== Implementation Notes
+
+* Creates fresh OAuth state for each test via 'tcMakeApp'
+* Uses demo credentials (demo/demo123)
+* Provides time advancement via TVar manipulation
+* Integrates AppM with Servant via hoistServerWithContext
+-}
+referenceTestConfig :: IO (TestConfig AppM)
+referenceTestConfig = do
+    -- Generate JWT key once for all tests
+    _jwk <- generateKey
+
+    let makeApp = do
+            -- Create fresh time TVar for this test
+            timeTVar <- newTVarIO defaultTestTime
+
+            -- Create fresh environment
+            _env <- mkTestEnv timeTVar
+
+            -- TODO: Build actual WAI Application
+            -- Once HTTP.hs is migrated to AppM, this will be:
+            --
+            -- let jwtSettings = defaultJWTSettings jwk
+            --     cookieSettings = defaultCookieSettings
+            --     ctx = cookieSettings :. jwtSettings :. EmptyContext
+            --     app = serveWithContext
+            --             (Proxy @(CompleteAPI '[JWT]))
+            --             ctx
+            --             (hoistServerWithContext
+            --               (Proxy @(CompleteAPI '[JWT]))
+            --               (Proxy @'[CookieSettings, JWTSettings])
+            --               (runAppM env)
+            --               oauthServerInAppM)
+            --
+            -- Where oauthServerInAppM :: Server OAuthAPI AppM
+            --       uses the typeclass instances directly
+
+            let app = error "referenceTestConfig: Application not yet implemented - HTTP.hs migration to AppM pending"
+
+            -- Time advancement callback - modifies the TVar that controls currentTime
+            let advanceTime dt = atomically $ modifyTVar' timeTVar (addUTCTime dt)
+
+            return (app, advanceTime)
+
+    return
+        TestConfig
+            { tcMakeApp = makeApp
+            , tcRunM = \action ->
+                -- For law tests: create a throwaway environment
+                -- Note: runAppM returns Handler a, but tcRunM needs IO a
+                -- This is a design limitation that will be resolved when HTTP.hs
+                -- is fully migrated to AppM. For now, this prevents law tests from running.
+                let _ = action
+                 in error "tcRunM: Cannot convert Handler to IO without Servant runtime - HTTP.hs migration pending"
+            , tcCredentials = TestCredentials "demo" "demo123"
+            }
