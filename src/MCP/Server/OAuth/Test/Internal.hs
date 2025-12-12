@@ -57,6 +57,7 @@ module MCP.Server.OAuth.Test.Internal (
     loginFlowSpec,
     tokenExchangeSpec,
     expirySpec,
+    headerSpec,
 ) where
 
 import Control.Monad (when)
@@ -951,3 +952,149 @@ expirySpec config = describe "Expiry behavior" $ do
 
                     -- Should get 400 for expired session
                     postHtmlForm "/login" loginForm `shouldRespondWith` 400
+
+{- | Test specification for HTTP header correctness.
+
+Tests correct header values in OAuth responses (regression for header swap bug).
+
+Covers:
+- Location header contains callback URI with authorization code
+- Location header does NOT contain session cookie value (regression test)
+- Set-Cookie header clears session cookie on successful login
+
+== Usage
+
+@
+import MCP.Server.OAuth.Test.Internal (headerSpec)
+
+spec :: Spec
+spec = do
+  let config = TestConfig { ... }
+  headerSpec config
+@
+
+== Test Isolation
+
+Each test uses 'withFreshApp' to get a fresh Application instance, ensuring
+complete isolation between tests (no shared state).
+
+== Regression Test
+
+This spec prevents regression of bug mcp-nyr.18 where Location and Set-Cookie
+header values were incorrectly swapped, causing the session cookie to be
+sent in the redirect URL and the redirect URL to be sent in Set-Cookie.
+-}
+headerSpec :: TestConfig m -> Spec
+headerSpec config = with (withFreshAppNoTime config) $ do
+    describe "HTTP Headers" $ do
+        it "Location header contains callback URI with code" $ do
+            withRegisteredClient config $ \clientId -> do
+                withAuthorizedUser config clientId $ \code _verifier -> do
+                    -- withAuthorizedUser validates the entire flow internally,
+                    -- including extracting the code from the Location header.
+                    -- If we got here, Location header was valid and contained a code.
+                    liftIO $ unAuthCodeId code `shouldSatisfy` (not . T.null)
+
+        it "Location header does NOT contain session cookie value" $ do
+            withRegisteredClient config $ \clientId -> do
+                (_, challenge) <- liftIO generatePKCE
+
+                -- Step 1: GET /authorize to get session cookie
+                let authUrl =
+                        "/authorize?client_id="
+                            <> unClientId clientId
+                            <> "&redirect_uri=http://localhost/callback"
+                            <> "&response_type=code"
+                            <> "&code_challenge="
+                            <> challenge
+                            <> "&code_challenge_method=S256"
+
+                resp1 <- get (TE.encodeUtf8 authUrl)
+
+                -- Extract session cookie value
+                sessionCookie <- case extractSessionCookie resp1 of
+                    Just cookie -> pure cookie
+                    Nothing ->
+                        liftIO $
+                            error $
+                                "Failed to extract session cookie for header test. "
+                                    <> "Response headers: "
+                                    <> show (simpleHeaders resp1)
+
+                -- Step 2: POST /login with credentials
+                let loginForm =
+                        [ ("username", T.unpack $ tcUsername (tcCredentials config))
+                        , ("password", T.unpack $ tcPassword (tcCredentials config))
+                        , ("session_id", T.unpack sessionCookie)
+                        , ("action", "approve")
+                        ]
+
+                resp2 <- postHtmlForm "/login" loginForm
+
+                -- Verify Location header exists and contains code parameter
+                let mLocation = lookup hLocation (simpleHeaders resp2)
+                case mLocation of
+                    Nothing ->
+                        liftIO $
+                            error $
+                                "Failed to find Location header in /login response. "
+                                    <> "Response headers: "
+                                    <> show (simpleHeaders resp2)
+                    Just locationBytes -> do
+                        let locationText = TE.decodeUtf8 locationBytes
+                        -- Regression test: Location should NOT contain session cookie
+                        liftIO $ locationText `shouldSatisfy` (not . T.isInfixOf "mcp_session")
+                        -- Location should contain the code parameter
+                        liftIO $ locationText `shouldSatisfy` T.isInfixOf "?code="
+
+        it "Set-Cookie clears session on successful login" $ do
+            withRegisteredClient config $ \clientId -> do
+                (_, challenge) <- liftIO generatePKCE
+
+                -- Step 1: GET /authorize to get session cookie
+                let authUrl =
+                        "/authorize?client_id="
+                            <> unClientId clientId
+                            <> "&redirect_uri=http://localhost/callback"
+                            <> "&response_type=code"
+                            <> "&code_challenge="
+                            <> challenge
+                            <> "&code_challenge_method=S256"
+
+                resp1 <- get (TE.encodeUtf8 authUrl)
+
+                -- Verify we got a session cookie
+                sessionCookie <- case extractSessionCookie resp1 of
+                    Just cookie -> pure cookie
+                    Nothing ->
+                        liftIO $
+                            error $
+                                "Failed to extract session cookie for Set-Cookie test. "
+                                    <> "Response headers: "
+                                    <> show (simpleHeaders resp1)
+
+                -- Step 2: POST /login with credentials
+                let loginForm =
+                        [ ("username", T.unpack $ tcUsername (tcCredentials config))
+                        , ("password", T.unpack $ tcPassword (tcCredentials config))
+                        , ("session_id", T.unpack sessionCookie)
+                        , ("action", "approve")
+                        ]
+
+                resp2 <- postHtmlForm "/login" loginForm
+
+                -- Verify Set-Cookie header clears the session cookie
+                let mSetCookie = lookup "Set-Cookie" (simpleHeaders resp2)
+                case mSetCookie of
+                    Nothing ->
+                        liftIO $
+                            error $
+                                "Failed to find Set-Cookie header in /login response. "
+                                    <> "Response headers: "
+                                    <> show (simpleHeaders resp2)
+                    Just setCookieBytes -> do
+                        let setCookieText = TE.decodeUtf8 setCookieBytes
+                        -- Should contain mcp_session cookie
+                        liftIO $ setCookieText `shouldSatisfy` T.isInfixOf "mcp_session="
+                        -- Should contain Max-Age=0 to clear the cookie
+                        liftIO $ setCookieText `shouldSatisfy` T.isInfixOf "Max-Age=0"
