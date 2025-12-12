@@ -4,7 +4,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
@@ -75,20 +74,22 @@ import Network.Wai (Application)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant (Context (..), Handler, Proxy (..), Server, serve, serveWithContext, throwError)
-import Servant.API (Accept (..), FormUrlEncoded, Get, Header, Headers, JSON, MimeRender (..), NoContent (..), Post, QueryParam, QueryParam', ReqBody, Required, StdMethod (POST), Verb, addHeader, (:<|>) (..), (:>))
+import Servant.API (Accept (..), Header, Headers, JSON, MimeRender (..), NoContent (..), Post, ReqBody, addHeader, (:<|>) (..), (:>))
 import Servant.Auth.Server (Auth, AuthResult (..), JWT, JWTSettings, defaultCookieSettings, defaultJWTSettings, generateKey, makeJWT)
 import Servant.Server (err400, err401, err500, errBody, errHeaders)
-import Web.FormUrlEncoded (FromForm (..), parseUnique)
 import Web.HttpApiData (parseUrlPiece, toUrlPiece)
 
 import Control.Monad (unless, when)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
 import MCP.Server.Auth (CredentialStore (..), OAuthConfig (..), OAuthMetadata (..), OAuthProvider (..), ProtectedResourceMetadata (..), Salt (..), defaultDemoCredentialStore, validateCodeVerifier, validateCredential)
-import MCP.Server.Auth.Backend (PlaintextPassword (..), Username, mkPlaintextPassword, mkUsername, unUsername)
+import MCP.Server.Auth.Backend (PlaintextPassword (..), unUsername)
 
 -- Import AuthBackend instance for AppM
 import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..))
+
+-- Import OAuthAPI from OAuth.Server (migration from duplication)
+import MCP.Server.OAuth.Server (ClientRegistrationRequest (..), ClientRegistrationResponse (..), LoginForm (..), OAuthAPI, TokenResponse (..))
 import MCP.Server.OAuth.Store ()
 
 -- Import OAuthStateStore instance for AppM
@@ -119,35 +120,7 @@ data OAuthState = OAuthState
     }
     deriving (Show, Generic)
 
--- | Login form data
-data LoginForm = LoginForm
-    { formUsername :: MCP.Server.Auth.Backend.Username
-    , formPassword :: MCP.Server.Auth.Backend.PlaintextPassword
-    , formSessionId :: MCP.Server.OAuth.Types.SessionId
-    , formAction :: Text
-    }
-    deriving (Generic)
-
--- | Custom Show instance that redacts password
-instance Show LoginForm where
-    show (LoginForm u _p s a) = "LoginForm {formUsername = " <> show u <> ", formPassword = <redacted>, formSessionId = " <> show s <> ", formAction = " <> show a <> "}"
-
-instance FromForm LoginForm where
-    fromForm form = do
-        userText <- parseUnique "username" form
-        passText <- parseUnique "password" form
-        sessText <- parseUnique "session_id" form
-        action <- parseUnique "action" form
-
-        username <- case mkUsername userText of
-            Just u -> Right u
-            Nothing -> Left "Invalid username"
-        let password = mkPlaintextPassword passText
-        sessionId <- case mkSessionId sessText of
-            Just s -> Right s
-            Nothing -> Left "Invalid session_id (must be UUID)"
-
-        pure $ LoginForm username password sessionId action
+-- Note: LoginForm is now imported from MCP.Server.OAuth.Server
 
 -- | Login error types
 data LoginError
@@ -175,33 +148,7 @@ data LoginResult
     | LoginFailure LoginError
     deriving (Show)
 
--- | Client registration request
-data ClientRegistrationRequest = ClientRegistrationRequest
-    { client_name :: Text
-    , redirect_uris :: [RedirectUri]
-    , grant_types :: [GrantType]
-    , response_types :: [ResponseType]
-    , token_endpoint_auth_method :: ClientAuthMethod
-    }
-    deriving (Show, Generic)
-
-instance Aeson.FromJSON ClientRegistrationRequest where
-    parseJSON = Aeson.genericParseJSON Aeson.defaultOptions
-
--- | Client registration response
-data ClientRegistrationResponse = ClientRegistrationResponse
-    { client_id :: Text
-    , client_secret :: Text -- Empty string for public clients
-    , client_name :: Text
-    , redirect_uris :: [RedirectUri]
-    , grant_types :: [GrantType]
-    , response_types :: [ResponseType]
-    , token_endpoint_auth_method :: ClientAuthMethod
-    }
-    deriving (Show, Generic)
-
-instance Aeson.ToJSON ClientRegistrationResponse where
-    toJSON = Aeson.genericToJSON Aeson.defaultOptions
+-- Note: ClientRegistrationRequest and ClientRegistrationResponse are now imported from MCP.Server.OAuth.Server
 
 -- | Client info stored in server
 data ClientInfo = ClientInfo
@@ -213,25 +160,7 @@ data ClientInfo = ClientInfo
     }
     deriving (Show, Generic)
 
--- | Token response
-data TokenResponse = TokenResponse
-    { access_token :: Text
-    , token_type :: Text
-    , expires_in :: Maybe Int
-    , refresh_token :: Maybe Text
-    , scope :: Maybe Text
-    }
-    deriving (Show, Generic)
-
-instance Aeson.ToJSON TokenResponse where
-    toJSON TokenResponse{..} =
-        object $
-            [ "access_token" .= access_token
-            , "token_type" .= token_type
-            ]
-                ++ maybe [] (\e -> ["expires_in" .= e]) expires_in
-                ++ maybe [] (\r -> ["refresh_token" .= r]) refresh_token
-                ++ maybe [] (\s -> ["scope" .= s]) scope
+-- Note: TokenResponse is now imported from MCP.Server.OAuth.Server
 
 -- | MCP API definition for HTTP server (following the MCP transport spec)
 type MCPAPI auths = Auth auths AuthUser :> "mcp" :> ReqBody '[JSON] Aeson.Value :> Post '[JSON] Aeson.Value
@@ -239,37 +168,7 @@ type MCPAPI auths = Auth auths AuthUser :> "mcp" :> ReqBody '[JSON] Aeson.Value 
 -- | Unprotected MCP API (for backward compatibility)
 type UnprotectedMCPAPI = "mcp" :> ReqBody '[JSON] Aeson.Value :> Post '[JSON] Aeson.Value
 
--- | Protected Resource Metadata API (RFC 9728)
-type ProtectedResourceAPI = ".well-known" :> "oauth-protected-resource" :> Get '[JSON] ProtectedResourceMetadata
-
--- | Login API endpoints - returns HTTP 302 redirect
-type LoginAPI =
-    "login"
-        :> Header "Cookie" Text
-        :> ReqBody '[FormUrlEncoded] LoginForm
-        :> Verb 'POST 302 '[HTML] (Headers '[Header "Location" RedirectTarget, Header "Set-Cookie" SessionCookie] NoContent)
-
--- | OAuth endpoints
-type OAuthAPI =
-    ProtectedResourceAPI
-        :<|> ".well-known" :> "oauth-authorization-server" :> Get '[JSON] OAuthMetadata
-        :<|> "register"
-            :> ReqBody '[JSON] ClientRegistrationRequest
-            :> Post '[JSON] ClientRegistrationResponse
-        :<|> "authorize"
-            :> QueryParam' '[Required] "response_type" ResponseType
-            :> QueryParam' '[Required] "client_id" ClientId
-            :> QueryParam' '[Required] "redirect_uri" RedirectUri
-            :> QueryParam' '[Required] "code_challenge" CodeChallenge
-            :> QueryParam' '[Required] "code_challenge_method" CodeChallengeMethod
-            :> QueryParam "scope" Text
-            :> QueryParam "state" Text
-            :> QueryParam "resource" Text
-            :> Get '[HTML] (Headers '[Header "Set-Cookie" SessionCookie] Text)
-        :<|> LoginAPI
-        :<|> "token"
-            :> ReqBody '[FormUrlEncoded] [(Text, Text)]
-            :> Post '[JSON] TokenResponse
+-- Note: OAuthAPI, ProtectedResourceAPI, and LoginAPI are now imported from MCP.Server.OAuth.Server
 
 -- | Complete API with OAuth
 type CompleteAPI auths = OAuthAPI :<|> MCPAPI auths
