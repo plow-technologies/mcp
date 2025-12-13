@@ -1,4 +1,6 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 {- |
 Module      : Laws.BoundarySpec
@@ -98,24 +100,24 @@ import MCP.Server.OAuth.Types (
 spec :: Spec
 spec = describe "Servant Boundary Round-trip Laws" $ do
     describe "Identity Newtypes" $ do
-        identityRoundTrip "ClientId" (undefined :: ClientId)
-        identityRoundTrip "AuthCodeId" (undefined :: AuthCodeId)
-        identityRoundTrip "SessionId" (undefined :: SessionId)
-        identityRoundTrip "AccessTokenId" (undefined :: AccessTokenId)
-        identityRoundTrip "UserId" (undefined :: UserId)
-        identityRoundTrip "RefreshTokenId" (undefined :: RefreshTokenId)
+        identityRoundTrip @ClientId "ClientId"
+        identityRoundTrip @AuthCodeId "AuthCodeId"
+        identityRoundTrip @SessionId "SessionId"
+        identityRoundTrip @AccessTokenId "AccessTokenId"
+        identityRoundTrip @UserId "UserId"
+        identityRoundTrip @RefreshTokenId "RefreshTokenId"
 
     describe "Value Newtypes" $ do
-        identityRoundTrip "RedirectUri" (undefined :: RedirectUri)
-        identityRoundTrip "Scope" (undefined :: Scope)
-        identityRoundTrip "CodeChallenge" (undefined :: CodeChallenge)
-        identityRoundTrip "CodeVerifier" (undefined :: CodeVerifier)
+        identityRoundTrip @RedirectUri "RedirectUri"
+        identityRoundTrip @Scope "Scope"
+        identityRoundTrip @CodeChallenge "CodeChallenge"
+        identityRoundTrip @CodeVerifier "CodeVerifier"
 
     describe "ADTs" $ do
-        identityRoundTrip "CodeChallengeMethod" (undefined :: CodeChallengeMethod)
-        identityRoundTrip "GrantType" (undefined :: GrantType)
-        identityRoundTrip "ResponseType" (undefined :: ResponseType)
-        identityRoundTrip "ClientAuthMethod" (undefined :: ClientAuthMethod)
+        identityRoundTrip @CodeChallengeMethod "CodeChallengeMethod"
+        identityRoundTrip @GrantType "GrantType"
+        identityRoundTrip @ResponseType "ResponseType"
+        identityRoundTrip @ClientAuthMethod "ClientAuthMethod"
 
 {- | Generic round-trip property test for any type with FromHttpApiData/ToHttpApiData
 
@@ -126,21 +128,20 @@ parseUrlPiece . toUrlPiece = Right
 @
 
 The test is parameterized by:
+- A type application to fix the type variable
 - A human-readable type name (for test output)
-- A type proxy (to fix the type variable)
 
 Example usage:
 
 @
-identityRoundTrip "ClientId" (undefined :: ClientId)
+identityRoundTrip @ClientId "ClientId"
 @
 -}
 identityRoundTrip ::
     forall a.
     (Eq a, Show a, Arbitrary a, FromHttpApiData a, ToHttpApiData a) =>
     String ->
-    a ->
     Spec
-identityRoundTrip typeName (_ :: a) =
+identityRoundTrip typeName =
     prop (typeName ++ " round-trip") $ \(x :: a) ->
         parseUrlPiece (toUrlPiece x) === Right x
