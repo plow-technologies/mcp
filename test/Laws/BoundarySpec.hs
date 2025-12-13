@@ -70,6 +70,8 @@ cabal test --test-option="-m" --test-option="Servant Boundary Round-trip"
 -}
 module Laws.BoundarySpec (spec) where
 
+import Data.Proxy (Proxy (..))
+import Data.Typeable (Typeable, typeRep)
 import Test.Hspec (Spec, describe)
 import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck (Arbitrary, (===))
@@ -100,24 +102,24 @@ import MCP.Server.OAuth.Types (
 spec :: Spec
 spec = describe "Servant Boundary Round-trip Laws" $ do
     describe "Identity Newtypes" $ do
-        identityRoundTrip @ClientId "ClientId"
-        identityRoundTrip @AuthCodeId "AuthCodeId"
-        identityRoundTrip @SessionId "SessionId"
-        identityRoundTrip @AccessTokenId "AccessTokenId"
-        identityRoundTrip @UserId "UserId"
-        identityRoundTrip @RefreshTokenId "RefreshTokenId"
+        identityRoundTrip @ClientId
+        identityRoundTrip @AuthCodeId
+        identityRoundTrip @SessionId
+        identityRoundTrip @AccessTokenId
+        identityRoundTrip @UserId
+        identityRoundTrip @RefreshTokenId
 
     describe "Value Newtypes" $ do
-        identityRoundTrip @RedirectUri "RedirectUri"
-        identityRoundTrip @Scope "Scope"
-        identityRoundTrip @CodeChallenge "CodeChallenge"
-        identityRoundTrip @CodeVerifier "CodeVerifier"
+        identityRoundTrip @RedirectUri
+        identityRoundTrip @Scope
+        identityRoundTrip @CodeChallenge
+        identityRoundTrip @CodeVerifier
 
     describe "ADTs" $ do
-        identityRoundTrip @CodeChallengeMethod "CodeChallengeMethod"
-        identityRoundTrip @GrantType "GrantType"
-        identityRoundTrip @ResponseType "ResponseType"
-        identityRoundTrip @ClientAuthMethod "ClientAuthMethod"
+        identityRoundTrip @CodeChallengeMethod
+        identityRoundTrip @GrantType
+        identityRoundTrip @ResponseType
+        identityRoundTrip @ClientAuthMethod
 
 {- | Generic round-trip property test for any type with FromHttpApiData/ToHttpApiData
 
@@ -127,21 +129,19 @@ This test verifies the fundamental boundary law:
 parseUrlPiece . toUrlPiece = Right
 @
 
-The test is parameterized by:
-- A type application to fix the type variable
-- A human-readable type name (for test output)
+The test is parameterized by a type application to fix the type variable.
+The type name for test output is automatically derived using 'Typeable'.
 
 Example usage:
 
 @
-identityRoundTrip @ClientId "ClientId"
+identityRoundTrip @ClientId
 @
 -}
 identityRoundTrip ::
     forall a.
-    (Eq a, Show a, Arbitrary a, FromHttpApiData a, ToHttpApiData a) =>
-    String ->
+    (Eq a, Show a, Arbitrary a, FromHttpApiData a, ToHttpApiData a, Typeable a) =>
     Spec
-identityRoundTrip typeName =
-    prop (typeName ++ " round-trip") $ \(x :: a) ->
+identityRoundTrip =
+    prop (show (typeRep (Proxy @a)) ++ " round-trip") $ \(x :: a) ->
         parseUrlPiece (toUrlPiece x) === Right x
