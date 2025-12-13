@@ -1,6 +1,11 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE RankNTypes #-}
 
+-- NOTE: Implementation will require these extensions for FR-038 type witness patterns:
+-- {-# LANGUAGE AllowAmbiguousTypes #-}
+-- {-# LANGUAGE ScopedTypeVariables #-}
+-- {-# LANGUAGE TypeApplications #-}
+
 {- | Conformance Test Interface Contract
 
 This module specifies the interface for the polymorphic OAuth conformance test suite.
@@ -47,6 +52,21 @@ spec = do
 
 4. Dual Isolation: Tests support both fresh-app-per-test (strict isolation)
    and shared-app-with-unique-IDs (performance optimization) strategies.
+
+5. Type Witness Patterns (FR-038): Type-directed polymorphic test helpers
+   MUST use @TypeApplications@ (@\@Type@) or @Proxy \@Type@ for type witnesses.
+   NEVER use @undefined :: Type@. Example:
+
+   @
+   -- CORRECT: Use \@Type syntax
+   httpApiRoundTrip \@ClientId
+
+   -- CORRECT: Use Proxy \@Type
+   httpApiRoundTrip (Proxy \@ClientId)
+
+   -- PROHIBITED: Never use undefined
+   httpApiRoundTrip (undefined :: ClientId)  -- DON'T DO THIS
+   @
 -}
 module MCP.Server.OAuth.Test.Internal (
     -- * Test Configuration

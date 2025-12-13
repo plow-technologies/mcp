@@ -623,6 +623,68 @@ build-depends:
   , network-uri ^>=2.6
 ```
 
+## Type Witness Patterns (FR-038)
+
+When writing type-directed polymorphic test helpers, **NEVER** use `undefined :: Type` as a type witness. Use modern Haskell patterns instead:
+
+### Preferred: Type Applications
+
+```haskell
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+
+-- | Generic round-trip test using @Type syntax
+httpApiRoundTrip
+  :: forall a. (FromHttpApiData a, ToHttpApiData a, Arbitrary a, Show a, Eq a, Typeable a)
+  => Spec
+httpApiRoundTrip = prop (show (typeRep (Proxy @a)) <> " round-trip") $ \(x :: a) ->
+  parseUrlPiece (toUrlPiece x) === Right x
+
+-- Usage: type passed at call site, no value-level witness
+spec :: Spec
+spec = describe "HTTP API round-trips" $ do
+  httpApiRoundTrip @ClientId
+  httpApiRoundTrip @AuthCodeId
+  httpApiRoundTrip @SessionId
+```
+
+### Alternative: Proxy Pattern
+
+```haskell
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+
+-- | When TypeApplications syntax isn't suitable
+httpApiRoundTrip
+  :: forall a. (FromHttpApiData a, ToHttpApiData a, Arbitrary a, Show a, Eq a, Typeable a)
+  => Proxy a -> Spec
+httpApiRoundTrip _ = prop (show (typeRep (Proxy @a)) <> " round-trip") $ \(x :: a) ->
+  parseUrlPiece (toUrlPiece x) === Right x
+
+-- Usage: Proxy @Type is safe (unlike undefined)
+spec :: Spec
+spec = describe "HTTP API round-trips" $ do
+  httpApiRoundTrip (Proxy @ClientId)
+  httpApiRoundTrip (Proxy @AuthCodeId)
+```
+
+### PROHIBITED Pattern
+
+```haskell
+-- NEVER do this - undefined can cause runtime errors if accidentally evaluated
+httpApiRoundTrip "ClientId" (undefined :: ClientId)  -- BAD
+prop_roundTrip (undefined :: ClientId)               -- BAD
+```
+
+### Required Extensions
+
+```haskell
+{-# LANGUAGE AllowAmbiguousTypes #-}  -- Enables type-only parameters
+{-# LANGUAGE TypeApplications #-}     -- Enables @Type syntax
+{-# LANGUAGE ScopedTypeVariables #-}  -- Binds type vars in where clauses
+```
+
 ## Next Steps
 
 1. **Production storage**: Implement PostgreSQL/Redis backend

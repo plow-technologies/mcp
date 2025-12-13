@@ -122,6 +122,7 @@ test/
 | Quickstart | `specs/004-oauth-auth-typeclasses/quickstart.md` | Usage examples and integration guide |
 | TestConfig Contract | `specs/004-oauth-auth-typeclasses/contracts/TestConfig.hs` | Conformance test interface (Phase 5) |
 | OAuthServer Contract | `specs/004-oauth-auth-typeclasses/contracts/OAuthServer.hs` | Polymorphic server interface (Phase 6) |
+| Type Witness Patterns | `specs/004-oauth-auth-typeclasses/plan.md#phase-7` | FR-038 type-directed polymorphism constraint (Phase 7) |
 
 ---
 
@@ -1011,3 +1012,175 @@ Servant is NOT:
 - The only framework for these handlers
 - The place where handler logic lives
 - Required for handlers to be useful
+
+---
+
+## Phase 7: Type Witness Patterns (FR-038)
+
+**Added**: 2025-12-13 | **Status**: Constraint (applies to all phases)
+
+### Problem Statement
+
+Type-directed polymorphic functions (common in property-based testing and generic programming) require threading type information. Haskell historically used `undefined :: Type` as a type witness, but this is unsafe and deprecated.
+
+**Bad pattern (PROHIBITED)**:
+```haskell
+-- NEVER do this - undefined can cause runtime errors if accidentally evaluated
+identityRoundTrip "ClientId" (undefined :: ClientId)
+prop_roundTrip (undefined :: ClientId)
+```
+
+### Blessed Solution (FR-038)
+
+Use modern Haskell type witness patterns with `TypeApplications` and `AllowAmbiguousTypes`:
+
+**Option 1: Type Applications (preferred)**
+```haskell
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+
+-- Type-level argument, no value-level witness needed
+identityRoundTrip @ClientId
+prop_roundTrip @ClientId
+
+-- Definition uses ScopedTypeVariables to bind the type
+identityRoundTrip :: forall a. (FromHttpApiData a, ToHttpApiData a, Arbitrary a, Show a) => Spec
+identityRoundTrip = prop "round-trip" $ \(x :: a) ->
+  parseUrlPiece (toUrlPiece x) === Right x
+```
+
+**Option 2: Proxy (when TypeApplications not suitable)**
+```haskell
+{-# LANGUAGE TypeApplications #-}
+
+-- Explicit Proxy value, safe to evaluate
+identityRoundTrip (Proxy @ClientId)
+
+-- Definition takes Proxy
+identityRoundTrip :: forall a. (FromHttpApiData a, ToHttpApiData a, Arbitrary a, Show a) => Proxy a -> Spec
+identityRoundTrip _ = prop "round-trip" $ \(x :: a) ->
+  parseUrlPiece (toUrlPiece x) === Right x
+```
+
+### Required GHC Extensions
+
+```haskell
+{-# LANGUAGE AllowAmbiguousTypes #-}  -- Enables type-only parameters
+{-# LANGUAGE TypeApplications #-}     -- Enables @Type syntax
+{-# LANGUAGE ScopedTypeVariables #-}  -- Binds type vars in where clauses
+```
+
+### Impact on Test Modules
+
+#### test/Laws/BoundarySpec.hs
+
+```haskell
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+
+module Laws.BoundarySpec (spec) where
+
+import Data.Proxy (Proxy(..))
+import Test.Hspec
+import Test.Hspec.QuickCheck (prop)
+import Test.QuickCheck
+
+-- | Generic round-trip test for FromHttpApiData/ToHttpApiData
+httpApiRoundTrip
+  :: forall a. (FromHttpApiData a, ToHttpApiData a, Arbitrary a, Show a, Eq a)
+  => Spec
+httpApiRoundTrip = prop (show (typeRep (Proxy @a)) <> " round-trip") $ \(x :: a) ->
+  parseUrlPiece (toUrlPiece x) === Right x
+
+-- | Generic round-trip test for FromJSON/ToJSON
+jsonRoundTrip
+  :: forall a. (FromJSON a, ToJSON a, Arbitrary a, Show a, Eq a)
+  => Spec
+jsonRoundTrip = prop (show (typeRep (Proxy @a)) <> " JSON round-trip") $ \(x :: a) ->
+  decode (encode x) === Just x
+
+spec :: Spec
+spec = describe "HTTP API boundary round-trips" $ do
+  describe "FromHttpApiData/ToHttpApiData" $ do
+    httpApiRoundTrip @ClientId
+    httpApiRoundTrip @AuthCodeId
+    httpApiRoundTrip @SessionId
+    httpApiRoundTrip @UserId
+    httpApiRoundTrip @RefreshTokenId
+    httpApiRoundTrip @RedirectUri
+    httpApiRoundTrip @Scope
+    httpApiRoundTrip @GrantType
+    httpApiRoundTrip @CodeChallengeMethod
+
+  describe "FromJSON/ToJSON" $ do
+    jsonRoundTrip @ClientInfo
+    jsonRoundTrip @AuthorizationCode
+    jsonRoundTrip @TokenResponse
+```
+
+#### test/Laws/OAuthStateStoreSpec.hs
+
+```haskell
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+
+-- | Polymorphic store law: lookup after store returns Just
+storeRetrieveLaw
+  :: forall m k v.
+     ( OAuthStateStore m
+     , Arbitrary k, Show k, Eq k
+     , Arbitrary v, Show v, Eq v
+     )
+  => (k -> v -> m ())        -- ^ Store operation
+  -> (k -> m (Maybe v))      -- ^ Lookup operation
+  -> Proxy k                 -- ^ Key type witness (Proxy OK here for clarity)
+  -> Proxy v                 -- ^ Value type witness
+  -> Spec
+storeRetrieveLaw store lookup _ _ =
+  prop "store then lookup returns Just" $ \(k :: k) (v :: v) -> monadicIO $ do
+    run $ store k v
+    result <- run $ lookup k
+    assert (result == Just v)
+
+-- Usage:
+spec :: Spec
+spec = describe "OAuthStateStore laws" $ do
+  storeRetrieveLaw @TestM
+    storeClient lookupClient
+    (Proxy @ClientId) (Proxy @ClientInfo)
+```
+
+### Checklist for All Test Code
+
+Before merging any test code, verify:
+
+- [ ] No `undefined :: Type` patterns anywhere
+- [ ] Type witnesses use `@Type` or `Proxy @Type`
+- [ ] Required extensions enabled: `AllowAmbiguousTypes`, `TypeApplications`, `ScopedTypeVariables`
+- [ ] Type variable bindings use explicit `:: a` annotations in lambda/where clauses
+- [ ] `Typeable` constraint added if `typeRep` needed for test names
+
+### Files Affected
+
+| File | Change Required |
+|------|-----------------|
+| `test/Laws/BoundarySpec.hs` | Use `@Type` for round-trip tests |
+| `test/Laws/OAuthStateStoreSpec.hs` | Use `Proxy @Type` for polymorphic law tests |
+| `test/Laws/AuthBackendSpec.hs` | Use `@Type` patterns |
+| `test/Generators.hs` | No change (Arbitrary instances don't need witnesses) |
+| `src/MCP/Server/OAuth/Test/Internal.hs` | Use `@Type` in conformance suite helpers |
+
+### Constitution Compliance (Phase 7)
+
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. Type-Driven Design | ✅ | Type-level witnesses enforce type safety; no runtime `undefined` |
+| II. Deep Module Architecture | N/A | Constraint, not module structure |
+| III. Denotational Semantics | ✅ | `@Type` and `Proxy @Type` have clear semantic meaning |
+| IV. Total Functions | ✅ | No partial functions (`undefined` eliminated) |
+| V. Pure Core, Impure Shell | N/A | Constraint, not architecture |
+| VI. Property-Based Testing | ✅ | Safe test patterns enable reliable property testing |
+
+**Gate Status**: PASS - Phase 7 constraint documented.

@@ -81,6 +81,10 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 
 ## Clarifications
 
+### Session 2025-12-13
+
+- Q: How should type-directed polymorphic functions thread type witnesses? → A: Modern Haskell patterns only: `Proxy @Type` or `@Type` type applications (AllowAmbiguousTypes/TypeApplications). Never use `undefined :: Type`.
+
 ### Session 2025-12-12
 
 - Q: What scope of OAuth flows should the hspec-wai functional test harness cover? → A: Full OAuth flow coverage (registration, authorization with login, token exchange, refresh, all error cases)
@@ -163,6 +167,7 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 - **FR-033**: The test harness MUST provide a `makeTestApp` combinator that constructs a WAI `Application` from the polymorphic server. The SAME type variable `m` that parameterizes `makeTestApp` MUST flow to the polymorphic test specs, ensuring type coherence between application construction and test assertions.
 - **FR-034**: The polymorphic conformance test interface MUST include an abstract `advanceTime :: NominalDiffTime -> IO ()` callback that implementations provide. The reference in-memory implementation uses `TVar UTCTime` internally; third-party implementations provide their own time control mechanism (e.g., database timestamps, mock clocks).
 - **FR-035**: The polymorphic conformance test interface MUST include `TestCredentials` (username, password) as part of the test configuration. Implementations are responsible for ensuring their `AuthBackend` recognizes these credentials. The reference implementation pre-configures demo credentials.
+- **FR-038**: Type-directed polymorphic functions (e.g., property-based test helpers) MUST use modern Haskell type witness patterns: `Proxy @Type` or `@Type` type applications with `AllowAmbiguousTypes`/`TypeApplications`. NEVER use `undefined :: Type` to thread type information. Example: prefer `identityRoundTrip @ClientId` or `identityRoundTrip (Proxy @ClientId)` over `identityRoundTrip "ClientId" (undefined :: ClientId)`.
 
 ### Key Entities
 
