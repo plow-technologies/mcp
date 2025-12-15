@@ -240,6 +240,8 @@ data AppError
       AuthBackendErr DemoAuthError
     | -- | Input validation error
       ValidationErr Text
+    | -- | Authentication failure (invalid credentials)
+      AuthFailure
     | -- | Servant server error (pass through)
       ServerErr ServerError
     deriving (Generic)
@@ -255,6 +257,7 @@ Maps domain-specific errors to appropriate HTTP status codes:
 * 'OAuthStoreErr': Storage errors map to 500 Internal Server Error
 * 'AuthBackendErr': Authentication errors map to 401 Unauthorized
 * 'ValidationErr': Validation errors map to 400 Bad Request
+* 'AuthFailure': Authentication failure map to 401 Unauthorized
 * 'ServerErr': Already a ServerError, pass through as-is
 
 This function is used at the Servant boundary to convert domain errors
@@ -271,6 +274,9 @@ toServerError (AuthBackendErr InvalidCredentials)
 
 toServerError (ValidationErr "Missing required parameter: client_id")
 -- err400 { errBody = "Validation error: Missing required parameter: client_id" }
+
+toServerError AuthFailure
+-- err401 { errBody = "Authentication failed: Invalid username or password" }
 @
 -}
 toServerError :: AppError -> ServerError
@@ -289,6 +295,8 @@ toServerError (AuthBackendErr authErr) =
             err401{errBody = "Authentication failed: Invalid credentials"}
 toServerError (ValidationErr msg) =
     err400{errBody = "Validation error: " <> toLBS msg}
+toServerError AuthFailure =
+    err401{errBody = "Authentication failed: Invalid username or password"}
 toServerError (ServerErr serverErr) =
     -- Already a ServerError, pass through
     serverErr

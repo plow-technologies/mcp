@@ -140,7 +140,6 @@ import MCP.Server.Auth (
     validateCodeVerifier,
  )
 import MCP.Server.Auth.Backend (AuthBackend (..), PlaintextPassword, Username (..), mkPlaintextPassword, mkUsername)
-import MCP.Server.Auth.Demo (DemoAuthError (..))
 import MCP.Server.HTTP.AppEnv (AppError (..), HTTPServerConfig (..))
 import MCP.Server.OAuth.Store (OAuthStateStore (..))
 import MCP.Server.OAuth.Types (
@@ -938,7 +937,7 @@ handleLogin mCookie loginForm = do
                     return $ addHeader redirectUrl $ addHeader clearCookie NoContent
                 Nothing ->
                     -- Invalid credentials - return error (validateCredentials already emitted trace)
-                    throwError $ AuthBackendErr InvalidCredentials
+                    throwError AuthFailure
 
 -- -----------------------------------------------------------------------------
 -- Helper Functions
