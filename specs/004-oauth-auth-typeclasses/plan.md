@@ -7,7 +7,7 @@
 
 ## Summary
 
-Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error, environment, user, and user ID types. `OAuthStateStore` requires `MonadTime m` for expiry filtering. `AuthBackend.validateCredentials` returns `Maybe (UserId, User)` tuple. Handlers requiring both typeclasses use type equality constraints (`AuthBackendUser m ~ OAuthUser m`, `AuthBackendUserId m ~ OAuthUserId m`). Provide reference in-memory (`TVar`) and hard-coded credential implementations. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation. **(Updated 2025-12-15: Added user type polymorphism per spec refinement)**
+Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error, environment, user, and user ID types. `OAuthStateStore` requires `MonadTime m` for expiry filtering. `AuthBackend.validateCredentials` returns `Maybe (UserId, User)` tuple. Handlers requiring both typeclasses use type equality constraints (`AuthBackendUser m ~ OAuthUser m`, `AuthBackendUserId m ~ OAuthUserId m`). Provide reference in-memory (`TVar`) and hard-coded credential implementations. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation. **(Updated 2025-12-15: Added user type polymorphism per spec refinement; reference implementation types colocated with implementations per FR-042)**
 
 ## Technical Context
 
@@ -67,11 +67,11 @@ src/
 │   │   ├── Auth.hs           # Modified: re-exports from Auth/*
 │   │   ├── Auth/
 │   │   │   ├── Backend.hs    # NEW: AuthBackend typeclass (AuthBackendUser m, AuthBackendUserId m) + Username, PlaintextPassword newtypes
-│   │   │   └── Demo.hs       # NEW: Demo credential implementation
+│   │   │   └── Demo.hs       # NEW: Demo credential implementation + AuthUser, UserId, DemoAuthError (Phase 9: colocated)
 │   │   ├── OAuth/
 │   │   │   ├── Store.hs      # NEW: OAuthStateStore typeclass (OAuthUser m, OAuthUserId m) + MonadTime constraint
 │   │   │   ├── Types.hs      # NEW: Newtypes (AuthCodeId, ClientId, etc.), ADTs, `AuthorizationCode userId` (parameterized)
-│   │   │   └── InMemory.hs   # NEW: TVar-based implementation
+│   │   │   └── InMemory.hs   # NEW: TVar-based implementation + OAuthStoreError, OAuthTVarEnv (Phase 9: colocated)
 │   │   └── Time.hs           # NEW: MonadTime instances (IO, test monads)
 │   └── Trace/                # Unchanged
 
@@ -85,7 +85,7 @@ test/
 └── Trace/                    # Unchanged
 ```
 
-**Structure Decision**: Single project structure. New modules added under `src/MCP/Server/Auth/` and `src/MCP/Server/OAuth/` for typeclass definitions and implementations. Test modules added under `test/Laws/` for property-based law verification using polymorphic specs with `prop` combinator. `Arbitrary` instances in `test/Generators.hs`.
+**Structure Decision**: Single project structure. New modules added under `src/MCP/Server/Auth/` and `src/MCP/Server/OAuth/` for typeclass definitions and implementations. Reference implementation concrete types (`AuthUser`, `UserId`, errors) colocated with their implementations per Phase 9 (FR-042). Test modules added under `test/Laws/` for property-based law verification using polymorphic specs with `prop` combinator. `Arbitrary` instances in `test/Generators.hs`.
 
 ## Complexity Tracking
 
@@ -124,6 +124,7 @@ test/
 | OAuthServer Contract | `specs/004-oauth-auth-typeclasses/contracts/OAuthServer.hs` | Polymorphic server interface (Phase 6) |
 | Type Witness Patterns | `specs/004-oauth-auth-typeclasses/plan.md#phase-7` | FR-038 type-directed polymorphism constraint (Phase 7) |
 | User Type Polymorphism | `specs/004-oauth-auth-typeclasses/plan.md#phase-8` | FR-039 through FR-041 user/userId associated types (Phase 8) |
+| Type Colocation | `specs/004-oauth-auth-typeclasses/plan.md#phase-9` | FR-042 reference implementation types in implementation modules (Phase 9) |
 
 ---
 
@@ -1032,6 +1033,22 @@ Servant is NOT:
 - The place where handler logic lives
 - Required for handlers to be useful
 
+### 5. Reference Implementation Type Colocation (Phase 9)
+
+Reference implementation types belong with their implementations:
+
+| Type | Location | Rationale |
+|------|----------|-----------|
+| `AuthUser`, `UserId` | `MCP.Server.Auth.Demo` | Demo AuthBackend's user types |
+| `DemoAuthError` | `MCP.Server.Auth.Demo` | Demo AuthBackend's error type |
+| `OAuthStoreError` | `MCP.Server.OAuth.InMemory` | TVar store's error type |
+| `OAuthTVarEnv` | `MCP.Server.OAuth.InMemory` | TVar store's environment |
+
+**Import rules**:
+- Polymorphic code (handlers, server, tests) → NEVER import concrete types
+- Application boundary (Main.hs, HTTP.hs) → OK to import for wiring
+- Test fixtures → OK to import for setup
+
 ---
 
 ## Phase 7: Type Witness Patterns (FR-038)
@@ -1307,13 +1324,16 @@ instance Functor AuthorizationCode where
 
 #### Step 4: Update Reference Implementations
 
+**Note**: Per Phase 9 (FR-042), all concrete types (`AuthUser`, `UserId`, `DemoAuthError`, `OAuthStoreError`) must be defined in their respective implementation modules, not imported from shared locations.
+
 ```haskell
 -- In MCP.Server.OAuth.InMemory
+-- OAuthStoreError and OAuthTVarEnv defined HERE (Phase 9)
 instance OAuthStateStore (ReaderT OAuthTVarEnv IO) where
   type OAuthStateError (ReaderT OAuthTVarEnv IO) = OAuthStoreError
   type OAuthStateEnv (ReaderT OAuthTVarEnv IO) = OAuthTVarEnv
 
-  -- Reference implementation uses existing AuthUser and UserId types
+  -- Reference implementation uses AuthUser/UserId from Auth.Demo
   type OAuthUser (ReaderT OAuthTVarEnv IO) = AuthUser
   type OAuthUserId (ReaderT OAuthTVarEnv IO) = UserId  -- Text or newtype
 
@@ -1322,11 +1342,12 @@ instance OAuthStateStore (ReaderT OAuthTVarEnv IO) where
   lookupAuthCode codeId = ...
 
 -- In MCP.Server.Auth.Demo
+-- AuthUser, UserId, DemoAuthError defined HERE (Phase 9)
 instance AuthBackend (ReaderT DemoCredentialEnv IO) where
   type AuthBackendError (ReaderT DemoCredentialEnv IO) = DemoAuthError
   type AuthBackendEnv (ReaderT DemoCredentialEnv IO) = DemoCredentialEnv
 
-  -- Reference implementation user types
+  -- Reference implementation user types (defined in THIS module)
   type AuthBackendUser (ReaderT DemoCredentialEnv IO) = AuthUser
   type AuthBackendUserId (ReaderT DemoCredentialEnv IO) = UserId
 
@@ -1471,3 +1492,267 @@ prop "valid credentials return (userId, user)" $
 | VI. Property-Based Testing | ✅ | Property tests verify user type consistency laws |
 
 **Gate Status**: PASS - Phase 8 planning complete.
+
+---
+
+## Phase 9: Reference Implementation Type Colocation (FR-042)
+
+**Added**: 2025-12-15 | **Status**: Planning | **Spec Session**: 2025-12-15
+
+### Problem Statement
+
+Reference implementation concrete types (`AuthUser`, `UserId`, `OAuthStoreError`, `DemoAuthError`) were initially placed in shared modules or near the typeclass definitions. This creates confusion about:
+
+1. Which types belong to which implementation
+2. Whether these types are "special" or "default"
+3. Import hygiene — polymorphic handler code accidentally importing concrete types
+
+**Spec Clarification** (2025-12-15): Reference implementation types must be colocated with their implementations and must NOT be imported by modules implementing against the polymorphic interface.
+
+### Design Principle
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    POLYMORPHIC LAYER                             │
+│  Handlers, Server, Test harness                                  │
+│  ONLY import: OAuthStateStore, AuthBackend, associated types     │
+│  NEVER import: AuthUser, UserId, OAuthStoreError, DemoAuthError  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+         Uses associated types (OAuthUser m, OAuthUserId m, etc.)
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  IMPLEMENTATION LAYER                            │
+│  MCP.Server.Auth.Demo       │  MCP.Server.OAuth.InMemory        │
+│  ├── AuthUser               │  ├── OAuthStoreError              │
+│  ├── UserId                 │  ├── OAuthTVarEnv                 │
+│  └── DemoAuthError          │  └── TVar-based instance          │
+│  └── Demo AuthBackend inst  │                                   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+              Monomorphization at application boundary
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  APPLICATION BOUNDARY                            │
+│  Main.hs, HTTP.hs (AppM), Test fixtures                         │
+│  ONLY place that imports concrete implementation types          │
+│  Wires up: AppEnv with OAuthTVarEnv + DemoCredentialEnv         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Clarified Decision
+
+| Aspect | Choice | Rationale |
+|--------|--------|-----------|
+| AuthUser location | `MCP.Server.Auth.Demo` | Colocated with demo AuthBackend instance |
+| UserId location | `MCP.Server.Auth.Demo` | Used by demo implementation |
+| DemoAuthError location | `MCP.Server.Auth.Demo` | Error type for demo backend |
+| OAuthStoreError location | `MCP.Server.OAuth.InMemory` | Error type for TVar store |
+| Import prohibition | Polymorphic code never imports these | Enforces clean abstraction boundary |
+
+### Implementation Approach
+
+#### Step 1: Audit Current Type Locations
+
+Current state (before refactoring):
+```text
+src/MCP/Server/
+├── Auth.hs              # May contain AuthUser
+├── Auth/
+│   ├── Backend.hs       # AuthBackend typeclass
+│   └── Demo.hs          # Demo implementation
+├── OAuth/
+│   ├── Types.hs         # May contain AuthUser incorrectly
+│   ├── Store.hs         # OAuthStateStore typeclass
+│   └── InMemory.hs      # TVar implementation
+└── HTTP.hs              # May import concrete types
+```
+
+#### Step 2: Move Types to Implementation Modules
+
+**MCP.Server.Auth.Demo** should define:
+```haskell
+module MCP.Server.Auth.Demo
+  ( -- * Demo AuthBackend instance (implicit via module import)
+    -- * Demo Types (exported for application composition only)
+    AuthUser(..)
+  , UserId
+  , DemoAuthError(..)
+  , DemoCredentialEnv(..)
+    -- * Smart constructors
+  , mkDemoCredentialEnv
+  , defaultDemoCredentials
+  ) where
+
+-- | User type for reference demo implementation.
+-- NOT a "default" — custom implementations define their own.
+data AuthUser = AuthUser
+  { authUserId   :: UserId
+  , authUsername :: Username
+  , authEmail    :: Maybe Text
+  }
+  deriving (Eq, Show, Generic)
+
+-- ToJWT instance stays here (not in OAuth.Types)
+instance ToJWT AuthUser where
+  encodeJWT user = ...
+
+-- | User identifier for reference implementation.
+type UserId = Text  -- Or: newtype UserId = UserId Text
+
+-- | Errors specific to demo credential backend.
+data DemoAuthError
+  = DemoCredentialsNotFound
+  | DemoPasswordMismatch
+  deriving (Eq, Show)
+```
+
+**MCP.Server.OAuth.InMemory** should define:
+```haskell
+module MCP.Server.OAuth.InMemory
+  ( -- * In-memory OAuthStateStore instance (implicit)
+    -- * Implementation types (exported for application composition only)
+    OAuthStoreError(..)
+  , OAuthTVarEnv(..)
+    -- * Smart constructors
+  , mkOAuthTVarEnv
+  , newOAuthTVarEnv
+  ) where
+
+-- | Errors specific to TVar-based OAuth store.
+data OAuthStoreError
+  = StoreNotFound Text
+  | StoreDuplicateKey Text
+  | StoreExpired Text
+  deriving (Eq, Show)
+```
+
+#### Step 3: Update Module Exports
+
+**MCP.Server.Auth** (re-export module) should NOT re-export concrete types:
+```haskell
+module MCP.Server.Auth
+  ( -- * Typeclass (from Backend)
+    AuthBackend(..)
+  , Username(..)
+  , PlaintextPassword(..)
+    -- * NO re-exports of AuthUser, UserId, DemoAuthError
+  ) where
+
+import MCP.Server.Auth.Backend
+-- NOT: import MCP.Server.Auth.Demo (AuthUser, UserId, ...)
+```
+
+#### Step 4: Update Handler Imports
+
+**Before** (problematic):
+```haskell
+-- In OAuth/Handlers/Login.hs
+module MCP.Server.OAuth.Handlers.Login where
+
+import MCP.Server.Auth.Demo (AuthUser(..))  -- WRONG: concrete type in polymorphic code
+import MCP.Server.OAuth.Store
+
+handleLogin :: ... -> m ...
+handleLogin = do
+  let user = AuthUser { ... }  -- WRONG: hardcoded to demo type
+```
+
+**After** (correct):
+```haskell
+-- In OAuth/Handlers/Login.hs
+module MCP.Server.OAuth.Handlers.Login where
+
+import MCP.Server.Auth.Backend (AuthBackend(..))
+import MCP.Server.OAuth.Store (OAuthStateStore(..))
+-- NO import of AuthUser, UserId, etc.
+
+handleLogin
+  :: ( AuthBackend m
+     , OAuthStateStore m
+     , AuthBackendUser m ~ OAuthUser m
+     , AuthBackendUserId m ~ OAuthUserId m
+     )
+  => ... -> m ...
+handleLogin = do
+  result <- validateCredentials username password
+  case result of
+    Just (userId, _user) -> do
+      -- userId is OAuthUserId m (abstract), not concrete UserId
+      let code = AuthorizationCode { authCodeUserId = userId, ... }
+      ...
+```
+
+#### Step 5: Update Application Composition
+
+**Main.hs** or **HTTP.hs** is the ONLY place that wires concrete types:
+```haskell
+-- In app/Main.hs or src/MCP/Server/HTTP.hs
+module Main where
+
+-- Application boundary: OK to import concrete types
+import MCP.Server.Auth.Demo (AuthUser, DemoCredentialEnv, mkDemoCredentialEnv)
+import MCP.Server.OAuth.InMemory (OAuthStoreError, OAuthTVarEnv, newOAuthTVarEnv)
+import MCP.Server.OAuth.Server (oauthServer)
+
+-- Composite environment wires concrete implementations
+data AppEnv = AppEnv
+  { envOAuth  :: OAuthTVarEnv       -- Concrete: from InMemory
+  , envAuth   :: DemoCredentialEnv  -- Concrete: from Demo
+  , envConfig :: HTTPServerConfig
+  }
+
+-- AppM instantiates type variables to concrete types
+type AppM = ReaderT AppEnv (ExceptT AppError IO)
+
+-- At this boundary, OAuthUser AppM = AuthUser, OAuthUserId AppM = UserId
+main :: IO ()
+main = do
+  oauthEnv <- newOAuthTVarEnv
+  authEnv <- mkDemoCredentialEnv defaultDemoCredentials
+  let env = AppEnv oauthEnv authEnv defaultConfig
+  -- hoistServer monomorphizes polymorphic handlers to AppM
+  runServer (mkApplication env)
+```
+
+### Verification Checklist
+
+Before marking Phase 9 complete:
+
+- [ ] `AuthUser` defined ONLY in `MCP.Server.Auth.Demo`
+- [ ] `UserId` defined ONLY in `MCP.Server.Auth.Demo`
+- [ ] `DemoAuthError` defined ONLY in `MCP.Server.Auth.Demo`
+- [ ] `OAuthStoreError` defined ONLY in `MCP.Server.OAuth.InMemory`
+- [ ] `MCP.Server.Auth` does NOT re-export `AuthUser`, `UserId`, `DemoAuthError`
+- [ ] `MCP.Server.OAuth.Store` does NOT re-export `OAuthStoreError`
+- [ ] No handler module imports `MCP.Server.Auth.Demo`
+- [ ] No handler module imports concrete types from `MCP.Server.OAuth.InMemory`
+- [ ] Only `Main.hs`, `HTTP.hs`, and test fixtures import concrete types
+- [ ] Build succeeds with no unused import warnings for concrete types in handlers
+
+### Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/MCP/Server/Auth/Demo.hs` | Ensure `AuthUser`, `UserId`, `DemoAuthError` defined here |
+| `src/MCP/Server/OAuth/InMemory.hs` | Ensure `OAuthStoreError` defined here |
+| `src/MCP/Server/Auth.hs` | Remove any re-exports of concrete types |
+| `src/MCP/Server/OAuth/Types.hs` | Remove `AuthUser` if present (it doesn't belong here) |
+| `src/MCP/Server/OAuth/Handlers/*.hs` | Remove imports of concrete types |
+| `src/MCP/Server/HTTP.hs` | Verify imports are at boundary only |
+| `app/Main.hs` | Verify concrete type imports are correct |
+
+### Constitution Compliance (Phase 9)
+
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. Type-Driven Design | ✅ | Import restrictions enforced by module structure; polymorphic code cannot accidentally use concrete types |
+| II. Deep Module Architecture | ✅ | Concrete types hidden in implementation modules; minimal exports at abstraction boundary |
+| III. Denotational Semantics | ✅ | Clear semantic distinction: "reference implementation type" vs "associated type" |
+| IV. Total Functions | N/A | No function changes |
+| V. Pure Core, Impure Shell | ✅ | Polymorphic handlers are pure over abstract types; concrete wiring at application shell |
+| VI. Property-Based Testing | ✅ | Test fixtures can import concrete types; test specs remain polymorphic |
+
+**Gate Status**: PASS - Phase 9 planning complete.
