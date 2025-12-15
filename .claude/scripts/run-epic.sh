@@ -26,7 +26,7 @@ SESSION_LOG="${SESSION_LOG:-../session-log.jsonl}"
 # Base prompt template (beads list appended dynamically in main loop)
 # Note: We use regular heredoc (not <<'EOF') to allow variable expansion for EPIC_ID
 read -r -d '' BASE_PROMPT <<PROMPT_EOF || true
-/speckit.implement claim ONE bead from epic $EPIC_ID, complete it, commit, then STOP. Ensure by running tests that no regressions have been introduced BEFORE closing. Use the efficient-subagent-orchestration skill for main agent context-management. Use the beads-project-tracking skill to track progress.
+/speckit.implement claim ONE bead from epic $EPIC_ID, complete it, use commit skill, then STOP. Ensure by running tests that no regressions have been introduced BEFORE closing. Use the efficient-subagent-orchestration skill for main agent context-management. Use the beads-project-tracking skill to track progress.
 
 EPIC: $EPIC_ID
 Claim exactly ONE bead from the candidates below, complete it, then STOP.

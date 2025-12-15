@@ -2155,10 +2155,10 @@ mcpApp runM = serve oauthAPI (hoistServer oauthAPI runM oauthServer)
 ```haskell
 -- | Reference implementation using in-memory TVar storage and demo credentials.
 -- This is what `cabal run mcp-http -- --oauth` uses.
-defaultMcpApp :: IO Application
-defaultMcpApp = do
+demoMcpApp :: IO Application
+demoMcpApp = do
   -- Initialize reference implementation environment
-  env <- mkDefaultAppEnv
+  env <- mkDemoAppEnv
   -- Construct natural transformation for reference implementation
   let runAppM :: forall a. AppM a -> Handler a
       runAppM action = do
@@ -2175,7 +2175,7 @@ defaultMcpApp = do
 
 **Separation of concerns**:
 - `mcpApp` is pure and polymorphic (library code)
-- `defaultMcpApp` does IO setup and provides the concrete nat-trans (application code)
+- `demoMcpApp` does IO setup and provides the concrete nat-trans (application code)
 
 #### Step 3: Alternative Entry Point with Context
 
@@ -2251,7 +2251,7 @@ src/MCP/Server/
 │   ├── Server.hs        # oauthServer (polymorphic server, unchanged)
 │   ├── Boundary.hs      # domainErrorToServerError (unchanged)
 │   └── ...
-├── HTTP.hs              # MODIFY: Import and re-export mcpApp; defaultMcpApp here
+├── HTTP.hs              # MODIFY: Import and re-export mcpApp; demoMcpApp here
 └── ...
 ```
 
@@ -2260,15 +2260,15 @@ src/MCP/Server/
 | File | Change |
 |------|--------|
 | `src/MCP/Server/OAuth/App.hs` | NEW: `mcpApp`, `mcpAppWithContext` |
-| `src/MCP/Server/HTTP.hs` | MODIFY: Add `defaultMcpApp`, import from OAuth.App |
-| `app/Main.hs` | MODIFY: Use `defaultMcpApp` (or custom nat-trans if configured) |
+| `src/MCP/Server/HTTP.hs` | MODIFY: Add `demoMcpApp`, import from OAuth.App |
+| `app/Main.hs` | MODIFY: Use `demoMcpApp` (or custom nat-trans if configured) |
 | `test/Spec/OAuth/...` | MODIFY: Use `mcpApp` with test nat-trans via `makeTestApp` |
 
 ### Migration Path
 
 1. **Create `OAuth.App` module** with polymorphic `mcpApp`
-2. **Extract nat-trans construction** from current monolithic setup into `defaultMcpApp`
-3. **Update `Main.hs`** to use `defaultMcpApp` (behavior unchanged, structure improved)
+2. **Extract nat-trans construction** from current monolithic setup into `demoMcpApp`
+3. **Update `Main.hs`** to use `demoMcpApp` (behavior unchanged, structure improved)
 4. **Update test harness** to use `mcpApp` directly with test-specific nat-trans
 5. **Document pattern** for third-party implementers
 
@@ -2278,8 +2278,8 @@ Before marking Phase 11 complete:
 
 - [ ] `mcpApp :: (∀ a. m a -> Handler a) -> Application` exists and compiles
 - [ ] `mcpApp` has all necessary typeclass constraints on `m`
-- [ ] `defaultMcpApp :: IO Application` uses `mcpApp` internally
-- [ ] `cabal run mcp-http -- --oauth` still works (uses `defaultMcpApp`)
+- [ ] `demoMcpApp :: IO Application` uses `mcpApp` internally
+- [ ] `cabal run mcp-http -- --oauth` still works (uses `demoMcpApp`)
 - [ ] Test harness uses `mcpApp` with test nat-trans
 - [ ] All existing OAuth tests pass
 - [ ] Third-party example (mock PostgresM) compiles and type-checks
@@ -2292,7 +2292,7 @@ Before marking Phase 11 complete:
 | II. Deep Module Architecture | ✅ | Single entry point hides server complexity; callers provide only the nat-trans |
 | III. Denotational Semantics | ✅ | Clear semantics: nat-trans interprets `m` actions in `Handler` |
 | IV. Total Functions | ✅ | Pure function; no partiality |
-| V. Pure Core, Impure Shell | ✅ | `mcpApp` is pure; IO lives in `defaultMcpApp` and caller's nat-trans construction |
+| V. Pure Core, Impure Shell | ✅ | `mcpApp` is pure; IO lives in `demoMcpApp` and caller's nat-trans construction |
 | VI. Property-Based Testing | ✅ | Same `mcpApp` used in tests with different nat-trans enables property testing |
 
 **Gate Status**: PASS - Phase 11 planning complete.
