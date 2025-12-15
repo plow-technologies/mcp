@@ -77,76 +77,84 @@ testRequest =
         ]
 
 spec :: Spec
-spec = describe "mcpServerAuth" $ do
-    describe "JWT authentication failure handling" $ do
-        it "returns 401 with WWW-Authenticate header for BadPassword" $ do
-            stateTVar <- newTVarIO (initialServerState (httpCapabilities testConfig))
-            result <- runHandler $ HTTP.mcpServerAuth testConfig testTracer stateTVar BadPassword testRequest
-            case result of
-                Left err -> do
-                    -- Check status code is 401
-                    show (errHTTPCode err) `shouldBe` "401"
-                    -- Check WWW-Authenticate header is present
-                    let headers = Servant.Server.errHeaders err
-                        hasWWWAuth = any (\(name, _) -> name == "WWW-Authenticate") headers
-                    hasWWWAuth `shouldBe` True
-                    -- Check header value contains Bearer and resource_metadata
-                    let wwwAuthValue = lookup "WWW-Authenticate" headers
-                    case wwwAuthValue of
-                        Just value -> do
-                            let valueStr = BS.unpack value
-                            valueStr `shouldSatisfy` \v -> "Bearer" `elem` words v
-                            valueStr `shouldSatisfy` \v -> "resource_metadata" `isInfixOf` v
-                        Nothing -> expectationFailure "WWW-Authenticate header missing"
-                Right _ -> expectationFailure "Expected ServerError (401), got success"
+spec = do
+    describe "mcpServerAuth" $ do
+        describe "JWT authentication failure handling" $ do
+            it "returns 401 with WWW-Authenticate header for BadPassword" $ do
+                stateTVar <- newTVarIO (initialServerState (httpCapabilities testConfig))
+                result <- runHandler $ HTTP.mcpServerAuth testConfig testTracer stateTVar BadPassword testRequest
+                case result of
+                    Left err -> do
+                        -- Check status code is 401
+                        show (errHTTPCode err) `shouldBe` "401"
+                        -- Check WWW-Authenticate header is present
+                        let headers = Servant.Server.errHeaders err
+                            hasWWWAuth = any (\(name, _) -> name == "WWW-Authenticate") headers
+                        hasWWWAuth `shouldBe` True
+                        -- Check header value contains Bearer and resource_metadata
+                        let wwwAuthValue = lookup "WWW-Authenticate" headers
+                        case wwwAuthValue of
+                            Just value -> do
+                                let valueStr = BS.unpack value
+                                valueStr `shouldSatisfy` \v -> "Bearer" `elem` words v
+                                valueStr `shouldSatisfy` \v -> "resource_metadata" `isInfixOf` v
+                            Nothing -> expectationFailure "WWW-Authenticate header missing"
+                    Right _ -> expectationFailure "Expected ServerError (401), got success"
 
-        it "returns 401 with WWW-Authenticate header for NoSuchUser" $ do
-            stateTVar <- newTVarIO (initialServerState (httpCapabilities testConfig))
-            result <- runHandler $ HTTP.mcpServerAuth testConfig testTracer stateTVar NoSuchUser testRequest
-            case result of
-                Left err -> do
-                    -- Check status code is 401
-                    show (Servant.Server.errHTTPCode err) `shouldBe` "401"
-                    -- Check WWW-Authenticate header is present
-                    let headers = Servant.Server.errHeaders err
-                        hasWWWAuth = any (\(name, _) -> name == "WWW-Authenticate") headers
-                    hasWWWAuth `shouldBe` True
-                    -- Check header value contains Bearer and resource_metadata
-                    let wwwAuthValue = lookup "WWW-Authenticate" headers
-                    case wwwAuthValue of
-                        Just value -> do
-                            let valueStr = BS.unpack value
-                            valueStr `shouldSatisfy` \v -> "Bearer" `elem` words v
-                            valueStr `shouldSatisfy` \v -> "resource_metadata" `isInfixOf` v
-                        Nothing -> expectationFailure "WWW-Authenticate header missing"
-                Right _ -> expectationFailure "Expected ServerError (401), got success"
+            it "returns 401 with WWW-Authenticate header for NoSuchUser" $ do
+                stateTVar <- newTVarIO (initialServerState (httpCapabilities testConfig))
+                result <- runHandler $ HTTP.mcpServerAuth testConfig testTracer stateTVar NoSuchUser testRequest
+                case result of
+                    Left err -> do
+                        -- Check status code is 401
+                        show (Servant.Server.errHTTPCode err) `shouldBe` "401"
+                        -- Check WWW-Authenticate header is present
+                        let headers = Servant.Server.errHeaders err
+                            hasWWWAuth = any (\(name, _) -> name == "WWW-Authenticate") headers
+                        hasWWWAuth `shouldBe` True
+                        -- Check header value contains Bearer and resource_metadata
+                        let wwwAuthValue = lookup "WWW-Authenticate" headers
+                        case wwwAuthValue of
+                            Just value -> do
+                                let valueStr = BS.unpack value
+                                valueStr `shouldSatisfy` \v -> "Bearer" `elem` words v
+                                valueStr `shouldSatisfy` \v -> "resource_metadata" `isInfixOf` v
+                            Nothing -> expectationFailure "WWW-Authenticate header missing"
+                    Right _ -> expectationFailure "Expected ServerError (401), got success"
 
-        it "returns 401 with WWW-Authenticate header for Indefinite" $ do
-            stateTVar <- newTVarIO (initialServerState (httpCapabilities testConfig))
-            result <- runHandler $ HTTP.mcpServerAuth testConfig testTracer stateTVar Indefinite testRequest
-            case result of
-                Left err -> do
-                    -- Check status code is 401
-                    show (Servant.Server.errHTTPCode err) `shouldBe` "401"
-                    -- Check WWW-Authenticate header is present
-                    let headers = Servant.Server.errHeaders err
-                        hasWWWAuth = any (\(name, _) -> name == "WWW-Authenticate") headers
-                    hasWWWAuth `shouldBe` True
-                    -- Check header value contains Bearer and resource_metadata
-                    let wwwAuthValue = lookup "WWW-Authenticate" headers
-                    case wwwAuthValue of
-                        Just value -> do
-                            let valueStr = BS.unpack value
-                            valueStr `shouldSatisfy` \v -> "Bearer" `elem` words v
-                            valueStr `shouldSatisfy` \v -> "resource_metadata" `isInfixOf` v
-                        Nothing -> expectationFailure "WWW-Authenticate header missing"
-                Right _ -> expectationFailure "Expected ServerError (401), got success"
+            it "returns 401 with WWW-Authenticate header for Indefinite" $ do
+                stateTVar <- newTVarIO (initialServerState (httpCapabilities testConfig))
+                result <- runHandler $ HTTP.mcpServerAuth testConfig testTracer stateTVar Indefinite testRequest
+                case result of
+                    Left err -> do
+                        -- Check status code is 401
+                        show (Servant.Server.errHTTPCode err) `shouldBe` "401"
+                        -- Check WWW-Authenticate header is present
+                        let headers = Servant.Server.errHeaders err
+                            hasWWWAuth = any (\(name, _) -> name == "WWW-Authenticate") headers
+                        hasWWWAuth `shouldBe` True
+                        -- Check header value contains Bearer and resource_metadata
+                        let wwwAuthValue = lookup "WWW-Authenticate" headers
+                        case wwwAuthValue of
+                            Just value -> do
+                                let valueStr = BS.unpack value
+                                valueStr `shouldSatisfy` \v -> "Bearer" `elem` words v
+                                valueStr `shouldSatisfy` \v -> "resource_metadata" `isInfixOf` v
+                            Nothing -> expectationFailure "WWW-Authenticate header missing"
+                    Right _ -> expectationFailure "Expected ServerError (401), got success"
 
-        it "processes request successfully for Authenticated user" $ do
-            stateTVar <- newTVarIO (initialServerState (httpCapabilities testConfig))
-            result <- runHandler $ HTTP.mcpServerAuth testConfig testTracer stateTVar (Authenticated testAuthUser) testRequest
-            case result of
-                Left err -> expectationFailure $ "Expected success, got error: " ++ show err
-                Right value -> do
-                    -- Just verify we got a value back (the actual response content is tested elsewhere)
-                    value `shouldSatisfy` const True
+            it "processes request successfully for Authenticated user" $ do
+                stateTVar <- newTVarIO (initialServerState (httpCapabilities testConfig))
+                result <- runHandler $ HTTP.mcpServerAuth testConfig testTracer stateTVar (Authenticated testAuthUser) testRequest
+                case result of
+                    Left err -> expectationFailure $ "Expected success, got error: " ++ show err
+                    Right value -> do
+                        -- Just verify we got a value back (the actual response content is tested elsewhere)
+                        value `shouldSatisfy` const True
+
+    describe "demoMcpApp" $ do
+        it "creates a non-bottom WAI Application" $ do
+            -- This tests that demoMcpApp can be called and returns a WAI Application
+            -- We verify it's non-bottom by evaluating to WHNF with seq
+            app <- HTTP.demoMcpApp
+            app `seq` True `shouldBe` True

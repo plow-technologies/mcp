@@ -27,6 +27,12 @@ module MCP.Server.HTTP (
     defaultDemoOAuthConfig,
     defaultProtectedResourceMetadata,
 
+    -- * Demo Entry Point
+    demoMcpApp,
+
+    -- * Polymorphic OAuth Entry Points
+    module MCP.Server.OAuth.App,
+
     -- * HTML Content Type
     HTML,
 
@@ -77,6 +83,9 @@ import MCP.Server.Auth.Demo (AuthUser (..), DemoCredentialEnv (..), defaultDemoC
 -- Import AuthBackend instance for AppM
 import MCP.Server.HTTP.AppEnv (AppEnv (..), HTTPServerConfig (..), runAppM)
 
+-- Import polymorphic mcpApp from OAuth.App (unqualified for re-export)
+import MCP.Server.OAuth.App
+
 -- Import OAuthAPI from OAuth.Server (migration from duplication)
 import MCP.Server.OAuth.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
 import MCP.Server.OAuth.Server (LoginForm (..), OAuthAPI)
@@ -87,7 +96,7 @@ import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Operation (OperationTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
 import MCP.Types
-import Plow.Logging (IOTracer (..), traceWith)
+import Plow.Logging (IOTracer (..), Tracer (..), traceWith)
 
 -- | HTML content type for Servant
 data HTML
@@ -152,9 +161,9 @@ type UnprotectedMCPAPI = "mcp" :> ReqBody '[JSON] Aeson.Value :> Post '[JSON] Ae
 -- | Complete API with OAuth
 type CompleteAPI auths = OAuthAPI :<|> MCPAPI auths
 
--- | Create a WAI Application for the MCP HTTP server
-mcpApp :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> OAuthTVarEnv -> JWTSettings -> Application
-mcpApp config tracer stateVar oauthEnv jwtSettings =
+-- | Create a WAI Application for the MCP HTTP server (internal monomorphic version)
+mcpAppInternal :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> OAuthTVarEnv -> JWTSettings -> Application
+mcpAppInternal config tracer stateVar oauthEnv jwtSettings =
     let cookieSettings = defaultCookieSettings
         authContext = cookieSettings :. jwtSettings :. EmptyContext
         baseApp = case httpOAuthConfig config of
@@ -660,6 +669,69 @@ renderErrorPage errorTitle errorMessage =
 escapeHtml :: Text -> Text
 escapeHtml = T.replace "&" "&amp;" . T.replace "<" "&lt;" . T.replace ">" "&gt;" . T.replace "\"" "&quot;" . T.replace "'" "&#39;"
 
+{- | Demo MCP application entry point.
+
+This is a reference implementation using in-memory TVar storage and demo credentials.
+This is what `cabal run mcp-http -- --oauth` uses.
+
+Creates a WAI Application with:
+
+* In-memory OAuth state storage (TVar-based)
+* Demo credentials (demo/demo123, admin/admin456)
+* Default HTTP server configuration (localhost:8080)
+* Null tracer (no trace output)
+* Generated JWK for JWT signing
+
+For production use, create a custom AppEnv with appropriate:
+
+* Persistent storage backend (PostgreSQL, Redis, etc.)
+* Real credential validation (LDAP, database, etc.)
+* Production configuration (proper base URL, HTTPS, etc.)
+* Structured tracing to your logging system
+-}
+demoMcpApp :: IO Application
+demoMcpApp = do
+    -- Generate JWK for JWT signing
+    jwk <- generateKey
+    let jwtSettings = defaultJWTSettings jwk
+
+    -- Initialize in-memory OAuth state storage
+    oauthEnv <- newOAuthTVarEnv defaultExpiryConfig
+
+    -- Create null tracer (discards all traces)
+    let tracer = IOTracer (Tracer (\_ -> pure ()))
+
+    -- Create default demo configuration
+    let config =
+            HTTPServerConfig
+                { httpPort = 8080
+                , httpBaseUrl = "http://localhost:8080"
+                , httpServerInfo = Implementation "mcp-demo" (Just "0.3.0") ""
+                , httpCapabilities = ServerCapabilities Nothing Nothing Nothing Nothing Nothing Nothing
+                , httpEnableLogging = False
+                , httpOAuthConfig = Just defaultDemoOAuthConfig
+                , httpJWK = Just jwk
+                , httpProtocolVersion = "2025-06-18"
+                , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata "http://localhost:8080")
+                }
+
+    -- Create demo credential environment
+    let authEnv = DemoCredentialEnv defaultDemoCredentialStore
+
+    -- Create AppEnv
+    let appEnv =
+            AppEnv
+                { envOAuth = oauthEnv
+                , envAuth = authEnv
+                , envConfig = config
+                , envTracer = tracer
+                , envJWT = jwtSettings
+                , envTimeProvider = Nothing -- Use real IO time
+                }
+
+    -- Use polymorphic mcpApp with runAppM natural transformation
+    pure $ mcpApp (runAppM appEnv)
+
 -- | Run the MCP server as an HTTP server
 runServerHTTP :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> IO ()
 runServerHTTP config tracer = do
@@ -687,4 +759,4 @@ runServerHTTP config tracer = do
             Nothing -> return ()
 
     traceWith tracer HTTPServerStarted
-    run (httpPort config) (mcpApp config tracer stateVar oauthEnv jwtSettings)
+    run (httpPort config) (mcpAppInternal config tracer stateVar oauthEnv jwtSettings)
