@@ -36,6 +36,9 @@ import Trace.GoldenSpec qualified as GoldenSpec
 import Trace.OAuthSpec qualified as OAuthSpec
 import Trace.RenderSpec qualified as RenderSpec
 
+-- Unit tests
+import MCP.Server.OAuth.TypesSpec qualified as TypesSpec
+
 -- Functional tests
 import Functional.OAuthFlowSpec qualified as OAuthFlowSpec
 
@@ -78,6 +81,9 @@ spec = do
     GoldenSpec.spec
     OAuthSpec.spec
     RenderSpec.spec
+
+    -- Unit tests
+    TypesSpec.spec
 
     -- Boundary layer tests (Servant FromHttpApiData/ToHttpApiData)
     BoundarySpec.spec
