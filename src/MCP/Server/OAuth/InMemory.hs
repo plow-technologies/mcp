@@ -70,6 +70,7 @@ import MCP.Server.OAuth.Types (
     ClientId,
     ClientInfo,
     PendingAuthorization (..),
+    UserId,
     unAccessTokenId,
     unAuthCodeId,
     unClientId,
@@ -160,6 +161,8 @@ data OAuthStoreError
 instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) where
     type OAuthStateError (ReaderT OAuthTVarEnv m) = OAuthStoreError
     type OAuthStateEnv (ReaderT OAuthTVarEnv m) = OAuthTVarEnv
+    type OAuthUser (ReaderT OAuthTVarEnv m) = AuthUser
+    type OAuthUserId (ReaderT OAuthTVarEnv m) = UserId
 
     -- Authorization Code Operations
 

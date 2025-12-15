@@ -275,6 +275,7 @@ test-suite mcp-test
         Generators
         TestMonad
         Laws.OAuthStateStoreSpec
+        Laws.OAuthUserTypeSpec
         Laws.AuthBackendSpec
         Laws.BoundarySpec
         Trace.FilterSpec

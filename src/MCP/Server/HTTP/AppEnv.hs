@@ -94,9 +94,11 @@ import MCP.Server.OAuth.InMemory (
 import MCP.Server.OAuth.Store (OAuthStateStore (..))
 import MCP.Server.OAuth.Types (
     AuthCodeId (..),
+    AuthUser,
     AuthorizationCode (..),
     PendingAuthorization (..),
     SessionId (..),
+    UserId,
  )
 import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types (Implementation, ServerCapabilities)
@@ -326,6 +328,8 @@ the OAuth environment component.
 instance OAuthStateStore AppM where
     type OAuthStateError AppM = OAuthStoreError
     type OAuthStateEnv AppM = OAuthTVarEnv
+    type OAuthUser AppM = AuthUser
+    type OAuthUserId AppM = UserId
 
     storeAuthCode code = do
         oauthEnv <- asks envOAuth

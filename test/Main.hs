@@ -24,6 +24,7 @@ import TestMonad (TestM, addTestCredential, mkTestEnv, runTestM)
 import Laws.AuthBackendSpec (authBackendKnownCredentials, authBackendLaws)
 import Laws.BoundarySpec qualified as BoundarySpec
 import Laws.OAuthStateStoreSpec (oauthStateStoreLaws)
+import Laws.OAuthUserTypeSpec qualified as OAuthUserTypeSpec
 
 -- Existing specs
 import Trace.FilterSpec qualified as FilterSpec
@@ -83,6 +84,7 @@ spec = do
     -- Typeclass law tests (using TestM with controlled time)
     describe "TestM OAuthStateStore" $ do
         oauthStateStoreLaws runTestM'
+        OAuthUserTypeSpec.spec
 
     describe "TestM AuthBackend" $ do
         authBackendLaws runTestMWithDemoCreds

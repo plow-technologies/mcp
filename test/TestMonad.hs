@@ -200,6 +200,8 @@ instance MonadTime TestM where
 instance OAuthStateStore TestM where
     type OAuthStateError TestM = ()
     type OAuthStateEnv TestM = TestEnv
+    type OAuthUser TestM = AuthUser
+    type OAuthUserId TestM = UserId
 
     -- Authorization Code Operations
     storeAuthCode code = TestM $ do

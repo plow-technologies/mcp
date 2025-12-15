@@ -126,7 +126,7 @@ Violation of TDD = task rejection. Code written before tests = delete and restar
 - Tests written FIRST, verified to fail
 - Minimal implementation to pass tests
 - All tests passing
-- Git commit with meaningful message
+- Git commit MUST use the commit skill
 ```
 
 ### Reviewer Subagent Requirements

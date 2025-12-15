@@ -145,6 +145,26 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
     -}
     type OAuthStateEnv m :: Type
 
+    {- | User type for JWT tokens and authentication.
+
+    This is the full user record stored with tokens.
+
+    Examples:
+    * Simple: @type OAuthUser MyMonad = AuthUser@
+    * Custom: @type OAuthUser MyMonad = MyCustomUser@
+    -}
+    type OAuthUser m :: Type
+
+    {- | User identifier type for authorization codes and state structures.
+
+    This is typically a lighter-weight identifier embedded in codes.
+
+    Examples:
+    * Simple: @type OAuthUserId MyMonad = UserId@
+    * Custom: @type OAuthUserId MyMonad = UUID@
+    -}
+    type OAuthUserId m :: Type
+
     -- * Authorization Code Operations
 
     --
