@@ -88,6 +88,7 @@ import Data.Map.Strict qualified as Map
 import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (UTCTime, addUTCTime)
 import MCP.Server.Auth.Backend
+import MCP.Server.Auth.Demo (AuthUser (..))
 import MCP.Server.OAuth.Store
 import MCP.Server.OAuth.Types
 import MCP.Server.Time

@@ -21,8 +21,9 @@ import Data.Typeable (typeRep)
 import Test.Hspec (Spec, describe, it, shouldBe)
 import TestMonad (TestM)
 
+import MCP.Server.Auth.Demo (AuthUser)
 import MCP.Server.OAuth.Store (OAuthStateStore (OAuthUser, OAuthUserId))
-import MCP.Server.OAuth.Types (AuthUser, UserId)
+import MCP.Server.OAuth.Types (UserId)
 
 {- | Test that OAuthUser and OAuthUserId associated types exist.
 

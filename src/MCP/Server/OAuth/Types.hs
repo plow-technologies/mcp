@@ -57,7 +57,6 @@ module MCP.Server.OAuth.Types (
     AuthorizationCode (..),
     ClientInfo (..),
     PendingAuthorization (..),
-    AuthUser (..),
 ) where
 
 import Control.Monad (forM_, when)
@@ -72,7 +71,6 @@ import Data.Text qualified as T
 import Data.Time.Clock (UTCTime)
 import GHC.Generics (Generic)
 import Network.URI (URI, parseURI, uriScheme, uriToString)
-import Servant.Auth.Server (FromJWT, ToJWT)
 import Web.HttpApiData (FromHttpApiData (..), ToHttpApiData (..))
 
 -- -----------------------------------------------------------------------------
@@ -618,31 +616,3 @@ instance ToJSON PendingAuthorization where
             , "pending_resource" .= fmap (T.pack . show) pendingResource
             , "pending_created_at" .= pendingCreatedAt
             ]
-
--- | Authenticated user information
-data AuthUser = AuthUser
-    { userUserId :: UserId
-    , userUserEmail :: Maybe Text
-    , userUserName :: Maybe Text
-    }
-    deriving stock (Eq, Show, Generic)
-
-instance FromJSON AuthUser where
-    parseJSON = withObject "AuthUser" $ \v ->
-        AuthUser
-            <$> v .: "user_id"
-            <*> v .:? "user_email"
-            <*> v .:? "user_name"
-
-instance ToJSON AuthUser where
-    toJSON AuthUser{..} =
-        object
-            [ "user_id" .= userUserId
-            , "user_email" .= userUserEmail
-            , "user_name" .= userUserName
-            ]
-
--- | JWT instances for AuthUser (rely on JSON instances above)
-instance ToJWT AuthUser
-
-instance FromJWT AuthUser

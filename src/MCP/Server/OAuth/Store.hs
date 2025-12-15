@@ -99,14 +99,12 @@ module MCP.Server.OAuth.Store (
     AuthorizationCode,
     ClientInfo,
     PendingAuthorization,
-    AuthUser,
 ) where
 
 import Data.Kind (Type)
 import MCP.Server.OAuth.Types (
     AccessTokenId,
     AuthCodeId,
-    AuthUser,
     AuthorizationCode,
     ClientId,
     ClientInfo,

@@ -60,10 +60,10 @@ import MCP.Server.Auth.Backend (
     mkPlaintextPassword,
     mkUsername,
  )
+import MCP.Server.Auth.Demo (AuthUser (..))
 import MCP.Server.OAuth.Types (
     AccessTokenId (..),
     AuthCodeId (..),
-    AuthUser (..),
     AuthorizationCode (..),
     ClientAuthMethod (..),
     ClientId (..),
