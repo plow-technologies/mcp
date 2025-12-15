@@ -7,20 +7,20 @@
 
 ## Summary
 
-Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error and environment types. Provide in-memory (`TVar`) and hard-coded credential implementations that preserve current demo behavior. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation.
+Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error, environment, user, and user ID types. `OAuthStateStore` requires `MonadTime m` for expiry filtering. `AuthBackend.validateCredentials` returns `Maybe (UserId, User)` tuple. Handlers requiring both typeclasses use type equality constraints (`AuthBackendUser m ~ OAuthUser m`, `AuthBackendUserId m ~ OAuthUserId m`). Provide reference in-memory (`TVar`) and hard-coded credential implementations. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation. **(Updated 2025-12-15: Added user type polymorphism per spec refinement)**
 
 ## Technical Context
 
 **Language/Version**: Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1)
 **Primary Dependencies**: servant-server 0.19-0.20, servant-auth-server 0.4, jose 0.10-0.11, cryptonite 0.30, stm 2.5, mtl 2.3, aeson 2.1-2.2, generic-lens (to add), network-uri (to add)
-**Storage**: In-memory (TVar-based) for default implementation; typeclass enables PostgreSQL/Redis backends
+**Storage**: In-memory (TVar-based) for reference implementation (not "default"); typeclass enables PostgreSQL/Redis backends
 **Testing**: hspec + QuickCheck + hspec-quickcheck (property tests via `prop` combinator, polymorphic specs testing interface not implementation)
 **Target Platform**: Linux server (GHC 9.4+)
 **Project Type**: Single Haskell library with examples
 **Performance Goals**: No measurable latency overhead (<5%) vs current TVar implementation
 **Constraints**: Must maintain backward compatibility with existing OAuth flows
 **Scale/Scope**: Single-instance semantics; distributed coordination delegated to backend implementations
-**Type Safety**: Strong newtypes for all identifiers (AuthCodeId, ClientId, etc.), ADTs for enumerations (CodeChallengeMethod, GrantType), MonadTime for testable time-dependent operations
+**Type Safety**: Strong newtypes for all identifiers (AuthCodeId, ClientId, etc.), ADTs for enumerations (CodeChallengeMethod, GrantType), MonadTime for testable time-dependent operations, associated user/userId types with equality constraints for type-safe user handling
 
 ## Constitution Check
 
@@ -30,7 +30,7 @@ Reference: `.specify/memory/constitution.md`
 
 | Principle | Status | Evidence/Notes |
 |-----------|--------|----------------|
-| I. Type-Driven Design | ✅ | Typeclasses with associated types (`OAuthStateError m`, `OAuthStateEnv m`, `AuthBackendError m`, `AuthBackendEnv m`) encode implementation-specific concerns at the type level. Smart constructors preserved for `HashedPassword`. Illegal states prevented by type constraints. |
+| I. Type-Driven Design | ✅ | Typeclasses with associated types (`OAuthStateError m`, `OAuthStateEnv m`, `OAuthUser m`, `OAuthUserId m`, `AuthBackendError m`, `AuthBackendEnv m`, `AuthBackendUser m`, `AuthBackendUserId m`) encode implementation-specific concerns at the type level. Type equality constraints (`AuthBackendUser m ~ OAuthUser m`) ensure compile-time agreement. Smart constructors preserved for `HashedPassword`. Illegal states prevented by type constraints. |
 | II. Deep Module Architecture | ✅ | Minimal public interface (typeclass methods only). Implementation details hidden in instance modules (`InMemory.hs`, `Demo.hs`). Complexity pulled into implementations, not pushed to callers. |
 | III. Denotational Semantics | ✅ | FR-016 requires documented algebraic laws (round-trip, delete, idempotence, overwrite). Property-based tests will verify these laws. |
 | IV. Total Functions | ✅ | All operations return results in monadic context (`m (Maybe a)`, `m (Either e a)`). No partial functions. Errors encoded via associated error types and `MonadError`. |
@@ -66,11 +66,11 @@ src/
 │   │   ├── StdIO.hs          # Unchanged (no OAuth)
 │   │   ├── Auth.hs           # Modified: re-exports from Auth/*
 │   │   ├── Auth/
-│   │   │   ├── Backend.hs    # NEW: AuthBackend typeclass + Username, PlaintextPassword newtypes
+│   │   │   ├── Backend.hs    # NEW: AuthBackend typeclass (AuthBackendUser m, AuthBackendUserId m) + Username, PlaintextPassword newtypes
 │   │   │   └── Demo.hs       # NEW: Demo credential implementation
 │   │   ├── OAuth/
-│   │   │   ├── Store.hs      # NEW: OAuthStateStore typeclass + MonadTime
-│   │   │   ├── Types.hs      # NEW: Newtypes (AuthCodeId, ClientId, etc.), ADTs, domain entities
+│   │   │   ├── Store.hs      # NEW: OAuthStateStore typeclass (OAuthUser m, OAuthUserId m) + MonadTime constraint
+│   │   │   ├── Types.hs      # NEW: Newtypes (AuthCodeId, ClientId, etc.), ADTs, `AuthorizationCode userId` (parameterized)
 │   │   │   └── InMemory.hs   # NEW: TVar-based implementation
 │   │   └── Time.hs           # NEW: MonadTime instances (IO, test monads)
 │   └── Trace/                # Unchanged
@@ -101,7 +101,7 @@ test/
 
 | Principle | Status | Post-Design Evidence |
 |-----------|--------|----------------------|
-| I. Type-Driven Design | ✅ | `contracts/OAuthStateStore.hs` and `contracts/AuthBackend.hs` define typeclasses with associated types. Types designed before implementation (spec → plan → contracts). |
+| I. Type-Driven Design | ✅ | `contracts/OAuthStateStore.hs` and `contracts/AuthBackend.hs` define typeclasses with associated types including user/userId. Type equality constraints ensure coherence. Types designed before implementation (spec → plan → contracts). |
 | II. Deep Module Architecture | ✅ | Module structure in plan shows minimal exports (`OAuthStateStore(..)`, `AuthBackend(..)`). Implementation modules (`InMemory.hs`, `Demo.hs`) hide complexity. |
 | III. Denotational Semantics | ✅ | Algebraic laws documented in `contracts/OAuthStateStore.hs` haddock (round-trip, delete, idempotence, overwrite). Test structure planned in `test/Laws/`. |
 | IV. Total Functions | ✅ | All typeclass methods return `m ()` or `m (Maybe a)`. No partial functions. Error handling via `MonadError e m` with `AsType` prism constraints. |
@@ -123,6 +123,7 @@ test/
 | TestConfig Contract | `specs/004-oauth-auth-typeclasses/contracts/TestConfig.hs` | Conformance test interface (Phase 5) |
 | OAuthServer Contract | `specs/004-oauth-auth-typeclasses/contracts/OAuthServer.hs` | Polymorphic server interface (Phase 6) |
 | Type Witness Patterns | `specs/004-oauth-auth-typeclasses/plan.md#phase-7` | FR-038 type-directed polymorphism constraint (Phase 7) |
+| User Type Polymorphism | `specs/004-oauth-auth-typeclasses/plan.md#phase-8` | FR-039 through FR-041 user/userId associated types (Phase 8) |
 
 ---
 
@@ -485,8 +486,16 @@ data TestCredentials = TestCredentials
 ```haskell
 -- | Polymorphic conformance test suite.
 -- Run against any OAuthStateStore/AuthBackend implementation.
+-- Updated 2025-12-15: Added user type equality constraints per Phase 8
 oauthConformanceSpec
-  :: forall m. (OAuthStateStore m, AuthBackend m, MonadTime m)
+  :: forall m.
+     ( OAuthStateStore m
+     , AuthBackend m
+     , MonadTime m
+     , AuthBackendUser m ~ OAuthUser m      -- Phase 8: type equality
+     , AuthBackendUserId m ~ OAuthUserId m  -- Phase 8: type equality
+     , ToJWT (OAuthUser m)                  -- Phase 8: JWT at operation level
+     )
   => TestConfig m
   -> Spec
 oauthConformanceSpec config = do
@@ -735,6 +744,7 @@ The conformance test harness (Phase 5) requires building a WAI `Application` fro
 
 ```haskell
 -- Common constraint bundle for OAuth handlers
+-- Updated 2025-12-15: Added user type equality constraints per spec refinement
 type OAuthHandler m env e =
   ( OAuthStateStore m
   , AuthBackend m
@@ -747,6 +757,9 @@ type OAuthHandler m env e =
   , HasType (AuthBackendEnv m) env
   , AsType (OAuthStateError m) e
   , AsType (AuthBackendError m) e
+  -- User type equality constraints (FR-039)
+  , AuthBackendUser m ~ OAuthUser m
+  , AuthBackendUserId m ~ OAuthUserId m
   )
 
 -- Alternative: type family for cleaner signatures
@@ -794,6 +807,7 @@ module MCP.Server.OAuth.Server
 
 -- | Polymorphic OAuth server. Framework-agnostic.
 -- Instantiate with hoistServer at framework boundary.
+-- Updated 2025-12-15: Added user type constraints per spec refinement
 oauthServer
   :: forall m env e.
      ( OAuthStateStore m
@@ -809,6 +823,11 @@ oauthServer
      , AsType (OAuthStateError m) e
      , AsType (AuthBackendError m) e
      , AsType ServerError e  -- For Servant error passthrough
+     -- User type equality (FR-039)
+     , AuthBackendUser m ~ OAuthUser m
+     , AuthBackendUserId m ~ OAuthUserId m
+     -- JWT constraint for token generation (FR-040)
+     , ToJWT (OAuthUser m)
      )
   => ServerT OAuthAPI m
 oauthServer =
@@ -1184,3 +1203,271 @@ Before merging any test code, verify:
 | VI. Property-Based Testing | ✅ | Safe test patterns enable reliable property testing |
 
 **Gate Status**: PASS - Phase 7 constraint documented.
+
+---
+
+## Phase 8: User Type Polymorphism (FR-039 through FR-041)
+
+**Added**: 2025-12-15 | **Status**: Planning | **Spec Session**: 2025-12-15
+
+### Problem Statement
+
+The original design used a fixed `AuthUser` type and `Bool` return from `validateCredentials`. This prevents library consumers from:
+
+1. Using their own user representations (enterprise IdP integration returns different user shapes)
+2. Using their own user ID representations (UUID, Integer, Text, custom newtype)
+3. Type-safe flow of user identity from authentication through to token generation
+
+**Spec Refinement** (2025-12-15): Add associated user and userId types to both typeclasses with type equality constraints ensuring compile-time agreement.
+
+### Clarified Decisions (from spec session 2025-12-15)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| User type coordination | Type equality constraints | `AuthBackendUser m ~ OAuthUser m` ensures compile-time agreement |
+| UserId handling | Separate associated type | `OAuthUserId m` for state structures; distinct from full user |
+| JWT constraints | At operation level | `ToJWT (OAuthUser m)` added where needed, not at typeclass level |
+| validateCredentials return | `Maybe (UserId, User)` tuple | Returns both values together; no separate extraction needed |
+| Data parameterization | Only AuthorizationCode | Access/refresh tokens validated by JWT signature; PendingAuth has no user |
+| Terminology | "Reference implementation" | Not "default" — one example among equals |
+| Time access | MonadTime on OAuthStateStore | Enables deterministic expiry testing |
+
+### New/Updated Requirements
+
+- **FR-039**: Type equality constraints `AuthBackendUser m ~ OAuthUser m` and `AuthBackendUserId m ~ OAuthUserId m`
+- **FR-040**: JWT constraints at operation level with optional userId in claims
+- **FR-041**: Only `AuthorizationCode userId` is parameterized
+
+### Implementation Approach
+
+#### Step 1: Update OAuthStateStore Typeclass
+
+```haskell
+-- In MCP.Server.OAuth.Store
+class (MonadTime m) => OAuthStateStore m where
+  -- Associated types for implementation-specific concerns
+  type OAuthStateError m
+  type OAuthStateEnv m
+
+  -- NEW: User types for this implementation
+  type OAuthUser m      -- Full user for JWT tokens
+  type OAuthUserId m    -- User identifier for state structures
+
+  -- Existing methods (unchanged signatures)
+  storeAuthCode :: AuthCodeId -> AuthorizationCode (OAuthUserId m) -> m ()
+  lookupAuthCode :: AuthCodeId -> m (Maybe (AuthorizationCode (OAuthUserId m)))
+  deleteAuthCode :: AuthCodeId -> m ()
+
+  storeClient :: ClientId -> ClientInfo -> m ()
+  lookupClient :: ClientId -> m (Maybe ClientInfo)
+
+  -- ... other methods
+```
+
+#### Step 2: Update AuthBackend Typeclass
+
+```haskell
+-- In MCP.Server.Auth.Backend
+class AuthBackend m where
+  -- Associated types
+  type AuthBackendError m
+  type AuthBackendEnv m
+
+  -- NEW: User types for this implementation
+  type AuthBackendUser m    -- Full authenticated user
+  type AuthBackendUserId m  -- User identifier
+
+  -- CHANGED: Returns tuple of (UserId, User) on success
+  validateCredentials
+    :: Username
+    -> PlaintextPassword
+    -> m (Maybe (AuthBackendUserId m, AuthBackendUser m))
+```
+
+#### Step 3: Parameterize AuthorizationCode
+
+```haskell
+-- In MCP.Server.OAuth.Types
+-- CHANGED: Now parameterized over userId type
+data AuthorizationCode userId = AuthorizationCode
+  { authCodeId          :: AuthCodeId
+  , authCodeClientId    :: ClientId
+  , authCodeUserId      :: userId              -- Parameterized!
+  , authCodeRedirectUri :: RedirectUri
+  , authCodeScope       :: Set Scope
+  , authCodeChallenge   :: CodeChallenge
+  , authCodeExpiry      :: UTCTime
+  }
+  deriving (Eq, Show, Generic)
+
+-- Functor instance for mapping over userId
+instance Functor AuthorizationCode where
+  fmap f code = code { authCodeUserId = f (authCodeUserId code) }
+```
+
+#### Step 4: Update Reference Implementations
+
+```haskell
+-- In MCP.Server.OAuth.InMemory
+instance OAuthStateStore (ReaderT OAuthTVarEnv IO) where
+  type OAuthStateError (ReaderT OAuthTVarEnv IO) = OAuthStoreError
+  type OAuthStateEnv (ReaderT OAuthTVarEnv IO) = OAuthTVarEnv
+
+  -- Reference implementation uses existing AuthUser and UserId types
+  type OAuthUser (ReaderT OAuthTVarEnv IO) = AuthUser
+  type OAuthUserId (ReaderT OAuthTVarEnv IO) = UserId  -- Text or newtype
+
+  -- Implementation unchanged, just uses concrete types
+  storeAuthCode codeId code = ...
+  lookupAuthCode codeId = ...
+
+-- In MCP.Server.Auth.Demo
+instance AuthBackend (ReaderT DemoCredentialEnv IO) where
+  type AuthBackendError (ReaderT DemoCredentialEnv IO) = DemoAuthError
+  type AuthBackendEnv (ReaderT DemoCredentialEnv IO) = DemoCredentialEnv
+
+  -- Reference implementation user types
+  type AuthBackendUser (ReaderT DemoCredentialEnv IO) = AuthUser
+  type AuthBackendUserId (ReaderT DemoCredentialEnv IO) = UserId
+
+  -- CHANGED: Return (UserId, AuthUser) tuple
+  validateCredentials username password = do
+    store <- asks credentialStore
+    case lookupCredential username store of
+      Nothing -> return Nothing
+      Just (hashedPw, userId) ->
+        if validatePassword password hashedPw
+          then do
+            let user = AuthUser { authUserId = userId, authUsername = username }
+            return $ Just (userId, user)
+          else return Nothing
+```
+
+#### Step 5: Update Handler Signatures
+
+```haskell
+-- Handler that creates auth code needs both user types to match
+handleLogin
+  :: ( OAuthStateStore m
+     , AuthBackend m
+     , MonadTime m
+     , MonadIO m
+     , AuthBackendUser m ~ OAuthUser m      -- Type equality!
+     , AuthBackendUserId m ~ OAuthUserId m  -- Type equality!
+     )
+  => LoginRequest
+  -> m (Headers '[Header "Location" RedirectTarget, Header "Set-Cookie" SessionCookie] NoContent)
+handleLogin req = do
+  -- validateCredentials returns (userId, user)
+  result <- validateCredentials (loginUsername req) (loginPassword req)
+  case result of
+    Nothing -> throwError authenticationFailed
+    Just (userId, _user) -> do
+      -- Store auth code with userId (type matches OAuthUserId m)
+      let code = AuthorizationCode
+            { authCodeUserId = userId  -- Type-safe: OAuthUserId m
+            , ...
+            }
+      storeAuthCode codeId code
+      ...
+
+-- Handler that generates JWT needs ToJWT on user type
+handleToken
+  :: ( OAuthStateStore m
+     , MonadIO m
+     , ToJWT (OAuthUser m)  -- JWT constraint at operation level
+     )
+  => TokenRequest
+  -> m TokenResponse
+handleToken req = do
+  code <- lookupAuthCode (tokenCode req)
+  -- Generate JWT with user info
+  let user = ...  -- Reconstruct or lookup user
+  jwt <- liftIO $ makeJWT user jwtSettings Nothing
+  ...
+```
+
+#### Step 6: Update Test Infrastructure
+
+```haskell
+-- In MCP.Server.OAuth.Test.Internal
+-- TestConfig now implicitly carries user types through m
+data TestConfig m = TestConfig
+  { tcMakeApp       :: IO (Application, NominalDiffTime -> IO ())
+  , tcRunM          :: forall a. m a -> IO a
+  , tcCredentials   :: TestCredentials
+  }
+
+-- Conformance spec requires type equality
+oauthConformanceSpec
+  :: forall m.
+     ( OAuthStateStore m
+     , AuthBackend m
+     , MonadTime m
+     , AuthBackendUser m ~ OAuthUser m
+     , AuthBackendUserId m ~ OAuthUserId m
+     , ToJWT (OAuthUser m)
+     )
+  => TestConfig m
+  -> Spec
+```
+
+### Migration Order
+
+| Order | Change | Complexity | Dependencies |
+|-------|--------|------------|--------------|
+| 1 | Add associated types to OAuthStateStore | Medium | None |
+| 2 | Add associated types to AuthBackend | Medium | None |
+| 3 | Change validateCredentials signature | Medium | Step 2 |
+| 4 | Parameterize AuthorizationCode | Low | None |
+| 5 | Update InMemory implementation | Medium | Steps 1, 4 |
+| 6 | Update Demo implementation | Medium | Steps 2, 3 |
+| 7 | Add type equality constraints to handlers | High | Steps 1-6 |
+| 8 | Update test infrastructure | Medium | Step 7 |
+
+### Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/MCP/Server/OAuth/Store.hs` | Add `OAuthUser m`, `OAuthUserId m` associated types |
+| `src/MCP/Server/Auth/Backend.hs` | Add `AuthBackendUser m`, `AuthBackendUserId m`; change validateCredentials |
+| `src/MCP/Server/OAuth/Types.hs` | Parameterize `AuthorizationCode userId` |
+| `src/MCP/Server/OAuth/InMemory.hs` | Define associated types for reference impl |
+| `src/MCP/Server/Auth/Demo.hs` | Define associated types; update validateCredentials |
+| `src/MCP/Server/OAuth/Server.hs` | Add type equality constraints to oauthServer |
+| `src/MCP/Server/OAuth/Handlers/*.hs` | Add constraints where needed |
+| `src/MCP/Server/OAuth/Test/Internal.hs` | Add type equality constraints to conformance spec |
+| `test/Laws/AuthBackendSpec.hs` | Test new validateCredentials signature |
+
+### Property Tests for User Types
+
+```haskell
+-- Round-trip law still holds with parameterized types
+prop "AuthorizationCode userId round-trip" $
+  \(code :: AuthorizationCode UserId) ->
+    lookupAuthCode (authCodeId code) `shouldReturn` Just code
+    -- after: storeAuthCode (authCodeId code) code
+
+-- validateCredentials law
+prop "valid credentials return (userId, user)" $
+  \(username, password) -> monadicIO $ do
+    result <- run $ validateCredentials username password
+    case result of
+      Just (userId, user) -> do
+        -- userId and user should be consistent
+        assert (authUserId user == userId)
+      Nothing -> return ()  -- Invalid credentials OK
+```
+
+### Constitution Compliance (Phase 8)
+
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. Type-Driven Design | ✅ | Associated types + equality constraints encode user shape at type level; illegal combinations rejected at compile time |
+| II. Deep Module Architecture | ✅ | User types hidden in implementations; handlers use abstract associated types |
+| III. Denotational Semantics | ✅ | Type equality `~` has precise mathematical meaning; validateCredentials returns exactly what callers need |
+| IV. Total Functions | ✅ | `Maybe (UserId, User)` is total; no partial extraction needed |
+| V. Pure Core, Impure Shell | ✅ | User types are pure data; IO only in implementations |
+| VI. Property-Based Testing | ✅ | Property tests verify user type consistency laws |
+
+**Gate Status**: PASS - Phase 8 planning complete.

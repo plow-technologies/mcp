@@ -111,6 +111,9 @@ The @m@ parameter is the implementation's monad stack. It must satisfy:
 * 'OAuthStateStore' m
 * 'AuthBackend' m
 * 'MonadTime' m
+* 'AuthBackendUser m ~ OAuthUser m' (Phase 8, FR-039)
+* 'AuthBackendUserId m ~ OAuthUserId m' (Phase 8, FR-039)
+* 'ToJWT (OAuthUser m)' (Phase 8, FR-040 - for token generation)
 
 == Invariants
 
@@ -184,8 +187,21 @@ Tests support two isolation strategies:
 
 The conformance suite uses strategy 1 for expiry tests (which modify time)
 and strategy 2 for stateless tests (error cases, validation).
+
+== Type Equality Constraints (Phase 8, FR-039)
+
+The spec requires type equality between user types from both typeclasses,
+ensuring handlers can flow user identity from authentication to token storage.
 -}
 oauthConformanceSpec ::
+    forall m.
+    ( OAuthStateStore m
+    , AuthBackend m
+    , MonadTime m
+    , AuthBackendUser m ~ OAuthUser m -- Phase 8: type equality
+    , AuthBackendUserId m ~ OAuthUserId m -- Phase 8: type equality
+    , ToJWT (OAuthUser m) -- Phase 8: JWT at operation level
+    ) =>
     TestConfig m ->
     Spec
 oauthConformanceSpec = undefined -- Implementation in MCP.Server.OAuth.Test.Internal

@@ -281,8 +281,11 @@ data ClientAuthMethod
 -- Domain Entities
 -- ============================================================================
 
--- | Authorization code with PKCE support.
-data AuthorizationCode = AuthorizationCode
+{- | Authorization code with PKCE support.
+Phase 8 (FR-041): Parameterized over userId type.
+At use sites, instantiate with @OAuthUserId m@ from the typeclass.
+-}
+data AuthorizationCode userId = AuthorizationCode
     { authCodeId :: AuthCodeId
     -- ^ Unique identifier (key)
     , authClientId :: ClientId
@@ -295,12 +298,12 @@ data AuthorizationCode = AuthorizationCode
     -- ^ S256 or Plain (ADT, not Text)
     , authScopes :: Set Scope
     -- ^ Granted scopes (Set, not list)
-    , authUserId :: UserId
-    -- ^ Authenticated user
+    , authUserId :: userId
+    -- ^ Authenticated user identifier (parameterized, Phase 8)
     , authExpiry :: UTCTime
     -- ^ Expiration timestamp
     }
-    deriving (Eq, Show, Generic)
+    deriving (Eq, Show, Generic, Functor)
 
 -- | Registered OAuth client information.
 data ClientInfo = ClientInfo
@@ -338,7 +341,11 @@ data PendingAuthorization = PendingAuthorization
     }
     deriving (Eq, Show, Generic)
 
--- | Authenticated user information.
+{- | Authenticated user information.
+This is the REFERENCE IMPLEMENTATION user type (not a "default").
+Custom implementations define their own user types via @OAuthUser m@.
+Phase 8 (FR-039): Implementations use associated types, not this fixed type.
+-}
 data AuthUser = AuthUser
     { authUserId' :: UserId
     -- ^ Unique user identifier
@@ -367,6 +374,20 @@ Implementations provide storage for:
 
 * 'OAuthStateError': Implementation-specific failure modes
 * 'OAuthStateEnv': Implementation-specific environment/configuration
+* 'OAuthUser': Implementation-specific user type for JWT tokens (Phase 8, FR-039)
+* 'OAuthUserId': Implementation-specific user identifier for state structures (Phase 8, FR-039)
+
+== Type Equality (Phase 8, FR-039)
+
+Handlers requiring both 'OAuthStateStore' and 'AuthBackend' MUST include:
+
+@
+( AuthBackendUser m ~ OAuthUser m
+, AuthBackendUserId m ~ OAuthUserId m
+)
+@
+
+This ensures compile-time agreement between the user types from both typeclasses.
 
 == Superclass Constraint
 
@@ -383,6 +404,8 @@ Implementations may add constraints in their instance context:
 instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) where
   type OAuthStateError (ReaderT OAuthTVarEnv m) = OAuthStoreError
   type OAuthStateEnv (ReaderT OAuthTVarEnv m) = OAuthTVarEnv
+  type OAuthUser (ReaderT OAuthTVarEnv m) = AuthUser        -- Phase 8
+  type OAuthUserId (ReaderT OAuthTVarEnv m) = UserId        -- Phase 8
   ...
 @
 -}
@@ -407,14 +430,42 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
     -}
     type OAuthStateEnv m :: Type
 
+    {- | Implementation-specific user type for JWT tokens (Phase 8, FR-039).
+
+    This is the full user representation used in JWT claims via 'ToJWT'.
+    The 'ToJWT' constraint is added at the operation level (FR-040), not here.
+
+    Examples:
+
+    * Reference: @AuthUser@ with userId, email, name
+    * Enterprise: Custom user type from IdP
+    * PostgreSQL: User record from database
+    -}
+    type OAuthUser m :: Type
+
+    {- | Implementation-specific user identifier for state structures (Phase 8, FR-039).
+
+    Stored in 'AuthorizationCode' and other state entities.
+    Distinct from full user to minimize storage in state.
+
+    Examples:
+
+    * Reference: @UserId@ (Text newtype)
+    * Enterprise: UUID, Integer, or custom identifier
+    * PostgreSQL: Database primary key type
+    -}
+    type OAuthUserId m :: Type
+
     -- Authorization Code Operations
 
     {- | Store an authorization code.
 
     The code is keyed by 'authCodeId' field. Overwrites any existing code
     with the same key (idempotent).
+
+    Phase 8 (FR-041): Takes parameterized @AuthorizationCode (OAuthUserId m)@.
     -}
-    storeAuthCode :: AuthorizationCode -> m ()
+    storeAuthCode :: AuthorizationCode (OAuthUserId m) -> m ()
 
     {- | Lookup an authorization code by its identifier.
 
@@ -425,8 +476,10 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
 
     /Note/: Expiry filtering is implementation responsibility (FR-017).
     Uses 'getCurrentTime' from 'MonadTime' for testability.
+
+    Phase 8 (FR-041): Returns parameterized @AuthorizationCode (OAuthUserId m)@.
     -}
-    lookupAuthCode :: AuthCodeId -> m (Maybe AuthorizationCode)
+    lookupAuthCode :: AuthCodeId -> m (Maybe (AuthorizationCode (OAuthUserId m)))
 
     {- | Delete an authorization code.
 
@@ -440,37 +493,47 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
     {- | Store an access token → user mapping.
 
     The token string is the key. Used for MCP request authentication.
+
+    Phase 8 (FR-039): Uses @OAuthUser m@ associated type instead of fixed @AuthUser@.
     -}
-    storeAccessToken :: AccessTokenId -> AuthUser -> m ()
+    storeAccessToken :: AccessTokenId -> OAuthUser m -> m ()
 
     {- | Lookup user by access token.
 
     Returns 'Nothing' if token doesn't exist.
 
     /Note/: Token expiry is handled by JWT validation, not the store.
+
+    Phase 8 (FR-039): Returns @OAuthUser m@ associated type.
     -}
-    lookupAccessToken :: AccessTokenId -> m (Maybe AuthUser)
+    lookupAccessToken :: AccessTokenId -> m (Maybe (OAuthUser m))
 
     -- Refresh Token Operations
 
     {- | Store a refresh token with associated client and user.
 
-    Format: @(ClientId, AuthUser)@
+    Format: @(ClientId, OAuthUser m)@
+
+    Phase 8 (FR-039): Uses @OAuthUser m@ associated type.
     -}
-    storeRefreshToken :: RefreshTokenId -> (ClientId, AuthUser) -> m ()
+    storeRefreshToken :: RefreshTokenId -> (ClientId, OAuthUser m) -> m ()
 
     {- | Lookup refresh token data.
 
-    Returns @Just (ClientId, AuthUser)@ if found, 'Nothing' otherwise.
+    Returns @Just (ClientId, OAuthUser m)@ if found, 'Nothing' otherwise.
+
+    Phase 8 (FR-039): Returns @OAuthUser m@ associated type.
     -}
-    lookupRefreshToken :: RefreshTokenId -> m (Maybe (ClientId, AuthUser))
+    lookupRefreshToken :: RefreshTokenId -> m (Maybe (ClientId, OAuthUser m))
 
     {- | Update refresh token data (for token rotation).
 
     Semantically equivalent to 'storeRefreshToken', but may be optimized
     for update-in-place in some implementations.
+
+    Phase 8 (FR-039): Uses @OAuthUser m@ associated type.
     -}
-    updateRefreshToken :: RefreshTokenId -> (ClientId, AuthUser) -> m ()
+    updateRefreshToken :: RefreshTokenId -> (ClientId, OAuthUser m) -> m ()
 
     -- Client Registration Operations
 

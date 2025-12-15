@@ -81,6 +81,17 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 
 ## Clarifications
 
+### Session 2025-12-15
+
+- Q: How should OAuthStateStore and AuthBackend agree on the user type at instantiation time? → A: Type equality constraint. Both typeclasses define their own associated user type (`AuthBackendUser m` and `OAuthUser m`), and handlers requiring both add `AuthBackendUser m ~ OAuthUser m` constraint to ensure compile-time agreement.
+- Q: Where should JWT constraints (ToJWT/FromJWT) on the associated user type be specified? → A: Constraints in operations. Individual methods/handlers that need JWT add `(ToJWT (OAuthUser m))` in their signatures rather than at typeclass level. Follows minimal constraint principle.
+- Q: How should data types like AuthorizationCode handle varying user identity representations? → A: Add associated type for UserId. Data types contain `UserId` (not full user struct), and `UserId` varies between implementations (UUID, Integer, Text). Add `OAuthUserId m` associated type to `OAuthStateStore`, parameterize data types as `AuthorizationCode userId`.
+- Q: How should the relationship between authenticated user and user ID be expressed? → A: Return tuple from validateCredentials. `validateCredentials :: Username -> PlaintextPassword -> m (Maybe (AuthBackendUserId m, AuthBackendUser m))` returns both values together. Callers get exactly what they need; no separate extraction method required.
+- Q: Which OAuth data types need userId parameterization? → A: Only AuthorizationCode. Access/refresh tokens are bearer tokens validated by JWT signature, not by stored userId lookup. PendingAuthorization tracks session state before authentication completes. FR-041 updated to remove vague "etc."
+- Q: What is the correct terminology for AuthUser and the in-memory UserId type? → A: "Reference implementation types", not "default types". AuthUser is the user type of the reference in-memory implementation we ship; same for the UserId type (e.g., Text or UUID). They are one example among equals, not fallbacks.
+- Q: What user data is encoded in JWT access tokens? → A: Full OAuthUser via ToJWT. The ToJWT instance on the user type produces appropriate claims; JWT structure is the user type's responsibility. Additionally, refresh and access tokens MAY include userId at the implementation's discretion for: (1) checking user validity during refresh, (2) matching against ACLs for access control. This is optional per-implementation.
+- Q: How does OAuthStateStore access current time for expiry filtering? → A: MonadTime constraint. `OAuthStateStore m` requires `MonadTime m`; implementations use `currentTime` from the constraint. Consistent with FR-032's test strategy and enables deterministic expiry testing via controllable clocks.
+
 ### Session 2025-12-13
 
 - Q: How should type-directed polymorphic functions thread type witnesses? → A: Modern Haskell patterns only: `Proxy @Type` or `@Type` type applications (AllowAmbiguousTypes/TypeApplications). Never use `undefined :: Type`.
@@ -126,12 +137,12 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 
 ### Functional Requirements
 
-- **FR-001**: System MUST provide an `OAuthStateStore` typeclass with operations for managing authorization codes, access tokens, refresh tokens, registered clients, and pending authorizations.
-- **FR-002**: System MUST provide an `AuthBackend` typeclass with operations for validating user credentials.
+- **FR-001**: System MUST provide an `OAuthStateStore` typeclass with operations for managing authorization codes, access tokens, refresh tokens, registered clients, and pending authorizations. The typeclass MUST define associated types `OAuthUser m` (authenticated user for JWT) and `OAuthUserId m` (user identifier stored in OAuth state structures like `AuthorizationCode`).
+- **FR-002**: System MUST provide an `AuthBackend` typeclass with operations for validating user credentials. The `validateCredentials` method MUST return `m (Maybe (AuthBackendUserId m, AuthBackendUser m))` where both are associated types, enabling implementations to return their own user ID and user representation on successful authentication. Returning both values together eliminates the need for separate ID extraction methods.
 - **FR-003**: Both typeclasses MUST be polymorphic over a constrained monad type parameter `m` (three-layer cake architecture), allowing implementations to require `MonadIO`, `MonadState`, etc. in their instance contexts.
-- **FR-004**: System MUST provide an in-memory implementation of `OAuthStateStore` using `TVar` that maintains current behavior.
-- **FR-005**: System MUST provide a hard-coded credential implementation of `AuthBackend` that maintains current demo behavior (demo/demo123, admin/admin456).
-- **FR-006**: All existing OAuth endpoints MUST continue to function identically when using the default implementations.
+- **FR-004**: System MUST provide a reference in-memory implementation of `OAuthStateStore` using `TVar` that maintains current behavior. This is one example implementation, not a fallback default.
+- **FR-005**: System MUST provide a reference hard-coded credential implementation of `AuthBackend` that maintains current demo behavior (demo/demo123, admin/admin456). This is one example implementation, not a fallback default.
+- **FR-006**: All existing OAuth endpoints MUST continue to function identically when using the reference implementations.
 - **FR-007**: The typeclass operations MUST return results in the monadic context, allowing implementations to perform effectful operations.
 - **FR-008**: The `OAuthStateStore` typeclass MUST support atomic operations where the current implementation uses `atomically` with `TVar`.
 - **FR-009**: The `AuthBackend` typeclass MUST allow implementations to access configuration (e.g., credential store, salt) needed for validation.
@@ -152,7 +163,7 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
   - Delete: `lookupX k` after `deleteX k` returns `Nothing`
   - Idempotence: `storeX k v >> storeX k v` equivalent to `storeX k v`
   - Overwrite: `storeX k v2` after `storeX k v1` makes `lookupX k` return `Just v2`
-- **FR-017**: Lookup operations for time-bounded entities (auth codes, pending authorizations) MUST filter expired entries, returning `Nothing` for expired items. This enables backend TTL mechanisms (e.g., Redis EXPIRE, PostgreSQL scheduled cleanup) and keeps expiry enforcement within the store abstraction.
+- **FR-017**: Lookup operations for time-bounded entities (auth codes, pending authorizations) MUST filter expired entries, returning `Nothing` for expired items. This enables backend TTL mechanisms (e.g., Redis EXPIRE, PostgreSQL scheduled cleanup) and keeps expiry enforcement within the store abstraction. The `OAuthStateStore` typeclass MUST require `MonadTime m` to access current time for expiry checks, enabling deterministic testing via controllable clocks.
 - **FR-022**: HTTP response headers MUST use type-safe values to prevent position-swap bugs. Use Servant's typed header combinators where available. For custom/composite headers, add semantic newtypes describing the value's purpose (e.g., `RedirectTarget`, `SessionCookie`) enabling usage like `Header "Location" RedirectTarget`. The `addHeader` call order must match the type-level header list, and distinct types make swaps a compile error.
 - **FR-023**: System MUST provide an hspec-wai-based functional test harness for HTTP-level black-box testing of OAuth flows. Tests run in-process using hspec-wai's `with` application pattern (no separate HTTP server process).
 - **FR-024**: The functional test suite MUST cover the full OAuth flow: client registration, authorization endpoint (GET with login page), login form submission, token exchange, and token refresh.
@@ -168,15 +179,19 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 - **FR-034**: The polymorphic conformance test interface MUST include an abstract `advanceTime :: NominalDiffTime -> IO ()` callback that implementations provide. The reference in-memory implementation uses `TVar UTCTime` internally; third-party implementations provide their own time control mechanism (e.g., database timestamps, mock clocks).
 - **FR-035**: The polymorphic conformance test interface MUST include `TestCredentials` (username, password) as part of the test configuration. Implementations are responsible for ensuring their `AuthBackend` recognizes these credentials. The reference implementation pre-configures demo credentials.
 - **FR-038**: Type-directed polymorphic functions (e.g., property-based test helpers) MUST use modern Haskell type witness patterns: `Proxy @Type` or `@Type` type applications with `AllowAmbiguousTypes`/`TypeApplications`. NEVER use `undefined :: Type` to thread type information. Example: prefer `identityRoundTrip @ClientId` or `identityRoundTrip (Proxy @ClientId)` over `identityRoundTrip "ClientId" (undefined :: ClientId)`.
+- **FR-039**: Handlers requiring both `OAuthStateStore` and `AuthBackend` MUST include type equality constraints `AuthBackendUser m ~ OAuthUser m` and `AuthBackendUserId m ~ OAuthUserId m` to ensure compile-time agreement on both user and user ID types. This enables the authenticated user and ID from `AuthBackend.validateCredentials` to be stored directly in OAuth state structures.
+- **FR-040**: JWT constraints (`ToJWT`, `FromJWT`) on the associated user type MUST be specified at the operation/handler level, not at the typeclass level. Operations requiring JWT token generation add `(ToJWT (OAuthUser m))` to their signature. This follows the minimal constraint principle and allows user types that don't need JWT support in all contexts. The `ToJWT` instance on the user type is responsible for producing appropriate JWT claims. Implementations MAY include `OAuthUserId m` in JWT claims at their discretion for refresh validation (checking user still valid) or access control (ACL matching).
+- **FR-041**: The `AuthorizationCode` data type MUST be parameterized over the user ID type: `AuthorizationCode userId`. The `OAuthUserId m` associated type from `OAuthStateStore` provides the concrete type at instantiation. Access tokens and refresh tokens are bearer tokens validated by JWT signature and do not require userId parameterization. `PendingAuthorization` tracks session state before authentication completes and does not contain user identity.
 
 ### Key Entities
 
-- **OAuthStateStore**: Typeclass abstracting persistence of OAuth protocol state (authorization codes, tokens, clients, sessions). Defines associated types `OAuthStateError` and `OAuthStateEnv` for implementation-specific failures and environment.
-- **AuthBackend**: Typeclass abstracting user authentication/credential validation. Defines associated types `AuthBackendError` and `AuthBackendEnv` for implementation-specific failures and environment.
-- **AuthorizationCode**: Data type from OAuth.Types representing an authorization code with PKCE, expiry, and user info. Uses type-safe newtypes (`AuthCodeId`, `CodeChallenge`, etc.).
+- **OAuthStateStore**: Typeclass abstracting persistence of OAuth protocol state (authorization codes, tokens, clients, sessions). Requires `MonadTime m` for expiry filtering. Defines associated types `OAuthStateError`, `OAuthStateEnv`, `OAuthUser m` (full user for JWT), and `OAuthUserId m` (user identifier for state structures).
+- **AuthBackend**: Typeclass abstracting user authentication/credential validation. Defines associated types `AuthBackendError`, `AuthBackendEnv`, `AuthBackendUser m`, and `AuthBackendUserId m` for implementation-specific failures, environment, user representation, and user identifier. The `validateCredentials` method returns `Maybe (AuthBackendUserId m, AuthBackendUser m)` on success.
+- **AuthorizationCode userId**: Parameterized data type from OAuth.Types representing an authorization code with PKCE, expiry, and user ID. Uses type-safe newtypes (`AuthCodeId`, `CodeChallenge`, etc.). The `userId` type parameter is instantiated to `OAuthUserId m` at use sites.
 - **ClientInfo**: Data type from OAuth.Types representing a registered OAuth client. Uses type-safe newtypes (`ClientId`, `NonEmpty RedirectUri`, `Set GrantType`).
 - **PendingAuthorization**: Data type from OAuth.Types representing an in-progress login session. Uses type-safe newtypes (`ClientId`, `RedirectUri`, `CodeChallenge`, etc.) for all OAuth parameters (validated at request parse time).
-- **AuthUser**: Existing data type representing an authenticated user.
+- **AuthUser**: User type for the reference in-memory implementation we ship. NOT a "default" - it is one example among equals. Custom implementations define their own user types via the `AuthBackendUser m` and `OAuthUser m` associated types; the type equality constraint ensures they agree.
+- **UserId (reference)**: User identifier type for the reference in-memory implementation (e.g., `Text` or `UserId` newtype). Custom implementations define their own via `AuthBackendUserId m` and `OAuthUserId m` associated types.
 - **Error Prisms**: Constraints using `AsType` from generic-lens to inject/project typeclass-specific errors into a unified error sum type.
 - **Environment Lenses**: Constraints using `HasType` from generic-lens to access typeclass-specific environments from a unified environment product type.
 - **RedirectTarget**: Newtype wrapping redirect URL `Text` for type-safe `Header "Location" RedirectTarget` usage in HTTP 3xx responses. Name describes the semantic purpose (where to redirect), not the header name.
@@ -187,7 +202,7 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 
 ### Measurable Outcomes
 
-- **SC-001**: All existing OAuth integration tests pass without modification when using default implementations.
+- **SC-001**: All existing OAuth integration tests pass without modification when using the reference implementations.
 - **SC-002**: A developer can implement a new storage backend by providing instances for the typeclasses without modifying core server code.
 - **SC-003**: The abstraction adds no measurable latency overhead (within 5%) for typical OAuth operations when using in-memory implementations.
 - **SC-004**: Type errors at compile time prevent mixing incompatible implementations (e.g., using IO-based storage with a pure test monad).
