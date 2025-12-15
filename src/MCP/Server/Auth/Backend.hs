@@ -336,6 +336,8 @@ authBackendLaws runM = describe "AuthBackend laws" $ do
 instance MonadIO m => AuthBackend (ReaderT CredentialStore m) where
   type AuthBackendError (ReaderT CredentialStore m) = Text
   type AuthBackendEnv (ReaderT CredentialStore m) = CredentialStore
+  type AuthBackendUser (ReaderT CredentialStore m) = AuthUser
+  type AuthBackendUserId (ReaderT CredentialStore m) = UserId
 
   validateCredentials username password = do
     store <- ask
@@ -367,6 +369,32 @@ class (Monad m) => AuthBackend m where
     * Database: Connection pool, table name, password column
     -}
     type AuthBackendEnv m :: Type
+
+    {- | The full authenticated user type for this implementation.
+
+    Contains all user data (name, email, roles, etc.) used for token generation.
+    This is analogous to 'OAuthUser' in the OAuthStateStore typeclass.
+
+    Examples:
+
+    * Simple: @type AuthBackendUser MyMonad = AuthUser@
+    * Custom: @type AuthBackendUser MyMonad = MyCustomUser@
+    * LDAP: @type AuthBackendUser MyMonad = LdapUserRecord@
+    -}
+    type AuthBackendUser m :: Type
+
+    {- | User identifier type for this implementation.
+
+    Lightweight identifier embedded in authorization codes and state structures.
+    This is analogous to 'OAuthUserId' in the OAuthStateStore typeclass.
+
+    Examples:
+
+    * Simple: @type AuthBackendUserId MyMonad = UserId@
+    * Custom: @type AuthBackendUserId MyMonad = UUID@
+    * Integer: @type AuthBackendUserId MyMonad = Int@
+    -}
+    type AuthBackendUserId m :: Type
 
     {- | Validate user credentials.
 

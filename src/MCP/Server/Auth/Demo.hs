@@ -74,6 +74,7 @@ import MCP.Server.Auth.Backend (
     mkHashedPassword,
     mkPlaintextPassword,
  )
+import MCP.Server.OAuth.Types (AuthUser, UserId)
 
 -- -----------------------------------------------------------------------------
 -- Environment
@@ -111,6 +112,8 @@ data DemoAuthError
 instance (MonadIO m) => AuthBackend (ReaderT DemoCredentialEnv m) where
     type AuthBackendError (ReaderT DemoCredentialEnv m) = DemoAuthError
     type AuthBackendEnv (ReaderT DemoCredentialEnv m) = DemoCredentialEnv
+    type AuthBackendUser (ReaderT DemoCredentialEnv m) = AuthUser
+    type AuthBackendUserId (ReaderT DemoCredentialEnv m) = UserId
 
     validateCredentials username password = do
         store <- asks credentialStore

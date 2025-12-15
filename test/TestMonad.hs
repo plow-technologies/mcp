@@ -295,6 +295,8 @@ instance OAuthStateStore TestM where
 instance AuthBackend TestM where
     type AuthBackendError TestM = ()
     type AuthBackendEnv TestM = TestEnv
+    type AuthBackendUser TestM = AuthUser
+    type AuthBackendUserId TestM = UserId
 
     validateCredentials username password = TestM $ do
         env <- ask

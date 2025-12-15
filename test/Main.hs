@@ -21,6 +21,7 @@ import Test.Hspec
 import TestMonad (TestM, addTestCredential, mkTestEnv, runTestM)
 
 -- Law tests
+import Laws.AuthBackendAssociatedTypesSpec qualified as AuthBackendAssociatedTypesSpec
 import Laws.AuthBackendSpec (authBackendKnownCredentials, authBackendLaws)
 import Laws.BoundarySpec qualified as BoundarySpec
 import Laws.OAuthStateStoreSpec (oauthStateStoreLaws)
@@ -87,6 +88,7 @@ spec = do
         OAuthUserTypeSpec.spec
 
     describe "TestM AuthBackend" $ do
+        AuthBackendAssociatedTypesSpec.spec
         authBackendLaws runTestMWithDemoCreds
         authBackendKnownCredentials
             runTestMWithDemoCreds
