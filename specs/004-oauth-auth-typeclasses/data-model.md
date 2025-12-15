@@ -476,12 +476,14 @@ data AppEnv = AppEnv
 **Purpose**: Unified error type for handlers requiring multiple typeclasses
 
 ```haskell
+-- Updated 2025-12-15: Removed ServerErr, added fixed error types (Phase 10)
 data AppError
-  = OAuthStoreErr OAuthStoreError
-  | AuthBackendErr DemoAuthError
-  | ValidationErr Text
-  | ServerErr ServerError
+  = OAuthStoreErr OAuthStoreError          -- Associated type (500, logged not exposed)
+  | AuthBackendErr DemoAuthError           -- Associated type (401, logged not exposed)
+  | ValidationErr ValidationError          -- Fixed type (400, safe to expose)
+  | AuthorizationErr AuthorizationError    -- Fixed type (4xx per RFC 6749, safe to expose)
   deriving (Generic)
+-- NOTE: No ServerErr constructor; ServerError translation happens at boundary only (see Phase 10)
 ```
 
 ## Type Migration Summary
@@ -710,4 +712,144 @@ genNonEmptyText = Text.pack <$> listOf1 (elements ['a'..'z'])
 
 genNonEmptyList :: Gen a -> Gen (NonEmpty a)
 genNonEmptyList g = NE.fromList <$> listOf1 g
+```
+
+---
+
+## Phase 10 Additions: Domain Error Types (FR-043 through FR-045)
+
+**Added**: 2025-12-15 | **Context**: Error architecture refinement for framework-agnostic handlers
+
+### Problem Statement
+
+The original error design hardcoded `ServerErr ServerError` in `AppError`, coupling handlers to Servant. This prevents handler reuse in other frameworks (Yesod, CLI) and doesn't provide precise HTTP status mapping per OAuth RFC 6749.
+
+### Fixed Error Types (Protocol-Defined)
+
+These types are NOT associated types—they're fixed by the OAuth protocol and safe to expose to clients.
+
+#### AuthorizationError
+
+**Purpose**: OAuth 2.0 protocol errors per RFC 6749 Section 4.1.2.1 and 5.2
+
+**Location**: `MCP.Server.OAuth.Types`
+
+```haskell
+-- | OAuth 2.0 authorization errors with RFC 6749 codes.
+-- Fixed type (protocol-defined), safe to expose to clients.
+data AuthorizationError
+  = InvalidRequest Text           -- 400: Missing/invalid parameter
+  | InvalidClient Text            -- 401: Client authentication failed
+  | InvalidGrant Text             -- 400: Invalid code/token
+  | UnauthorizedClient Text       -- 403: Client not authorized for grant type
+  | UnsupportedGrantType Text     -- 400: Grant type not supported
+  | InvalidScope Text             -- 400: Invalid/unknown scope
+  | AccessDenied Text             -- 403: User denied authorization
+  | ExpiredCode                   -- 400: Authorization code expired
+  | InvalidRedirectUri Text       -- 400: Redirect URI mismatch
+  | PKCEVerificationFailed        -- 400: Code verifier doesn't match challenge
+  deriving (Eq, Show, Generic)
+
+-- | Map to HTTP status and OAuth error response JSON
+authorizationErrorToResponse :: AuthorizationError -> (Status, OAuthErrorResponse)
+authorizationErrorToResponse = \case
+  InvalidRequest msg      -> (status400, OAuthErrorResponse "invalid_request" (Just msg))
+  InvalidClient msg       -> (status401, OAuthErrorResponse "invalid_client" (Just msg))
+  InvalidGrant msg        -> (status400, OAuthErrorResponse "invalid_grant" (Just msg))
+  UnauthorizedClient msg  -> (status403, OAuthErrorResponse "unauthorized_client" (Just msg))
+  UnsupportedGrantType msg-> (status400, OAuthErrorResponse "unsupported_grant_type" (Just msg))
+  InvalidScope msg        -> (status400, OAuthErrorResponse "invalid_scope" (Just msg))
+  AccessDenied msg        -> (status403, OAuthErrorResponse "access_denied" (Just msg))
+  ExpiredCode             -> (status400, OAuthErrorResponse "invalid_grant" (Just "Authorization code expired"))
+  InvalidRedirectUri msg  -> (status400, OAuthErrorResponse "invalid_request" (Just msg))
+  PKCEVerificationFailed  -> (status400, OAuthErrorResponse "invalid_grant" (Just "PKCE verification failed"))
+```
+
+#### ValidationError
+
+**Purpose**: Semantic validation failures at handler level (distinct from parse-time 400s)
+
+**Location**: `MCP.Server.OAuth.Types`
+
+```haskell
+-- | Semantic validation errors.
+-- Distinct from FromJSON/FromHttpApiData parse errors.
+-- Fixed type, safe to expose (no infrastructure secrets).
+data ValidationError
+  = RedirectUriMismatch ClientId RedirectUri  -- redirect_uri doesn't match registered
+  | UnsupportedResponseType Text              -- response_type not supported by client
+  | ClientNotRegistered ClientId              -- client_id not found
+  | MissingRequiredScope Scope                -- required scope not requested
+  | InvalidStateParameter Text                -- state parameter validation failed
+  deriving (Eq, Show, Generic)
+
+-- | Always maps to 400 Bad Request
+validationErrorToResponse :: ValidationError -> (Status, Text)
+validationErrorToResponse = \case
+  RedirectUriMismatch cid _ -> (status400, "redirect_uri does not match registered URIs for " <> unClientId cid)
+  UnsupportedResponseType t -> (status400, "response_type not supported: " <> t)
+  ClientNotRegistered cid   -> (status400, "Client not found: " <> unClientId cid)
+  MissingRequiredScope s    -> (status400, "Required scope missing: " <> unScope s)
+  InvalidStateParameter msg -> (status400, "Invalid state parameter: " <> msg)
+```
+
+### Error Type Categorization
+
+| Error Type | Kind | HTTP Status | Exposure Policy |
+|------------|------|-------------|-----------------|
+| `OAuthStateError m` | Associated | 500 | LOGGED, generic message to client |
+| `AuthBackendError m` | Associated | 401 | LOGGED, generic message to client |
+| `ValidationError` | Fixed | 400 | Safe to expose (no secrets) |
+| `AuthorizationError` | Fixed | 4xx per RFC | Safe to expose (protocol-defined) |
+
+### Boundary Translation Function
+
+**Location**: `MCP.Server.OAuth.Boundary`
+
+```haskell
+-- | Translate domain errors to Servant ServerError.
+-- Security: associated types logged, fixed types exposed.
+domainErrorToServerError
+  :: forall m m' e trace.
+     ( MonadIO m
+     , AsType (OAuthStateError m') e
+     , AsType (AuthBackendError m') e
+     , AsType ValidationError e
+     , AsType AuthorizationError e
+     )
+  => IOTracer trace
+  -> (OAuthBoundaryTrace -> trace)
+  -> e
+  -> m (Maybe ServerError)
+```
+
+### Updated Entity Overview
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                      ERROR ARCHITECTURE                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ASSOCIATED TYPES (implementation-specific, logged not exposed) │
+│  ┌───────────────────────┐  ┌───────────────────────┐          │
+│  │ OAuthStateError m     │  │ AuthBackendError m    │          │
+│  │ - TVar errors         │  │ - LDAP errors         │          │
+│  │ - PostgreSQL errors   │  │ - DB timeout          │          │
+│  │ → HTTP 500 (generic)  │  │ → HTTP 401 (generic)  │          │
+│  └───────────────────────┘  └───────────────────────┘          │
+│                                                                 │
+│  FIXED TYPES (protocol-defined, safe to expose)                 │
+│  ┌───────────────────────┐  ┌───────────────────────┐          │
+│  │ ValidationError       │  │ AuthorizationError    │          │
+│  │ - RedirectUriMismatch │  │ - InvalidClient       │          │
+│  │ - ClientNotRegistered │  │ - InvalidGrant        │          │
+│  │ → HTTP 400            │  │ → HTTP 4xx per RFC    │          │
+│  └───────────────────────┘  └───────────────────────┘          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                    domainErrorToServerError
+                              │
+                              ▼
+                      ServerError (Servant only)
 ```

@@ -7,7 +7,7 @@
 
 ## Summary
 
-Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error, environment, user, and user ID types. `OAuthStateStore` requires `MonadTime m` for expiry filtering. `AuthBackend.validateCredentials` returns `Maybe (UserId, User)` tuple. Handlers requiring both typeclasses use type equality constraints (`AuthBackendUser m ~ OAuthUser m`, `AuthBackendUserId m ~ OAuthUserId m`). Provide reference in-memory (`TVar`) and hard-coded credential implementations. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation. **(Updated 2025-12-15: Added user type polymorphism per spec refinement; reference implementation types colocated with implementations per FR-042)**
+Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error, environment, user, and user ID types. `OAuthStateStore` requires `MonadTime m` for expiry filtering. `AuthBackend.validateCredentials` returns `Maybe (UserId, User)` tuple. Handlers requiring both typeclasses use type equality constraints (`AuthBackendUser m ~ OAuthUser m`, `AuthBackendUserId m ~ OAuthUserId m`). Provide reference in-memory (`TVar`) and hard-coded credential implementations. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation. **(Updated 2025-12-15: Added user type polymorphism per spec refinement; reference implementation types colocated with implementations per FR-042; error architecture refined with four domain error types and domainErrorToServerError boundary function per Phase 10)**
 
 ## Technical Context
 
@@ -70,7 +70,8 @@ src/
 │   │   │   └── Demo.hs       # NEW: Demo credential implementation + AuthUser, UserId, DemoAuthError (Phase 9: colocated)
 │   │   ├── OAuth/
 │   │   │   ├── Store.hs      # NEW: OAuthStateStore typeclass (OAuthUser m, OAuthUserId m) + MonadTime constraint
-│   │   │   ├── Types.hs      # NEW: Newtypes (AuthCodeId, ClientId, etc.), ADTs, `AuthorizationCode userId` (parameterized)
+│   │   │   ├── Types.hs      # NEW: Newtypes (AuthCodeId, ClientId, etc.), ADTs, `AuthorizationCode userId`, AuthorizationError, ValidationError (Phase 10)
+│   │   │   ├── Boundary.hs   # NEW: domainErrorToServerError, OAuthBoundaryTrace (Phase 10)
 │   │   │   └── InMemory.hs   # NEW: TVar-based implementation + OAuthStoreError, OAuthTVarEnv (Phase 9: colocated)
 │   │   └── Time.hs           # NEW: MonadTime instances (IO, test monads)
 │   └── Trace/                # Unchanged
@@ -125,6 +126,7 @@ test/
 | Type Witness Patterns | `specs/004-oauth-auth-typeclasses/plan.md#phase-7` | FR-038 type-directed polymorphism constraint (Phase 7) |
 | User Type Polymorphism | `specs/004-oauth-auth-typeclasses/plan.md#phase-8` | FR-039 through FR-041 user/userId associated types (Phase 8) |
 | Type Colocation | `specs/004-oauth-auth-typeclasses/plan.md#phase-9` | FR-042 reference implementation types in implementation modules (Phase 9) |
+| Error Architecture | `specs/004-oauth-auth-typeclasses/plan.md#phase-10` | FR-043 through FR-045 domain error types and boundary translation (Phase 10) |
 
 ---
 
@@ -746,6 +748,7 @@ The conformance test harness (Phase 5) requires building a WAI `Application` fro
 ```haskell
 -- Common constraint bundle for OAuth handlers
 -- Updated 2025-12-15: Added user type equality constraints per spec refinement
+-- Updated 2025-12-15: Added ValidationError/AuthorizationError, removed ServerError (Phase 10)
 type OAuthHandler m env e =
   ( OAuthStateStore m
   , AuthBackend m
@@ -756,8 +759,12 @@ type OAuthHandler m env e =
   , HasType OAuthConfig env
   , HasType (OAuthStateEnv m) env
   , HasType (AuthBackendEnv m) env
-  , AsType (OAuthStateError m) e
-  , AsType (AuthBackendError m) e
+  -- Four domain error types (Phase 10)
+  , AsType (OAuthStateError m) e   -- Associated: storage failures
+  , AsType (AuthBackendError m) e  -- Associated: auth failures
+  , AsType ValidationError e       -- Fixed: semantic validation
+  , AsType AuthorizationError e    -- Fixed: OAuth protocol errors
+  -- NOTE: NO ServerError constraint; translation happens at boundary
   -- User type equality constraints (FR-039)
   , AuthBackendUser m ~ OAuthUser m
   , AuthBackendUserId m ~ OAuthUserId m
@@ -823,7 +830,9 @@ oauthServer
      , HasType (AuthBackendEnv m) env
      , AsType (OAuthStateError m) e
      , AsType (AuthBackendError m) e
-     , AsType ServerError e  -- For Servant error passthrough
+     , AsType ValidationError e        -- Fixed type (Phase 10)
+     , AsType AuthorizationError e     -- Fixed type (Phase 10)
+     -- NOTE: ServerError NOT in constraints (Phase 10); translation at boundary only
      -- User type equality (FR-039)
      , AuthBackendUser m ~ OAuthUser m
      , AuthBackendUserId m ~ OAuthUserId m
@@ -1756,3 +1765,343 @@ Before marking Phase 9 complete:
 | VI. Property-Based Testing | ✅ | Test fixtures can import concrete types; test specs remain polymorphic |
 
 **Gate Status**: PASS - Phase 9 planning complete.
+
+---
+
+## Phase 10: Error Architecture Refinement (FR-043 through FR-045)
+
+**Added**: 2025-12-15 | **Status**: Planning | **Spec Session**: 2025-12-15
+
+### Problem Statement
+
+The original error handling design hardcoded `AppError` in handler `MonadError` constraints and included `ServerErr ServerError` as a constructor. This creates several issues:
+
+1. **Framework coupling**: Handlers depend on Servant's `ServerError` type
+2. **Imprecise HTTP status mapping**: Generic error types don't map precisely to OAuth RFC 6749 error responses
+3. **Security concerns**: Associated type errors might leak infrastructure details (connection strings, table names)
+4. **Reusability blocked**: Handlers can't be used in non-Servant contexts (Yesod, CLI)
+
+**Spec Refinement** (2025-12-15): Handlers use `AsType` constraints for four domain error types only. `ServerError` appears ONLY in the natural transformation at the Servant boundary.
+
+### Clarified Decisions (from spec session 2025-12-15)
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| ServerError in handlers | PROHIBITED | Handlers are framework-agnostic; ServerError is Servant-specific |
+| Domain error types | Four distinct types | Precise HTTP status mapping per OAuth RFC 6749 |
+| Associated vs fixed | OAuthStateError m, AuthBackendError m (associated); ValidationError, AuthorizationError (fixed) | Storage/auth errors vary by implementation; protocol errors are fixed |
+| Error exposure policy | Associated types logged not exposed; fixed types safe to expose | Security: prevent infrastructure detail leakage |
+| Boundary function | `domainErrorToServerError` in Boundary module | Reusable translation with logging for sensitive errors |
+| Boundary signature | `MonadIO m` + tracer parameter | Function logs internally for security; returns `Maybe ServerError` |
+| Reference AppError | Four constructors, no ServerErr | Natural transformation is total for this type |
+
+### New Requirements (FR-043 through FR-045)
+
+- **FR-043**: `AuthorizationError` type in `OAuth.Types` with RFC 6749 constructors
+- **FR-044**: `ValidationError` type in `OAuth.Types` for semantic validation failures
+- **FR-045**: `domainErrorToServerError` function with `MonadIO m` and tracer for secure logging
+
+### Error Type Taxonomy
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       DOMAIN ERROR TYPES                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ASSOCIATED TYPES (implementation-specific)                             │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ OAuthStateError m                                                │   │
+│  │ - TVar errors, PostgreSQL errors, Redis errors, etc.            │   │
+│  │ - HTTP 500 (generic "Internal Server Error")                    │   │
+│  │ - LOGGED internally, NEVER exposed to clients                   │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ AuthBackendError m                                               │   │
+│  │ - LDAP errors, database errors, account locked, etc.            │   │
+│  │ - HTTP 401 (generic "Authentication failed")                    │   │
+│  │ - LOGGED internally, NEVER exposed to clients                   │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│  FIXED TYPES (protocol-defined, safe to expose)                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ ValidationError                                                  │   │
+│  │ - Semantic validation failures (mismatched redirect_uri, etc.)  │   │
+│  │ - HTTP 400 Bad Request                                          │   │
+│  │ - Safe to expose (no infrastructure secrets)                    │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │ AuthorizationError                                               │   │
+│  │ - RFC 6749 error codes: InvalidClient, InvalidGrant, etc.       │   │
+│  │ - HTTP 4xx per OAuth spec                                       │   │
+│  │ - Safe to expose (protocol-defined responses)                   │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+                              │
+                              │ AsType prisms
+                              ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    COMPOSITE ERROR TYPE (e)                              │
+│  Consumer defines: data AppError = OAuthStateErr ... | AuthBackendErr   │
+│                                  | ValidationErr ... | AuthorizationErr │
+│  NO ServerErr constructor                                               │
+└─────────────────────────────────────────────────────────────────────────┘
+                              │
+                              │ domainErrorToServerError (MonadIO, tracer)
+                              ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    FRAMEWORK BOUNDARY                                    │
+│  Servant: hoistServer with natural transformation                       │
+│  Maybe ServerError → Handler/ServerError                                │
+│  Nothing → fallback 500                                                 │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Implementation Approach
+
+#### Step 1: Define AuthorizationError in OAuth.Types
+
+```haskell
+-- | OAuth 2.0 authorization errors per RFC 6749 Section 4.1.2.1 and 5.2.
+-- Fixed type (protocol-defined), NOT an associated type.
+-- Safe to expose to clients in OAuth error response format.
+data AuthorizationError
+  = InvalidRequest Text           -- 400: Missing/invalid parameter
+  | InvalidClient Text            -- 401: Client authentication failed
+  | InvalidGrant Text             -- 400: Invalid authorization code/refresh token
+  | UnauthorizedClient Text       -- 403: Client not authorized for grant type
+  | UnsupportedGrantType Text     -- 400: Grant type not supported
+  | InvalidScope Text             -- 400: Invalid/unknown/malformed scope
+  | AccessDenied Text             -- 403: User denied authorization
+  | ExpiredCode                   -- 400: Authorization code expired
+  | InvalidRedirectUri Text       -- 400: Redirect URI mismatch
+  | PKCEVerificationFailed        -- 400: Code verifier doesn't match challenge
+  deriving (Eq, Show, Generic)
+
+-- | Map AuthorizationError to HTTP status and OAuth error response
+authorizationErrorToResponse :: AuthorizationError -> (Status, OAuthErrorResponse)
+authorizationErrorToResponse = \case
+  InvalidRequest msg -> (status400, OAuthErrorResponse "invalid_request" (Just msg))
+  InvalidClient msg  -> (status401, OAuthErrorResponse "invalid_client" (Just msg))
+  InvalidGrant msg   -> (status400, OAuthErrorResponse "invalid_grant" (Just msg))
+  -- ... etc per RFC 6749
+```
+
+#### Step 2: Define ValidationError in OAuth.Types
+
+```haskell
+-- | Semantic validation errors at handler level.
+-- Distinct from parse-time 400s (FromJSON/FromHttpApiData).
+-- Fixed type, safe to expose.
+data ValidationError
+  = RedirectUriMismatch ClientId RedirectUri  -- redirect_uri doesn't match registered
+  | UnsupportedResponseType Text              -- response_type not supported by client
+  | ClientNotRegistered ClientId              -- client_id not found
+  | MissingRequiredScope Scope                -- required scope not requested
+  | InvalidStateParameter Text                -- state parameter validation failed
+  deriving (Eq, Show, Generic)
+
+-- | Map ValidationError to HTTP 400 response
+validationErrorToResponse :: ValidationError -> (Status, Text)
+validationErrorToResponse = \case
+  RedirectUriMismatch cid uri -> (status400, "redirect_uri does not match registered URIs for client " <> unClientId cid)
+  -- ... etc
+```
+
+#### Step 3: Define domainErrorToServerError in OAuth.Boundary
+
+```haskell
+module MCP.Server.OAuth.Boundary
+  ( domainErrorToServerError
+  , OAuthBoundaryTrace(..)
+  ) where
+
+import Control.Lens (preview)
+import Data.Generics.Product (AsType(..))
+import Servant.Server (ServerError, err400, err401, err500)
+
+-- | Trace events for boundary error translation
+data OAuthBoundaryTrace
+  = TraceStorageError Text    -- Logged, not exposed
+  | TraceAuthError Text       -- Logged, not exposed
+  | TraceValidationError Text -- May be logged for debugging
+  | TraceAuthzError Text      -- May be logged for debugging
+  deriving (Show)
+
+-- | Translate domain errors to Servant ServerError.
+--
+-- Security policy:
+--   - OAuthStateError m: LOGGED via tracer, returns generic 500
+--   - AuthBackendError m: LOGGED via tracer, returns generic 401
+--   - ValidationError: Safe to expose, returns 400 with details
+--   - AuthorizationError: Safe to expose, returns appropriate 4xx per RFC 6749
+--
+-- Returns Nothing if no prism matches (consumer handles fallback).
+domainErrorToServerError
+  :: forall m m' e trace.
+     ( MonadIO m
+     , AsType (OAuthStateError m') e
+     , AsType (AuthBackendError m') e
+     , AsType ValidationError e
+     , AsType AuthorizationError e
+     )
+  => IOTracer trace
+  -> (OAuthBoundaryTrace -> trace)  -- Embed boundary trace in consumer's trace type
+  -> e
+  -> m (Maybe ServerError)
+domainErrorToServerError tracer embedTrace err = do
+  -- Try each prism in priority order
+
+  -- 1. Storage errors: log and return generic 500
+  case preview (typed @(OAuthStateError m')) err of
+    Just storeErr -> do
+      liftIO $ traceIO tracer $ embedTrace $ TraceStorageError (show storeErr)
+      return $ Just err500 { errBody = "Internal Server Error" }
+    Nothing -> pure ()
+
+  -- 2. Auth backend errors: log and return generic 401
+  case preview (typed @(AuthBackendError m')) err of
+    Just authErr -> do
+      liftIO $ traceIO tracer $ embedTrace $ TraceAuthError (show authErr)
+      return $ Just err401 { errBody = "Authentication failed" }
+    Nothing -> pure ()
+
+  -- 3. Validation errors: safe to expose
+  case preview (typed @ValidationError) err of
+    Just valErr -> do
+      let (status, msg) = validationErrorToResponse valErr
+      return $ Just $ ServerError (statusCode status) (statusMessage status) msg []
+    Nothing -> pure ()
+
+  -- 4. Authorization errors: safe to expose per RFC 6749
+  case preview (typed @AuthorizationError) err of
+    Just authzErr -> do
+      let (status, oauthResp) = authorizationErrorToResponse authzErr
+      return $ Just $ ServerError (statusCode status) (statusMessage status) (encode oauthResp)
+        [("Content-Type", "application/json")]
+    Nothing -> pure ()
+
+  -- No prism matched
+  return Nothing
+```
+
+#### Step 4: Update Reference AppError (remove ServerErr)
+
+```haskell
+-- In MCP.Server.HTTP.AppEnv or similar
+-- Updated 2025-12-15: Removed ServerErr per Phase 10
+
+-- | Composite error type for reference implementation.
+-- Four domain error constructors only (Phase 10).
+data AppError
+  = OAuthStateErr OAuthStoreError     -- From InMemory implementation
+  | AuthBackendErr DemoAuthError      -- From Demo implementation
+  | ValidationErr ValidationError     -- Fixed type from OAuth.Types
+  | AuthorizationErr AuthorizationError  -- Fixed type from OAuth.Types
+  deriving (Eq, Show, Generic)
+
+-- AsType instances for generic-lens
+instance AsType OAuthStoreError AppError where
+  _Typed = _OAuthStateErr
+instance AsType DemoAuthError AppError where
+  _Typed = _AuthBackendErr
+instance AsType ValidationError AppError where
+  _Typed = _ValidationErr
+instance AsType AuthorizationError AppError where
+  _Typed = _AuthorizationErr
+```
+
+#### Step 5: Update Natural Transformation in HTTP.hs
+
+```haskell
+-- | Run polymorphic handlers in Servant's Handler monad.
+-- Uses domainErrorToServerError for domain → HTTP translation.
+runAppM :: AppEnv -> AppM a -> Handler a
+runAppM env action = do
+  result <- liftIO $ runExceptT $ runReaderT action env
+  case result of
+    Right a -> return a
+    Left err -> do
+      -- Use boundary function for secure error translation
+      mServerErr <- liftIO $ domainErrorToServerError
+        (envTracer env)
+        HTTPBoundaryTrace  -- Embed in HTTP trace type
+        err
+      case mServerErr of
+        Just serverErr -> throwError serverErr
+        Nothing -> throwError err500 { errBody = "Unknown error" }  -- Fallback
+```
+
+### Updated Module Organization
+
+```text
+src/MCP/Server/OAuth/
+├── Types.hs              # MODIFIED: Add AuthorizationError, ValidationError
+├── Store.hs              # OAuthStateStore typeclass
+├── InMemory.hs           # TVar-based implementation
+├── Boundary.hs           # NEW: domainErrorToServerError, OAuthBoundaryTrace
+├── Server.hs             # Polymorphic oauthServer (no ServerError constraints)
+└── Handlers/             # Individual handlers (no ServerError constraints)
+
+src/MCP/Server/HTTP/
+├── AppEnv.hs             # MODIFIED: AppError without ServerErr
+└── ...
+```
+
+### Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/MCP/Server/OAuth/Types.hs` | Add `AuthorizationError`, `ValidationError` types |
+| `src/MCP/Server/OAuth/Boundary.hs` | NEW: `domainErrorToServerError` function |
+| `src/MCP/Server/HTTP/AppEnv.hs` | Remove `ServerErr` from `AppError` |
+| `src/MCP/Server/HTTP.hs` | Update `runAppM` to use `domainErrorToServerError` |
+| `src/MCP/Server/OAuth/Server.hs` | Update constraints (already done in Phase 6 section) |
+| `src/MCP/Server/OAuth/Handlers/*.hs` | Update error throwing to use domain types |
+
+### Error Throwing Patterns
+
+**Before** (hardcoded ServerError):
+```haskell
+handleToken req = do
+  case lookupCode codeId of
+    Nothing -> throwError err400 { errBody = "invalid_grant" }  -- WRONG
+```
+
+**After** (domain error types):
+```haskell
+handleToken
+  :: (AsType AuthorizationError e, MonadError e m, ...)
+  => TokenRequest -> m TokenResponse
+handleToken req = do
+  case lookupCode codeId of
+    Nothing -> throwError $ injectTyped $ InvalidGrant "Authorization code not found"
+```
+
+### Verification Checklist
+
+Before marking Phase 10 complete:
+
+- [ ] `AuthorizationError` defined in `OAuth.Types` with all RFC 6749 constructors
+- [ ] `ValidationError` defined in `OAuth.Types`
+- [ ] `domainErrorToServerError` implemented in `OAuth.Boundary`
+- [ ] `AppError` has exactly 4 constructors (no `ServerErr`)
+- [ ] No handler imports `Servant.Server (ServerError)`
+- [ ] No handler constraint includes `AsType ServerError e`
+- [ ] `runAppM` uses `domainErrorToServerError` for translation
+- [ ] Storage/auth errors are logged, not exposed (verify with test)
+- [ ] Validation/authorization errors return correct HTTP status codes
+- [ ] Build succeeds with no ServerError in handler modules
+
+### Constitution Compliance (Phase 10)
+
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. Type-Driven Design | ✅ | Four distinct error types encode semantics at type level; `AsType` constraints compose precisely |
+| II. Deep Module Architecture | ✅ | Error translation isolated in Boundary module; handlers don't know about ServerError |
+| III. Denotational Semantics | ✅ | Each error type has clear semantic meaning; mapping to HTTP status is deterministic |
+| IV. Total Functions | ✅ | `domainErrorToServerError` returns `Maybe` (total); caller handles `Nothing` |
+| V. Pure Core, Impure Shell | ✅ | Handlers throw pure domain errors; IO logging happens at boundary |
+| VI. Property-Based Testing | ✅ | Can test error mapping: each domain error → expected HTTP status |
+
+**Gate Status**: PASS - Phase 10 planning complete.
