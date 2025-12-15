@@ -125,14 +125,14 @@ The OAuth implementation uses a **typeclass-based architecture** for pluggable b
 
 **OAuthStateStore** (`MCP.Server.OAuth.Store`):
 - Manages OAuth state persistence (codes, tokens, clients, sessions)
-- Associated types: `OAuthStateError m`, `OAuthStateEnv m`
+- Associated types: `OAuthStateError m`, `OAuthStateEnv m`, `OAuthUser m`, `OAuthUserId m`
 - Methods: `storeAuthCode`, `lookupAuthCode`, `deleteAuthCode`, `storeAccessToken`, `lookupAccessToken`, `storeRefreshToken`, `lookupRefreshToken`, `updateRefreshToken`, `storeClient`, `lookupClient`, `storePendingAuth`, `lookupPendingAuth`, `deletePendingAuth`
 - Default: In-memory TVar implementation (`MCP.Server.OAuth.InMemory`)
 
 **AuthBackend** (`MCP.Server.Auth.Backend`):
-- Validates user credentials
-- Associated types: `AuthBackendError m`, `AuthBackendEnv m`
-- Method: `validateCredentials :: Username -> PlaintextPassword -> m Bool`
+- Validates user credentials and returns authenticated user data
+- Associated types: `AuthBackendError m`, `AuthBackendEnv m`, `AuthBackendUser m`, `AuthBackendUserId m`
+- Method: `validateCredentials :: Username -> PlaintextPassword -> m (Maybe (AuthBackendUserId m, AuthBackendUser m))`
 - Default: Demo hardcoded credentials (`MCP.Server.Auth.Demo`)
 
 **MonadTime** (`MCP.Server.Time`):
@@ -173,7 +173,7 @@ Uses `generic-lens` with `HasType` constraints for composable environment/error 
 ### Key Data Types:
 - **HTTPServerConfig** - Server config with httpBaseUrl, httpProtocolVersion
 - **OAuthConfig** - OAuth settings (timing, demo settings, parameters)
-- **AuthorizationCode** - PKCE code with expiry, client, user, scopes
+- **AuthorizationCode userId** - PKCE code with expiry, client, user, scopes (parameterized by user ID type)
 - **ClientInfo** - Registered client metadata (redirect URIs, grant types)
 - **PendingAuthorization** - OAuth params awaiting login approval
 - **AuthUser** - Authenticated user (ToJWT/FromJWT)
@@ -186,6 +186,8 @@ Uses `generic-lens` with `HasType` constraints for composable environment/error 
 instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT PostgresEnv m) where
   type OAuthStateError (ReaderT PostgresEnv m) = SqlError
   type OAuthStateEnv (ReaderT PostgresEnv m) = PostgresEnv
+  type OAuthUser (ReaderT PostgresEnv m) = DbUser      -- Your user type
+  type OAuthUserId (ReaderT PostgresEnv m) = DbUserId  -- Your user ID type
   storeAuthCode = ...  -- INSERT into auth_codes table
   lookupAuthCode = ... -- SELECT with expiry check
 ```
@@ -195,7 +197,19 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT PostgresEnv m) whe
 instance MonadIO m => AuthBackend (ReaderT LdapConfig m) where
   type AuthBackendError (ReaderT LdapConfig m) = LdapError
   type AuthBackendEnv (ReaderT LdapConfig m) = LdapConfig
-  validateCredentials user pass = ldapBind user pass
+  type AuthBackendUser (ReaderT LdapConfig m) = LdapUser    -- Your user type
+  type AuthBackendUserId (ReaderT LdapConfig m) = LdapUid   -- Your user ID type
+  validateCredentials user pass = do
+    result <- ldapBind user pass
+    pure $ fmap (\u -> (ldapUid u, u)) result  -- Return (userId, user) tuple
+```
+
+**Type Bridging**: When using both typeclasses together, ensure the associated types align:
+```haskell
+-- Handlers requiring both backends use type equality constraints:
+handleLogin :: (AuthBackend m, OAuthStateStore m,
+                AuthBackendUser m ~ OAuthUser m,
+                AuthBackendUserId m ~ OAuthUserId m) => ...
 ```
 
 ### Important Implementation Notes:
