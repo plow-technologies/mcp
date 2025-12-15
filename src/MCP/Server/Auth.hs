@@ -25,9 +25,6 @@ module MCP.Server.Auth (
     -- * AuthBackend typeclass (re-exported from MCP.Server.Auth.Backend)
     module MCP.Server.Auth.Backend,
 
-    -- * Demo implementation (re-exported from MCP.Server.Auth.Demo)
-    module MCP.Server.Auth.Demo,
-
     -- * OAuth Configuration
     OAuthConfig (..),
     OAuthProvider (..),
@@ -61,7 +58,6 @@ module MCP.Server.Auth (
 
 -- Re-exports
 import MCP.Server.Auth.Backend
-import MCP.Server.Auth.Demo
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Crypto.Hash (hashWith)

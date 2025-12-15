@@ -11,6 +11,7 @@ import Data.Time.Format (defaultTimeLocale, parseTimeM)
 
 -- Old Auth module (for existing tests)
 import MCP.Server.Auth qualified as Auth
+import MCP.Server.Auth.Demo qualified as Auth
 
 -- New typeclass modules (for law tests)
 import MCP.Server.Auth.Backend (Username (..), mkPlaintextPassword)
