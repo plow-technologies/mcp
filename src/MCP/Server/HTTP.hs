@@ -69,19 +69,17 @@ import Control.Monad (when)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
 import MCP.Server.Auth (OAuthConfig (..), OAuthProvider (..), ProtectedResourceMetadata (..))
-import MCP.Server.Auth.Demo (defaultDemoCredentialStore)
+import MCP.Server.Auth.Demo (AuthUser (..), DemoCredentialEnv (..), defaultDemoCredentialStore)
 
 -- Import AuthBackend instance for AppM
 import MCP.Server.HTTP.AppEnv (AppEnv (..), HTTPServerConfig (..), runAppM)
 
 -- Import OAuthAPI from OAuth.Server (migration from duplication)
-
-import MCP.Server.Auth.Demo (AuthUser (..), DemoCredentialEnv (..))
 import MCP.Server.OAuth.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
 import MCP.Server.OAuth.Server (LoginForm (..), OAuthAPI)
 import MCP.Server.OAuth.Server qualified as OAuthServer
 import MCP.Server.OAuth.Store ()
-import MCP.Server.OAuth.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
+import MCP.Server.OAuth.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthErrorResponse (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Operation (OperationTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
@@ -197,10 +195,11 @@ mcpApp config tracer stateVar oauthEnv jwtSettings =
             BadPassword -> do
                 liftIO $ traceWith httpTracer $ HTTPAuthFailure "Bad password"
                 liftIO $ traceWith httpTracer $ HTTPAuthRequired "/mcp"
+                -- Throw domain error with WWW-Authenticate header
                 throwError $
                     err401
                         { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
-                        , errBody = encode $ object ["error" .= ("Authentication required" :: Text)]
+                        , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
                         }
             NoSuchUser -> do
                 liftIO $ traceWith httpTracer $ HTTPAuthFailure "No such user"
@@ -208,7 +207,7 @@ mcpApp config tracer stateVar oauthEnv jwtSettings =
                 throwError $
                     err401
                         { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
-                        , errBody = encode $ object ["error" .= ("Authentication required" :: Text)]
+                        , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
                         }
             Indefinite -> do
                 liftIO $ traceWith httpTracer $ HTTPAuthFailure "Authentication indefinite"
@@ -216,7 +215,7 @@ mcpApp config tracer stateVar oauthEnv jwtSettings =
                 throwError $
                     err401
                         { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
-                        , errBody = encode $ object ["error" .= ("Authentication required" :: Text)]
+                        , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
                         }
       where
         metadataUrl = httpBaseUrl httpConfig <> "/.well-known/oauth-protected-resource"

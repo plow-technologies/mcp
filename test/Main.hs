@@ -39,6 +39,9 @@ import Trace.RenderSpec qualified as RenderSpec
 -- Unit tests
 import MCP.Server.OAuth.TypesSpec qualified as TypesSpec
 
+-- HTTP endpoint tests
+import MCP.Server.HTTP.McpAuthSpec qualified as McpAuthSpec
+
 -- Functional tests
 import Functional.OAuthFlowSpec qualified as OAuthFlowSpec
 
@@ -84,6 +87,9 @@ spec = do
 
     -- Unit tests
     TypesSpec.spec
+
+    -- HTTP endpoint tests
+    McpAuthSpec.spec
 
     -- Boundary layer tests (Servant FromHttpApiData/ToHttpApiData)
     BoundarySpec.spec
