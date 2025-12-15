@@ -398,7 +398,10 @@ class (Monad m) => AuthBackend m where
 
     {- | Validate user credentials.
 
-    Returns 'True' if the username/password pair is valid, 'False' otherwise.
+    Returns 'Just (userId, user)' if the username/password pair is valid,
+    'Nothing' otherwise. The returned tuple contains both the user identifier
+    (for embedding in authorization codes) and the full user object (for token
+    generation).
 
     == Semantics
 
@@ -422,10 +425,16 @@ class (Monad m) => AuthBackend m where
     validateCredentials username password = do
       store <- asks credentialStore
       case Map.lookup username (storeCredentials store) of
-        Nothing -> pure False  -- User not found (same as invalid password)
+        Nothing -> pure Nothing  -- User not found (same as invalid password)
         Just hash -> do
           let candidateHash = mkHashedPassword (storeSalt store) password
-          pure $ hash == candidateHash  -- Constant-time via ScrubbedBytes Eq
+          if hash == candidateHash  -- Constant-time via ScrubbedBytes Eq
+            then do
+              -- Extract user data from store
+              let userId = userIdFromUsername username
+              let user = userFromUsername username
+              pure $ Just (userId, user)
+            else pure Nothing
     @
     -}
-    validateCredentials :: Username -> PlaintextPassword -> m Bool
+    validateCredentials :: Username -> PlaintextPassword -> m (Maybe (AuthBackendUserId m, AuthBackendUser m))

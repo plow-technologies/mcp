@@ -278,6 +278,7 @@ test-suite mcp-test
         Laws.OAuthUserTypeSpec
         Laws.AuthBackendSpec
         Laws.AuthBackendAssociatedTypesSpec
+        Laws.AuthBackendSignatureSpec
         Laws.BoundarySpec
         Trace.FilterSpec
         Trace.GoldenSpec
