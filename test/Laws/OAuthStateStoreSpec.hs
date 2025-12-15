@@ -59,7 +59,6 @@ import Generators ()
 import MCP.Server.OAuth.Store (OAuthStateStore (..))
 import MCP.Server.OAuth.Types (
     AccessTokenId,
-    AuthUser,
     AuthorizationCode (..),
     ClientId,
     ClientInfo,
@@ -102,7 +101,14 @@ runInMemory action = do
 -}
 oauthStateStoreLaws ::
     forall m.
-    (OAuthStateStore m, Arbitrary (OAuthUserId m), Eq (OAuthUserId m), Show (OAuthUserId m)) =>
+    ( OAuthStateStore m
+    , Arbitrary (OAuthUserId m)
+    , Eq (OAuthUserId m)
+    , Show (OAuthUserId m)
+    , Arbitrary (OAuthUser m)
+    , Eq (OAuthUser m)
+    , Show (OAuthUser m)
+    ) =>
     -- | Runner function to execute 'm' in 'IO'
     (forall a. m a -> IO a) ->
     Spec
@@ -222,14 +228,14 @@ oauthStateStoreLaws runM = describe "OAuthStateStore laws" $ do
 
     describe "AccessToken" $ do
         prop "round-trip: lookup after store returns the value" $
-            \(tokenId :: AccessTokenId) (user :: AuthUser) -> ioProperty $ do
+            \(tokenId :: AccessTokenId) (user :: OAuthUser m) -> ioProperty $ do
                 result <- runM $ do
                     storeAccessToken tokenId user
                     lookupAccessToken tokenId
                 pure $ result === Just user
 
         prop "idempotence: store twice is same as store once" $
-            \(tokenId :: AccessTokenId) (user :: AuthUser) -> ioProperty $ do
+            \(tokenId :: AccessTokenId) (user :: OAuthUser m) -> ioProperty $ do
                 result <- runM $ do
                     storeAccessToken tokenId user
                     storeAccessToken tokenId user
@@ -237,7 +243,7 @@ oauthStateStoreLaws runM = describe "OAuthStateStore laws" $ do
                 pure $ result === Just user
 
         prop "overwrite: second store with same key replaces first" $
-            \(tokenId :: AccessTokenId) (user1 :: AuthUser) (user2 :: AuthUser) -> ioProperty $ do
+            \(tokenId :: AccessTokenId) (user1 :: OAuthUser m) (user2 :: OAuthUser m) -> ioProperty $ do
                 result <- runM $ do
                     storeAccessToken tokenId user1
                     storeAccessToken tokenId user2
@@ -246,14 +252,14 @@ oauthStateStoreLaws runM = describe "OAuthStateStore laws" $ do
 
     describe "RefreshToken" $ do
         prop "round-trip: lookup after store returns the value" $
-            \(tokenId :: RefreshTokenId) (clientId :: ClientId) (user :: AuthUser) -> ioProperty $ do
+            \(tokenId :: RefreshTokenId) (clientId :: ClientId) (user :: OAuthUser m) -> ioProperty $ do
                 result <- runM $ do
                     storeRefreshToken tokenId (clientId, user)
                     lookupRefreshToken tokenId
                 pure $ result === Just (clientId, user)
 
         prop "idempotence: store twice is same as store once" $
-            \(tokenId :: RefreshTokenId) (clientId :: ClientId) (user :: AuthUser) -> ioProperty $ do
+            \(tokenId :: RefreshTokenId) (clientId :: ClientId) (user :: OAuthUser m) -> ioProperty $ do
                 result <- runM $ do
                     storeRefreshToken tokenId (clientId, user)
                     storeRefreshToken tokenId (clientId, user)
@@ -261,7 +267,7 @@ oauthStateStoreLaws runM = describe "OAuthStateStore laws" $ do
                 pure $ result === Just (clientId, user)
 
         prop "overwrite: second store with same key replaces first" $
-            \(tokenId :: RefreshTokenId) (c1 :: ClientId) (u1 :: AuthUser) (c2 :: ClientId) (u2 :: AuthUser) -> ioProperty $ do
+            \(tokenId :: RefreshTokenId) (c1 :: ClientId) (u1 :: OAuthUser m) (c2 :: ClientId) (u2 :: OAuthUser m) -> ioProperty $ do
                 result <- runM $ do
                     storeRefreshToken tokenId (c1, u1)
                     storeRefreshToken tokenId (c2, u2)
@@ -269,7 +275,7 @@ oauthStateStoreLaws runM = describe "OAuthStateStore laws" $ do
                 pure $ result === Just (c2, u2)
 
         prop "updateRefreshToken: overwrite semantics" $
-            \(tokenId :: RefreshTokenId) (c1 :: ClientId) (u1 :: AuthUser) (c2 :: ClientId) (u2 :: AuthUser) -> ioProperty $ do
+            \(tokenId :: RefreshTokenId) (c1 :: ClientId) (u1 :: OAuthUser m) (c2 :: ClientId) (u2 :: OAuthUser m) -> ioProperty $ do
                 result <- runM $ do
                     storeRefreshToken tokenId (c1, u1)
                     updateRefreshToken tokenId (c2, u2)

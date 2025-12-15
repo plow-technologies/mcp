@@ -1,6 +1,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 {- |
 Module      : MCP.Server.OAuth.Test.Internal
@@ -87,7 +88,11 @@ import System.Random (newStdGen, randomRs)
 import Test.Hspec (Spec, describe, expectationFailure, it, runIO, shouldSatisfy)
 import Test.Hspec.Wai (WaiSession, get, liftIO, postHtmlForm, request, shouldRespondWith, with)
 
+import MCP.Server.Auth.Backend (AuthBackend (..))
+import MCP.Server.OAuth.Store (OAuthStateStore (..))
 import MCP.Server.OAuth.Types (AuthCodeId (..), ClientId (..), mkAuthCodeId)
+import MCP.Server.Time (MonadTime)
+import Servant.Auth.Server (ToJWT)
 
 -- -----------------------------------------------------------------------------
 -- Test Configuration Types
@@ -1164,9 +1169,35 @@ The TestConfig must provide:
 - 'tcMakeApp': Create Application with time control
 - 'tcRunM': Execute monad stack in IO
 - 'tcCredentials': Valid test credentials matching configured AuthBackend
+
+== Type Constraints (Phase 8: FR-039)
+
+The function requires type equality constraints to bridge AuthBackend and
+OAuthStateStore user types, ensuring handlers can flow user identity from
+authentication to token storage.
+
+Note: The constraints are currently unused but required for future test
+extensions. The redundant-constraints warning is suppressed to allow
+forward-compatible type signatures.
 -}
-oauthConformanceSpec :: TestConfig m -> Spec
+oauthConformanceSpec ::
+    forall m.
+    ( OAuthStateStore m
+    , AuthBackend m
+    , MonadTime m
+    , AuthBackendUser m ~ OAuthUser m
+    , AuthBackendUserId m ~ OAuthUserId m
+    , ToJWT (OAuthUser m)
+    ) =>
+    TestConfig m ->
+    Spec
 oauthConformanceSpec config = describe "OAuth Conformance Suite" $ do
+    -- Type witness: compile-time verification that constraints hold
+    -- This ensures the test suite can be extended to use these constraints
+    -- without breaking existing tests.
+    let _typeWitness :: Maybe (AuthBackendUser m, AuthBackendUserId m)
+        _typeWitness = Nothing :: Maybe (OAuthUser m, OAuthUserId m)
+
     clientRegistrationSpec config
     loginFlowSpec config
     tokenExchangeSpec config
