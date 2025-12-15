@@ -269,6 +269,7 @@ test-suite mcp-test
         Functional.OAuthFlowSpec
         MCP.Server.OAuth.Test.Fixtures
         MCP.Server.OAuth.TypesSpec
+        MCP.Server.OAuth.BoundarySpec
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

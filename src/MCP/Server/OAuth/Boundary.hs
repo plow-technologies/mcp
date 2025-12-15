@@ -1,3 +1,11 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE UndecidableInstances #-}
+
 {- |
 Module      : MCP.Server.OAuth.Boundary
 Description : Boundary conversion functions between Text and typed OAuth newtypes
@@ -54,14 +62,30 @@ module MCP.Server.OAuth.Boundary (
     scopeToText,
     codeChallengeToText,
 
+    -- * Error Boundary Translation
+    OAuthBoundaryTrace (..),
+    domainErrorToServerError,
+
     -- * Re-exports from MCP.Server.OAuth.Types
     module MCP.Server.OAuth.Types,
 ) where
 
+import Control.Monad.IO.Class (MonadIO (..))
+import Data.Aeson (encode)
+import Data.ByteString.Lazy qualified as BL
+import Data.Functor.Const (Const (..))
+import Data.Generics.Sum (AsType (..))
+import Data.Monoid (First (..))
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
+import MCP.Server.Auth.Backend (AuthBackend (..))
+import MCP.Server.OAuth.Store (OAuthStateStore (..))
 import MCP.Server.OAuth.Types
+import Network.HTTP.Types.Status (Status, statusCode)
 import Network.URI (parseURI)
+import Plow.Logging (IOTracer (..), traceWith)
+import Servant.Server (ServerError (..), err401, err500)
 
 -- -----------------------------------------------------------------------------
 -- Unsafe Constructors
@@ -175,3 +199,114 @@ scopeToText = unScope
 -- | Extract Text from CodeChallenge
 codeChallengeToText :: CodeChallenge -> Text
 codeChallengeToText = unCodeChallenge
+
+-- -----------------------------------------------------------------------------
+-- Error Boundary Translation
+-- -----------------------------------------------------------------------------
+
+{- | Trace events for boundary error translation.
+
+These events are logged for observability but never exposed to clients.
+-}
+data OAuthBoundaryTrace
+    = -- | OAuth state storage error (details hidden from client)
+      BoundaryStoreError Text
+    | -- | Authentication backend error (details hidden from client)
+      BoundaryAuthError Text
+    | -- | Validation error (safe to expose)
+      BoundaryValidationError ValidationError
+    | -- | Authorization error (safe to expose)
+      BoundaryAuthorizationError AuthorizationError
+    deriving (Eq, Show)
+
+{- | Translate domain errors to Servant ServerError with security-conscious handling.
+
+This function uses generic-lens 'AsType' constraints to pattern match on
+different error types and translate them appropriately:
+
+* **OAuthStateError**: Logs details, returns generic 500 (no details exposed)
+* **AuthBackendError**: Logs details, returns generic 401 (no details exposed)
+* **ValidationError**: Returns descriptive 400 (safe to expose)
+* **AuthorizationError**: Returns OAuth error response (safe to expose)
+
+== Returns
+
+* @Just ServerError@: If the error matches one of the prisms
+* @Nothing@: If the error doesn't match any prism (caller handles it)
+-}
+domainErrorToServerError ::
+    forall m m' e trace.
+    ( MonadIO m
+    , AsType (OAuthStateError m') e
+    , AsType (AuthBackendError m') e
+    , AsType ValidationError e
+    , AsType AuthorizationError e
+    , Show (OAuthStateError m')
+    , Show (AuthBackendError m')
+    ) =>
+    IOTracer trace ->
+    (OAuthBoundaryTrace -> trace) ->
+    e ->
+    m (Maybe ServerError)
+domainErrorToServerError tracer inject err =
+    -- Try each prism in order
+    case tryOAuthStateError err of
+        Just storeErr -> do
+            -- Log details but return generic 500
+            liftIO $ traceWith tracer $ inject $ BoundaryStoreError $ T.pack $ show storeErr
+            pure $ Just $ err500{errBody = "Internal server error"}
+        Nothing -> case tryAuthBackendError err of
+            Just authErr -> do
+                -- Log details but return generic 401
+                liftIO $ traceWith tracer $ inject $ BoundaryAuthError $ T.pack $ show authErr
+                pure $ Just $ err401{errBody = "Unauthorized"}
+            Nothing -> case tryValidationError err of
+                Just validationErr -> do
+                    -- Validation errors are safe to expose
+                    let (status, message) = validationErrorToResponse validationErr
+                    pure $ Just $ toServerError status message
+                Nothing -> case tryAuthorizationError err of
+                    Just authzErr -> do
+                        -- Authorization errors are safe to expose (OAuth format)
+                        let (status, oauthResp) = authorizationErrorToResponse authzErr
+                        pure $ Just $ toServerErrorOAuth status oauthResp
+                    Nothing ->
+                        -- No prism matched
+                        pure Nothing
+  where
+    -- Try to extract OAuthStateError using AsType prism
+    -- Using Const (First a) to properly extract 'a' from sum type 'e'
+    tryOAuthStateError :: e -> Maybe (OAuthStateError m')
+    tryOAuthStateError = getFirst . getConst . (_Typed @(OAuthStateError m') @e) (Const . First . Just)
+
+    -- Try to extract AuthBackendError using AsType prism
+    tryAuthBackendError :: e -> Maybe (AuthBackendError m')
+    tryAuthBackendError = getFirst . getConst . (_Typed @(AuthBackendError m') @e) (Const . First . Just)
+
+    -- Try to extract ValidationError using AsType prism
+    tryValidationError :: e -> Maybe ValidationError
+    tryValidationError = getFirst . getConst . (_Typed @ValidationError @e) (Const . First . Just)
+
+    -- Try to extract AuthorizationError using AsType prism
+    tryAuthorizationError :: e -> Maybe AuthorizationError
+    tryAuthorizationError = getFirst . getConst . (_Typed @AuthorizationError @e) (Const . First . Just)
+
+    -- Convert Status + Text to ServerError
+    toServerError :: Network.HTTP.Types.Status.Status -> Text -> ServerError
+    toServerError status message =
+        ServerError
+            { errHTTPCode = fromIntegral $ statusCode status
+            , errReasonPhrase = ""
+            , errBody = BL.fromStrict $ TE.encodeUtf8 message
+            , errHeaders = [("Content-Type", "text/plain; charset=utf-8")]
+            }
+
+    -- Convert Status + OAuthErrorResponse to ServerError
+    toServerErrorOAuth :: Network.HTTP.Types.Status.Status -> OAuthErrorResponse -> ServerError
+    toServerErrorOAuth status oauthResp =
+        ServerError
+            { errHTTPCode = fromIntegral $ statusCode status
+            , errReasonPhrase = ""
+            , errBody = encode oauthResp
+            , errHeaders = [("Content-Type", "application/json; charset=utf-8")]
+            }
