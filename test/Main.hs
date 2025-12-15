@@ -40,6 +40,9 @@ import Trace.RenderSpec qualified as RenderSpec
 -- Unit tests
 import MCP.Server.OAuth.TypesSpec qualified as TypesSpec
 
+-- OAuth App tests
+import MCP.Server.OAuth.AppSpec qualified as AppSpec
+
 -- HTTP endpoint tests
 import MCP.Server.HTTP.McpAuthSpec qualified as McpAuthSpec
 
@@ -88,6 +91,9 @@ spec = do
 
     -- Unit tests
     TypesSpec.spec
+
+    -- OAuth App tests
+    AppSpec.spec
 
     -- HTTP endpoint tests
     McpAuthSpec.spec
