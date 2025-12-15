@@ -2,7 +2,6 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
 
 {- |
 Module      : MCP.Server.OAuth.Test.Fixtures
@@ -49,15 +48,14 @@ import Control.Monad.Reader (MonadReader, ReaderT, ask)
 import Data.Time.Clock (UTCTime, addUTCTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeOrError)
 import Plow.Logging (IOTracer (..), Tracer (..))
-import Servant (Context (..), Proxy (..), hoistServerWithContext, serveWithContext)
-import Servant.Auth.Server (CookieSettings, JWTSettings, defaultCookieSettings, defaultJWTSettings, generateKey)
+import Servant.Auth.Server (defaultJWTSettings, generateKey)
 import Servant.Server.Internal.Handler (runHandler)
 
 import MCP.Server.Auth.Demo (DemoCredentialEnv (..), defaultDemoCredentialStore)
 import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata)
 import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, runAppM)
+import MCP.Server.OAuth.App (mcpApp)
 import MCP.Server.OAuth.InMemory (defaultExpiryConfig, newOAuthTVarEnv)
-import MCP.Server.OAuth.Server (OAuthAPI, oauthServer)
 import MCP.Server.OAuth.Test.Internal (TestConfig (..), TestCredentials (..))
 import MCP.Server.Time (MonadTime (..))
 import MCP.Types (Implementation (..), ServerCapabilities (..), ToolsCapability (..))
@@ -191,7 +189,7 @@ spec = do
 * Creates fresh OAuth state for each test via 'tcMakeApp'
 * Uses demo credentials (demo/demo123)
 * Provides time advancement via TVar manipulation
-* Integrates AppM with Servant via hoistServerWithContext
+* Uses polymorphic mcpApp entry point from MCP.Server.OAuth.App
 -}
 referenceTestConfig :: IO (TestConfig AppM)
 referenceTestConfig = do
@@ -202,20 +200,9 @@ referenceTestConfig = do
             -- Create fresh environment
             env <- mkTestEnv timeTVar
 
-            -- Build actual WAI Application using the migrated architecture
-            let jwtSettings = envJWT env
-                cookieSettings = defaultCookieSettings
-                ctx = cookieSettings :. jwtSettings :. EmptyContext
-                app =
-                    serveWithContext
-                        (Proxy @OAuthAPI)
-                        ctx
-                        ( hoistServerWithContext
-                            (Proxy @OAuthAPI)
-                            (Proxy @'[CookieSettings, JWTSettings])
-                            (runAppM env)
-                            oauthServer
-                        )
+            -- Build actual WAI Application using mcpApp polymorphic entry point
+            -- The natural transformation is runAppM env :: forall a. AppM a -> Handler a
+            let app = mcpApp (runAppM env)
 
             -- Time advancement callback - modifies the TVar that controls currentTime
             let advanceTime dt = atomically $ modifyTVar' timeTVar (addUTCTime dt)
