@@ -41,6 +41,9 @@ module MCP.Server.HTTP (
     renderErrorPage,
     scopeToDescription,
     formatScopeDescriptions,
+
+    -- * Handlers (for testing)
+    mcpServerAuth,
 ) where
 
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
@@ -186,43 +189,44 @@ mcpApp config tracer stateVar oauthEnv jwtSettings =
                 (runAppM appEnv)
                 OAuthServer.oauthServer
 
-    mcpServerAuth :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> AuthResult AuthUser -> Aeson.Value -> Handler Aeson.Value
-    mcpServerAuth httpConfig httpTracer stateTVar authResult requestValue =
-        case authResult of
-            Authenticated user -> do
-                liftIO $ traceWith httpTracer $ HTTPAuthSuccess (unUserId $ userUserId user)
-                handleHTTPRequest httpConfig httpTracer stateTVar (Just user) requestValue
-            BadPassword -> do
-                liftIO $ traceWith httpTracer $ HTTPAuthFailure "Bad password"
-                liftIO $ traceWith httpTracer $ HTTPAuthRequired "/mcp"
-                -- Throw domain error with WWW-Authenticate header
-                throwError $
-                    err401
-                        { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
-                        , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
-                        }
-            NoSuchUser -> do
-                liftIO $ traceWith httpTracer $ HTTPAuthFailure "No such user"
-                liftIO $ traceWith httpTracer $ HTTPAuthRequired "/mcp"
-                throwError $
-                    err401
-                        { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
-                        , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
-                        }
-            Indefinite -> do
-                liftIO $ traceWith httpTracer $ HTTPAuthFailure "Authentication indefinite"
-                liftIO $ traceWith httpTracer $ HTTPAuthRequired "/mcp"
-                throwError $
-                    err401
-                        { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
-                        , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
-                        }
-      where
-        metadataUrl = httpBaseUrl httpConfig <> "/.well-known/oauth-protected-resource"
-        wwwAuthenticateValue = TE.encodeUtf8 $ "Bearer resource_metadata=\"" <> metadataUrl <> "\""
-
     mcpServerNoAuth :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> Aeson.Value -> Handler Aeson.Value
     mcpServerNoAuth httpConfig httpTracer stateTVar = handleHTTPRequest httpConfig httpTracer stateTVar Nothing
+
+-- | MCP server handler with JWT authentication
+mcpServerAuth :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> AuthResult AuthUser -> Aeson.Value -> Handler Aeson.Value
+mcpServerAuth httpConfig httpTracer stateTVar authResult requestValue =
+    case authResult of
+        Authenticated user -> do
+            liftIO $ traceWith httpTracer $ HTTPAuthSuccess (unUserId $ userUserId user)
+            handleHTTPRequest httpConfig httpTracer stateTVar (Just user) requestValue
+        BadPassword -> do
+            liftIO $ traceWith httpTracer $ HTTPAuthFailure "Bad password"
+            liftIO $ traceWith httpTracer $ HTTPAuthRequired "/mcp"
+            -- Throw domain error with WWW-Authenticate header
+            throwError $
+                err401
+                    { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
+                    , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
+                    }
+        NoSuchUser -> do
+            liftIO $ traceWith httpTracer $ HTTPAuthFailure "No such user"
+            liftIO $ traceWith httpTracer $ HTTPAuthRequired "/mcp"
+            throwError $
+                err401
+                    { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
+                    , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
+                    }
+        Indefinite -> do
+            liftIO $ traceWith httpTracer $ HTTPAuthFailure "Authentication indefinite"
+            liftIO $ traceWith httpTracer $ HTTPAuthRequired "/mcp"
+            throwError $
+                err401
+                    { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
+                    , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
+                    }
+  where
+    metadataUrl = httpBaseUrl httpConfig <> "/.well-known/oauth-protected-resource"
+    wwwAuthenticateValue = TE.encodeUtf8 $ "Bearer resource_metadata=\"" <> metadataUrl <> "\""
 
 -- | Handle HTTP MCP requests following the MCP transport protocol
 handleHTTPRequest :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> Maybe AuthUser -> Aeson.Value -> Handler Aeson.Value
