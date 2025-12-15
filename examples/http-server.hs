@@ -30,6 +30,7 @@ import Data.Functor.Contravariant (contramap)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
+import Network.Wai.Handler.Warp (run)
 import Options.Applicative
 import Plow.Logging (IOTracer (..), Tracer (..), filterTracer)
 import Plow.Logging.Async (withAsyncHandleTracer)
@@ -38,9 +39,13 @@ import System.IO (stdout)
 import MCP.Protocol
 import MCP.Server
 import MCP.Server.Auth
+import MCP.Server.Auth.Demo (DemoCredentialEnv (..), defaultDemoCredentialStore)
 import MCP.Server.HTTP
+import MCP.Server.HTTP.AppEnv (AppEnv (..), runAppM)
+import MCP.Server.OAuth.InMemory (defaultExpiryConfig, newOAuthTVarEnv)
 import MCP.Trace.Types (MCPTrace (..), isOAuthTrace, renderMCPTrace)
 import MCP.Types
+import Servant.Auth.Server (defaultJWTSettings, generateKey)
 
 -- | A no-op tracer that discards all trace events
 nullIOTracer :: IOTracer a
@@ -280,4 +285,34 @@ main = do
                          in IOTracer $ filterTracer isOAuthTrace (unIOTracer mcpTracer)
                     else mcpTracer
             httpTracer = contramap MCPHttp filteredTracer
-        runServerHTTP config httpTracer
+
+        if optEnableOAuth
+            then do
+                -- Use mcpApp pattern for OAuth mode (following demoMcpApp implementation)
+                -- Generate JWK for JWT signing
+                jwk <- generateKey
+                let jwtSettings = defaultJWTSettings jwk
+
+                -- Initialize in-memory OAuth state storage
+                oauthEnv <- newOAuthTVarEnv defaultExpiryConfig
+
+                -- Create demo credential environment
+                let authEnv = DemoCredentialEnv defaultDemoCredentialStore
+
+                -- Create AppEnv with configured settings
+                let appEnv =
+                        AppEnv
+                            { envOAuth = oauthEnv
+                            , envAuth = authEnv
+                            , envConfig = config
+                            , envTracer = httpTracer
+                            , envJWT = jwtSettings
+                            , envTimeProvider = Nothing -- Use real IO time
+                            }
+
+                -- Use polymorphic mcpApp with runAppM natural transformation
+                let app = mcpApp (runAppM appEnv)
+                run (httpPort config) app
+            else
+                -- Use runServerHTTP for non-OAuth mode
+                runServerHTTP config httpTracer
