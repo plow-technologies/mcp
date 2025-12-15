@@ -72,6 +72,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, ReaderT (..), asks, runReaderT)
 import Control.Monad.Time (MonadTime (..))
 import Crypto.JOSE (JWK)
+import Data.Aeson (encode)
 import Data.ByteString.Lazy qualified as LBS
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
@@ -95,9 +96,13 @@ import MCP.Server.OAuth.Store (OAuthStateStore (..))
 import MCP.Server.OAuth.Types (
     AuthCodeId (..),
     AuthorizationCode (..),
+    AuthorizationError (..),
     PendingAuthorization (..),
     SessionId (..),
     UserId,
+    ValidationError (..),
+    authorizationErrorToResponse,
+    validationErrorToResponse,
  )
 import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types (Implementation, ServerCapabilities)
@@ -228,8 +233,8 @@ Unifies all possible error types from different components:
 
 * 'OAuthStoreErr': Storage backend errors (unavailable, internal errors)
 * 'AuthBackendErr': Authentication failures (invalid credentials, user not found)
-* 'ValidationErr': Input validation errors (malformed parameters, missing fields)
-* 'ServerErr': Servant-level errors (already a ServerError, pass through)
+* 'ValidationErr': Semantic validation errors (redirect URI mismatch, unsupported response type)
+* 'AuthorizationErr': OAuth authorization errors per RFC 6749 (invalid grant, access denied, etc.)
 
 Derives 'Generic' to enable @generic-lens@ projection via 'AsType'.
 -}
@@ -238,12 +243,10 @@ data AppError
       OAuthStoreErr OAuthStoreError
     | -- | Error from credential authentication
       AuthBackendErr DemoAuthError
-    | -- | Input validation error
-      ValidationErr Text
-    | -- | Authentication failure (invalid credentials)
-      AuthFailure
-    | -- | Servant server error (pass through)
-      ServerErr ServerError
+    | -- | Semantic validation error
+      ValidationErr ValidationError
+    | -- | OAuth authorization error
+      AuthorizationErr AuthorizationError
     deriving (Generic)
 
 -- -----------------------------------------------------------------------------
@@ -256,9 +259,8 @@ Maps domain-specific errors to appropriate HTTP status codes:
 
 * 'OAuthStoreErr': Storage errors map to 500 Internal Server Error
 * 'AuthBackendErr': Authentication errors map to 401 Unauthorized
-* 'ValidationErr': Validation errors map to 400 Bad Request
-* 'AuthFailure': Authentication failure map to 401 Unauthorized
-* 'ServerErr': Already a ServerError, pass through as-is
+* 'ValidationErr': Semantic validation errors map to 400 Bad Request
+* 'AuthorizationErr': OAuth authorization errors map to appropriate status per RFC 6749
 
 This function is used at the Servant boundary to convert domain errors
 into HTTP responses.
@@ -272,11 +274,11 @@ toServerError (OAuthStoreErr (StoreUnavailable "Database connection failed"))
 toServerError (AuthBackendErr InvalidCredentials)
 -- err401 { errBody = "Authentication failed: Invalid credentials" }
 
-toServerError (ValidationErr "Missing required parameter: client_id")
--- err400 { errBody = "Validation error: Missing required parameter: client_id" }
+toServerError (ValidationErr (ClientNotRegistered clientId))
+-- err400 { errBody = "client_id not registered: ..." }
 
-toServerError AuthFailure
--- err401 { errBody = "Authentication failed: Invalid username or password" }
+toServerError (AuthorizationErr (InvalidGrant "Code expired"))
+-- err400 { errBody = JSON OAuth error response }
 @
 -}
 toServerError :: AppError -> ServerError
@@ -293,13 +295,12 @@ toServerError (AuthBackendErr authErr) =
         UserNotFound _ ->
             -- Don't leak user existence to unauthorized clients
             err401{errBody = "Authentication failed: Invalid credentials"}
-toServerError (ValidationErr msg) =
-    err400{errBody = "Validation error: " <> toLBS msg}
-toServerError AuthFailure =
-    err401{errBody = "Authentication failed: Invalid username or password"}
-toServerError (ServerErr serverErr) =
-    -- Already a ServerError, pass through
-    serverErr
+toServerError (ValidationErr validationErr) =
+    let (_status, message) = validationErrorToResponse validationErr
+     in err400{errBody = toLBS message}
+toServerError (AuthorizationErr authzErr) =
+    let (_status, oauthResp) = authorizationErrorToResponse authzErr
+     in err400{errBody = encode oauthResp}
 
 -- -----------------------------------------------------------------------------
 -- Utilities
@@ -312,6 +313,11 @@ toLBS = LBS.fromStrict . TE.encodeUtf8
 -- -----------------------------------------------------------------------------
 -- Typeclass Instances for AppM
 -- -----------------------------------------------------------------------------
+
+{- Note: AsType instances for ValidationError and AuthorizationError are
+automatically derived by generic-lens from the Generic instance on AppError.
+No manual instances needed.
+-}
 
 {- | MonadTime instance for AppM.
 
