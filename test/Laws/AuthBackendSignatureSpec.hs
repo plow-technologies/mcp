@@ -73,7 +73,12 @@ authBackendSignatureTests runM validUser validPass invalidPass
 -}
 authBackendSignatureTests ::
     forall m.
-    (AuthBackend m) =>
+    ( AuthBackend m
+    , Eq (AuthBackendUserId m)
+    , Show (AuthBackendUserId m)
+    , Eq (AuthBackendUser m)
+    , Show (AuthBackendUser m)
+    ) =>
     -- | Runner function to execute 'm' in 'IO'
     (forall a. m a -> IO a) ->
     -- | Known valid username

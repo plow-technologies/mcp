@@ -163,9 +163,9 @@ import MCP.Server.OAuth.Types (
     Scope (..),
     SessionCookie (..),
     SessionId (..),
+    UserId,
     mkScope,
     mkSessionId,
-    mkUserId,
     unClientId,
     unCodeChallenge,
     unCodeVerifier,
@@ -336,6 +336,7 @@ customHandler = do
 oauthServer ::
     ( OAuthStateStore m
     , AuthBackend m
+    , AuthBackendUserId m ~ UserId
     , MonadTime m
     , MonadIO m
     , MonadReader env m
@@ -828,6 +829,7 @@ by calling this handler via runAppM.
 handleLogin ::
     ( OAuthStateStore m
     , AuthBackend m
+    , AuthBackendUserId m ~ UserId
     , MonadTime m
     , MonadIO m
     , MonadReader env m
@@ -896,10 +898,10 @@ handleLogin mCookie loginForm = do
             let username = formUsername loginForm
                 password = formPassword loginForm
 
-            credentialsValid <- validateCredentials username password
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt (unUsername username) credentialsValid
-            if credentialsValid
-                then do
+            validationResult <- validateCredentials username password
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt (unUsername username) (isJust validationResult)
+            case validationResult of
+                Just (userId, _authUser) -> do
                     -- Emit authorization granted trace
                     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (unClientId $ pendingClientId pending) (unUsername username)
 
@@ -911,10 +913,6 @@ handleLogin mCookie loginForm = do
                         expiry = addUTCTime expirySeconds codeGenerationTime
                         -- Convert pendingScope from Maybe (Set Scope) to Set Scope
                         scopes = fromMaybe Set.empty (pendingScope pending)
-                        -- Create UserId from username
-                        userId = case mkUserId (unUsername username) of
-                            Just uid -> uid
-                            Nothing -> error "Invalid user ID" -- This shouldn't happen as username is already validated
                         codeId = AuthCodeId code
                         authCode =
                             AuthorizationCode
@@ -940,7 +938,7 @@ handleLogin mCookie loginForm = do
                         clearCookie = SessionCookie "mcp_session=; Max-Age=0; Path=/"
 
                     return $ addHeader redirectUrl $ addHeader clearCookie NoContent
-                else
+                Nothing ->
                     -- Invalid credentials - return error (validateCredentials already emitted trace)
                     throwError $ AuthBackendErr InvalidCredentials
 

@@ -74,7 +74,7 @@ import MCP.Server.Auth.Backend (
     mkHashedPassword,
     mkPlaintextPassword,
  )
-import MCP.Server.OAuth.Types (AuthUser, UserId)
+import MCP.Server.OAuth.Types (AuthUser (..), UserId (..))
 
 -- -----------------------------------------------------------------------------
 -- Environment
@@ -119,11 +119,21 @@ instance (MonadIO m) => AuthBackend (ReaderT DemoCredentialEnv m) where
         store <- asks credentialStore
         let storedHash = Map.lookup username (storeCredentials store)
         case storedHash of
-            Nothing -> pure False -- User not found (same as invalid password)
+            Nothing -> pure Nothing -- User not found (same as invalid password)
             Just hash -> do
                 let candidateHash = mkHashedPassword (storeSalt store) password
                 -- ScrubbedBytes Eq is constant-time
-                pure $ hash == candidateHash
+                if hash == candidateHash
+                    then do
+                        let userId = UserId (unUsername username)
+                        let authUser =
+                                AuthUser
+                                    { userUserId = userId
+                                    , userUserEmail = Just (unUsername username <> "@demo.local")
+                                    , userUserName = Just (unUsername username)
+                                    }
+                        pure $ Just (userId, authUser)
+                    else pure Nothing
 
 -- -----------------------------------------------------------------------------
 -- Default Credentials

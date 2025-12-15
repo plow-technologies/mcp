@@ -302,10 +302,20 @@ instance AuthBackend TestM where
         env <- ask
         store <- liftIO $ readIORef (testCredentials env)
         case Map.lookup username (storeCredentials store) of
-            Nothing -> pure False -- User not found
+            Nothing -> pure Nothing -- User not found
             Just storedHash -> do
                 let candidateHash = mkHashedPassword (storeSalt store) password
-                pure $ storedHash == candidateHash -- Constant-time via ScrubbedBytes Eq
+                if storedHash == candidateHash -- Constant-time via ScrubbedBytes Eq
+                    then do
+                        let userId = UserId (unUsername username)
+                        let authUser =
+                                AuthUser
+                                    { userUserId = userId
+                                    , userUserEmail = Just (unUsername username <> "@test.local")
+                                    , userUserName = Just (unUsername username)
+                                    }
+                        pure $ Just (userId, authUser)
+                    else pure Nothing
 
 -- -----------------------------------------------------------------------------
 -- Helper Functions

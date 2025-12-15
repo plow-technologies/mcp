@@ -54,7 +54,8 @@ module Laws.AuthBackendSpec (
     authBackendKnownCredentials,
 ) where
 
-import Test.Hspec (Spec, describe, it, shouldBe)
+import Data.Maybe (isJust)
+import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
 import Test.QuickCheck (arbitrary, forAllShrinkShow, ioProperty, property, (===))
 
 -- Import orphan Arbitrary instances
@@ -102,7 +103,12 @@ runInMemory action = do
 -}
 authBackendLaws ::
     forall m.
-    (AuthBackend m) =>
+    ( AuthBackend m
+    , Eq (AuthBackendUserId m)
+    , Show (AuthBackendUserId m)
+    , Eq (AuthBackendUser m)
+    , Show (AuthBackendUser m)
+    ) =>
     -- | Runner function to execute 'm' in 'IO'
     (forall a. m a -> IO a) ->
     Spec
@@ -165,7 +171,12 @@ the rejection behavior.
 -}
 authBackendKnownCredentials ::
     forall m.
-    (AuthBackend m) =>
+    ( AuthBackend m
+    , Eq (AuthBackendUserId m)
+    , Show (AuthBackendUserId m)
+    , Eq (AuthBackendUser m)
+    , Show (AuthBackendUser m)
+    ) =>
     -- | Runner function to execute 'm' in 'IO'
     (forall a. m a -> IO a) ->
     -- | Known valid username
@@ -176,18 +187,18 @@ authBackendKnownCredentials ::
     PlaintextPassword ->
     Spec
 authBackendKnownCredentials runM validUser validPass invalidPass = describe "Known credentials" $ do
-    it "accepts valid credentials (returns True)" $ do
+    it "accepts valid credentials (returns Just (userId, user))" $ do
         result <- runM $ validateCredentials validUser validPass
-        result `shouldBe` True
+        result `shouldSatisfy` isJust
 
-    it "rejects invalid password for valid user (returns False)" $ do
+    it "rejects invalid password for valid user (returns Nothing)" $ do
         result <- runM $ validateCredentials validUser invalidPass
-        result `shouldBe` False
+        result `shouldBe` Nothing
 
-    it "rejects unknown user (returns False)" $ do
+    it "rejects unknown user (returns Nothing)" $ do
         -- Use a clearly invalid username that won't exist in any real store
         let unknownUser = case mkUsername "nonexistent_user_12345" of
                 Just u -> u
                 Nothing -> error "Failed to create test username (should never happen)"
         result <- runM $ validateCredentials unknownUser validPass
-        result `shouldBe` False
+        result `shouldBe` Nothing
