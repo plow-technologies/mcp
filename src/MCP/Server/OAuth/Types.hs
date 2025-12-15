@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -457,19 +458,19 @@ instance ToHttpApiData ClientAuthMethod where
 -- -----------------------------------------------------------------------------
 
 -- | Authorization code with PKCE
-data AuthorizationCode = AuthorizationCode
+data AuthorizationCode userId = AuthorizationCode
     { authCodeId :: AuthCodeId
     , authClientId :: ClientId
     , authRedirectUri :: RedirectUri
     , authCodeChallenge :: CodeChallenge
     , authCodeChallengeMethod :: CodeChallengeMethod
     , authScopes :: Set Scope
-    , authUserId :: UserId
+    , authUserId :: userId
     , authExpiry :: UTCTime
     }
-    deriving stock (Eq, Show, Generic)
+    deriving stock (Eq, Show, Generic, Functor)
 
-instance FromJSON AuthorizationCode where
+instance (FromJSON userId) => FromJSON (AuthorizationCode userId) where
     parseJSON = withObject "AuthorizationCode" $ \v -> do
         codeId <- v .: "auth_code_id"
         -- Validate AuthCodeId is non-empty
@@ -497,14 +498,12 @@ instance FromJSON AuthorizationCode where
                 fail "auth_scopes must contain valid scopes (non-empty, no whitespace)"
 
         userId <- v .: "auth_user_id"
-        when (T.null (unUserId userId)) $
-            fail "auth_user_id must not be empty"
 
         expiry <- v .: "auth_expiry"
 
         pure $ AuthorizationCode codeId clientId redirectUri challenge challengeMethod scopesSet userId expiry
 
-instance ToJSON AuthorizationCode where
+instance (ToJSON userId) => ToJSON (AuthorizationCode userId) where
     toJSON AuthorizationCode{..} =
         object
             [ "auth_code_id" .= authCodeId

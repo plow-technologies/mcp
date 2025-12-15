@@ -114,7 +114,7 @@ data TestEnv = TestEnv
 Contains all OAuth-related data structures.
 -}
 data OAuthState = OAuthState
-    { oauthAuthCodes :: Map AuthCodeId AuthorizationCode
+    { oauthAuthCodes :: Map AuthCodeId (AuthorizationCode UserId)
     , oauthAccessTokens :: Map AccessTokenId AuthUser
     , oauthRefreshTokens :: Map RefreshTokenId (ClientId, AuthUser)
     , oauthClients :: Map ClientId ClientInfo

@@ -230,7 +230,7 @@ instance Arbitrary UTCTime where
 -- Domain Entities
 -- ============================================================================
 
-instance Arbitrary AuthorizationCode where
+instance (Arbitrary userId) => Arbitrary (AuthorizationCode userId) where
     arbitrary = do
         authCodeId <- arbitrary
         authClientId <- arbitrary

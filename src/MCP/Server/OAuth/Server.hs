@@ -337,7 +337,7 @@ oauthServer ::
     ( OAuthStateStore m
     , AuthBackend m
     , AuthBackendUserId m ~ UserId
-    , MonadTime m
+    , OAuthUserId m ~ UserId
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m
@@ -830,7 +830,7 @@ handleLogin ::
     ( OAuthStateStore m
     , AuthBackend m
     , AuthBackendUserId m ~ UserId
-    , MonadTime m
+    , OAuthUserId m ~ UserId
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m
@@ -1095,7 +1095,7 @@ by calling this handler via runAppM.
 -}
 handleToken ::
     ( OAuthStateStore m
-    , MonadTime m
+    , OAuthUserId m ~ UserId
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m
@@ -1147,7 +1147,7 @@ migration.
 -}
 handleAuthCodeGrant ::
     ( OAuthStateStore m
-    , MonadTime m
+    , OAuthUserId m ~ UserId
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m
@@ -1277,7 +1277,6 @@ migration.
 -}
 handleRefreshTokenGrant ::
     ( OAuthStateStore m
-    , MonadTime m
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m

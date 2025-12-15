@@ -65,7 +65,7 @@ spec = describe "AuthBackend associated types" $ do
 This function doesn't need to be called - its existence proves the type family exists.
 If AuthBackendUser m doesn't exist, this won't compile.
 -}
-witnessAuthBackendUser :: forall m. (AuthBackend m) => Proxy (AuthBackendUser m) -> ()
+witnessAuthBackendUser :: forall m. Proxy (AuthBackendUser m) -> ()
 witnessAuthBackendUser _ = ()
 
 {- | Type-level witness that AuthBackendUserId exists.
@@ -73,5 +73,5 @@ witnessAuthBackendUser _ = ()
 This function doesn't need to be called - its existence proves the type family exists.
 If AuthBackendUserId m doesn't exist, this won't compile.
 -}
-witnessAuthBackendUserId :: forall m. (AuthBackend m) => Proxy (AuthBackendUserId m) -> ()
+witnessAuthBackendUserId :: forall m. Proxy (AuthBackendUserId m) -> ()
 witnessAuthBackendUserId _ = ()

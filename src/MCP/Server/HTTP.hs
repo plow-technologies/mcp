@@ -250,7 +250,7 @@ handleHTTPRequest httpConfig tracer stateVar mAuthUser requestValue = do
         Aeson.Error e -> throwError err400{errBody = encode $ object ["error" .= ("Invalid JSON-RPC message" :: Text), "error_description" .= T.pack e]}
 
 -- | Process an HTTP MCP notification
-processHTTPNotification :: (MCPServer MCPServerM) => HTTPServerConfig -> TVar ServerState -> JSONRPCNotification -> IO ()
+processHTTPNotification :: HTTPServerConfig -> TVar ServerState -> JSONRPCNotification -> IO ()
 processHTTPNotification _ _ _ = do
     -- For now, just ignore notifications since they don't need responses
     -- In a more complete implementation, this would handle logging/setLevel notifications

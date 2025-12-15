@@ -109,7 +109,7 @@ defaultExpiryConfig =
 
 -- | OAuth server state stored in memory using maps
 data OAuthState = OAuthState
-    { authCodes :: Map Text AuthorizationCode
+    { authCodes :: Map Text (AuthorizationCode UserId)
     -- ^ Authorization codes keyed by unAuthCodeId
     , accessTokens :: Map Text AuthUser
     -- ^ Access tokens keyed by unAccessTokenId
@@ -133,7 +133,7 @@ emptyOAuthState =
         }
 
 -- | Create new OAuth environment with the given expiry configuration
-newOAuthTVarEnv :: MonadIO m => ExpiryConfig -> m OAuthTVarEnv
+newOAuthTVarEnv :: (MonadIO m) => ExpiryConfig -> m OAuthTVarEnv
 newOAuthTVarEnv config = do
     stateVar <- liftIO $ newTVarIO emptyOAuthState
     pure
@@ -148,10 +148,10 @@ newOAuthTVarEnv config = do
 
 -- | Errors that can occur during in-memory OAuth operations
 data OAuthStoreError
-    = StoreUnavailable Text
-    -- ^ The storage backend is unavailable
-    | StoreInternalError Text
-    -- ^ An internal error occurred
+    = -- | The storage backend is unavailable
+      StoreUnavailable Text
+    | -- | An internal error occurred
+      StoreInternalError Text
     deriving (Eq, Show)
 
 -- -----------------------------------------------------------------------------
