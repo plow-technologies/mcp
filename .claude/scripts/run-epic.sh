@@ -7,6 +7,7 @@
 #   CLAUDE_MODEL    - Model to use (default: opus)
 #   SESSION_LOG     - Log file path (default: ../session-log.jsonl)
 #   CLAUDE_PROMPT   - Override the default prompt
+#   DRY_RUN         - If set, print prompt and exit without running Claude
 
 set -euo pipefail
 
@@ -22,10 +23,13 @@ fi
 CLAUDE_MODEL="${CLAUDE_MODEL:-opus}"
 SESSION_LOG="${SESSION_LOG:-../session-log.jsonl}"
 
-# Default prompt using heredoc for multi-line support
-if [[ -z "${CLAUDE_PROMPT:-}" ]]; then
-    read -r -d '' CLAUDE_PROMPT <<'PROMPT_EOF' || true
-/speckit.implement claim next bead from the epic that is currently in_progress and use the commit skill when closed and STOP. Ensure by running tests that no regressions have been introduced BEFORE closing. Use the efficient-subagent-orchestration skill for main agent context-management. Use the beads-project-tracking skill to track progress.
+# Base prompt template (beads list appended dynamically in main loop)
+# Note: We use regular heredoc (not <<'EOF') to allow variable expansion for EPIC_ID
+read -r -d '' BASE_PROMPT <<PROMPT_EOF || true
+/speckit.implement claim ONE bead from epic $EPIC_ID, complete it, commit, then STOP. Ensure by running tests that no regressions have been introduced BEFORE closing. Use the efficient-subagent-orchestration skill for main agent context-management. Use the beads-project-tracking skill to track progress.
+
+EPIC: $EPIC_ID
+Claim exactly ONE bead from the candidates below, complete it, then STOP.
 
 CONTEXT MONITORING (CRITICAL): Continuously monitor your context usage. When you reach 50% context capacity, you MUST:
 1. Leave the current bead as in_progress (do NOT close it)
@@ -38,18 +42,54 @@ TECHNICAL DEBT TRACKING (MANDATORY):
 - ALL TODO, FIXME, XXX, and HACK comments MUST include a bead ID that tracks the work. Format: TODO(bead-id): description
 - Never leave implicit work—make it explicit in beads
 
-BEAD SELECTION PRIORITY (CRITICAL):
-1. FIRST: Check for any in_progress child beads (bd list --status in_progress) - these are handoff continuations, resume them
-2. THEN: If no in_progress children, claim the next ready bead from bd ready
-3. The root epic being in_progress is expected - look for its CHILDREN to continue work
+BEAD SELECTION PRIORITY:
+1. FIRST: Resume any in_progress bead (handoff continuation)
+2. THEN: Claim the highest-priority ready bead from candidates below
 
-ONE BEAD PER SESSION (CRITICAL):
-- Work on exactly ONE bead per session
-- Once you close a bead (bd close), STOP IMMEDIATELY
-- Do NOT loop to the next bead - the shell wrapper script handles iteration
-- After closing: commit, then STOP
+ONE BEAD ONLY:
+- Complete exactly ONE bead per session
+- After bd close: commit, then STOP IMMEDIATELY
+- Do NOT continue to the next bead - the wrapper script handles iteration
 PROMPT_EOF
-fi
+
+# Function to get sorted candidate beads for this epic
+get_candidate_beads() {
+    bd ready --json 2>/dev/null | jq -r --arg epic "$EPIC_ID" '
+        [.[] | select(.id == $epic or (.id | startswith($epic + ".")))]
+        | sort_by(.priority // 99)
+        | .[]
+        | "  \(.priority // "-")  \(.id)  \(.title)"
+    '
+}
+
+# Function to get in_progress beads (handoff continuations)
+get_in_progress_beads() {
+    bd list --status in_progress --json 2>/dev/null | jq -r --arg epic "$EPIC_ID" '
+        [.[] | select(.id != $epic and (.id | startswith($epic + ".")))]
+        | .[]
+        | "  \(.priority // "-")  \(.id)  \(.title)"
+    '
+}
+
+# Build full prompt with current bead state
+build_prompt() {
+    local in_progress candidates full_prompt
+
+    in_progress=$(get_in_progress_beads)
+    candidates=$(get_candidate_beads)
+
+    full_prompt="$BASE_PROMPT"
+
+    if [[ -n "$in_progress" ]]; then
+        full_prompt+=$'\n\nIN_PROGRESS (resume first):\n  P#  ID  TITLE\n'"$in_progress"
+    fi
+
+    if [[ -n "$candidates" ]]; then
+        full_prompt+=$'\n\nCANDIDATE BEADS (sorted by priority):\n  P#  ID  TITLE\n'"$candidates"
+    fi
+
+    echo "$full_prompt"
+}
 
 # Function to count ready beads for epic (includes epic itself and all children)
 count_ready_beads() {
@@ -96,8 +136,10 @@ claim_epic_if_needed() {
     esac
 }
 
-# Ensure epic is claimed before starting
-claim_epic_if_needed
+# Ensure epic is claimed before starting (skip in dry run mode)
+if [[ -z "${DRY_RUN:-}" ]]; then
+    claim_epic_if_needed
+fi
 
 # Main loop
 iteration=0
@@ -111,10 +153,32 @@ while true; do
     fi
 
     echo "[$(date -Iseconds)] Iteration $iteration: $ready_count ready bead(s) for epic $EPIC_ID"
+
+    # Build prompt with current bead state (or use override if set)
+    if [[ -n "${CLAUDE_PROMPT:-}" ]]; then
+        current_prompt="$CLAUDE_PROMPT"
+    else
+        current_prompt=$(build_prompt)
+    fi
+
+    # Dry run mode: print prompt and exit
+    if [[ -n "${DRY_RUN:-}" ]]; then
+        echo "=== DRY RUN MODE ==="
+        echo "Epic: $EPIC_ID"
+        echo "Model: $CLAUDE_MODEL"
+        echo "Log: $SESSION_LOG"
+        echo ""
+        echo "=== PROMPT ==="
+        echo "$current_prompt"
+        echo ""
+        echo "=== END DRY RUN ==="
+        exit 0
+    fi
+
     echo "[$(date -Iseconds)] Running Claude (model=$CLAUDE_MODEL, log=$SESSION_LOG)..."
 
     # Run Claude with streaming JSON output, log to file
-    claude -p "$CLAUDE_PROMPT" \
+    claude -p "$current_prompt" \
         --dangerously-skip-permissions \
         --model "$CLAUDE_MODEL" \
         --output-format stream-json \
