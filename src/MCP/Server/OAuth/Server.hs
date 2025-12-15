@@ -125,7 +125,7 @@ import Servant (
     (:>),
  )
 import Servant.API (Accept (..), MimeRender (..))
-import Servant.Auth.Server (JWTSettings, makeJWT)
+import Servant.Auth.Server (JWTSettings, ToJWT, makeJWT)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
 import Web.HttpApiData (ToHttpApiData (..), parseUrlPiece)
 
@@ -146,7 +146,6 @@ import MCP.Server.OAuth.Store (OAuthStateStore (..))
 import MCP.Server.OAuth.Types (
     AccessTokenId (..),
     AuthCodeId (..),
-    AuthUser (..),
     AuthorizationCode (..),
     ClientAuthMethod,
     ClientId (..),
@@ -163,7 +162,6 @@ import MCP.Server.OAuth.Types (
     Scope (..),
     SessionCookie (..),
     SessionId (..),
-    UserId,
     mkScope,
     mkSessionId,
     unClientId,
@@ -172,7 +170,6 @@ import MCP.Server.OAuth.Types (
     unRefreshTokenId,
     unScope,
     unSessionId,
-    unUserId,
  )
 import MCP.Server.Time (MonadTime (..))
 import MCP.Trace.HTTP (HTTPTrace (..))
@@ -338,8 +335,7 @@ oauthServer ::
     , AuthBackend m
     , AuthBackendUser m ~ OAuthUser m
     , AuthBackendUserId m ~ OAuthUserId m
-    , OAuthUserId m ~ UserId
-    , OAuthUser m ~ AuthUser
+    , ToJWT (OAuthUser m)
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m
@@ -833,7 +829,6 @@ handleLogin ::
     , AuthBackend m
     , AuthBackendUser m ~ OAuthUser m
     , AuthBackendUserId m ~ OAuthUserId m
-    , OAuthUserId m ~ UserId
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m
@@ -904,7 +899,7 @@ handleLogin mCookie loginForm = do
             validationResult <- validateCredentials username password
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt (unUsername username) (isJust validationResult)
             case validationResult of
-                Just (userId, _authUser) -> do
+                Just (_userId, authUser) -> do
                     -- Emit authorization granted trace
                     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (unClientId $ pendingClientId pending) (unUsername username)
 
@@ -925,7 +920,7 @@ handleLogin mCookie loginForm = do
                                 , authCodeChallenge = pendingCodeChallenge pending
                                 , authCodeChallengeMethod = pendingCodeChallengeMethod pending
                                 , authScopes = scopes
-                                , authUserId = userId
+                                , authUserId = authUser
                                 , authExpiry = expiry
                                 }
 
@@ -1098,8 +1093,7 @@ by calling this handler via runAppM.
 -}
 handleToken ::
     ( OAuthStateStore m
-    , OAuthUserId m ~ UserId
-    , OAuthUser m ~ AuthUser
+    , ToJWT (OAuthUser m)
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m
@@ -1151,8 +1145,7 @@ migration.
 -}
 handleAuthCodeGrant ::
     ( OAuthStateStore m
-    , OAuthUserId m ~ UserId
-    , OAuthUser m ~ AuthUser
+    , ToJWT (OAuthUser m)
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m
@@ -1218,23 +1211,14 @@ handleAuthCodeGrant params = do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
         throwError $ ValidationErr "Invalid code verifier"
 
-    -- Create user for JWT
-    let oauthCfg = httpOAuthConfig config
-        emailDomain = maybe "example.com" demoEmailDomain oauthCfg
-        userName = maybe "User" demoUserName oauthCfg
-        userId = authUserId authCode
-        user =
-            AuthUser
-                { userUserId = userId
-                , userUserEmail = Just $ unUserId userId <> "@" <> emailDomain
-                , userUserName = Just userName
-                }
+    -- Extract user from auth code (now stores full user, not just ID)
+    let user = authUserId authCode
+        clientId = authClientId authCode
 
     -- Generate tokens
     accessTokenText <- generateJWTAccessToken user jwtSettings
     refreshTokenText <- liftIO $ generateRefreshTokenWithConfig config
     let refreshToken = RefreshTokenId refreshTokenText
-        clientId = authClientId authCode
 
     -- Store tokens
     storeAccessToken (AccessTokenId accessTokenText) user
@@ -1282,7 +1266,7 @@ migration.
 -}
 handleRefreshTokenGrant ::
     ( OAuthStateStore m
-    , OAuthUser m ~ AuthUser
+    , ToJWT (OAuthUser m)
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m
@@ -1342,7 +1326,7 @@ handleRefreshTokenGrant params = do
             }
 
 -- | Generate JWT access token for user
-generateJWTAccessToken :: (MonadIO m, MonadError AppError m) => AuthUser -> JWTSettings -> m Text
+generateJWTAccessToken :: (OAuthStateStore m, ToJWT (OAuthUser m), MonadIO m, MonadError AppError m) => OAuthUser m -> JWTSettings -> m Text
 generateJWTAccessToken user jwtSettings = do
     accessTokenResult <- liftIO $ makeJWT user jwtSettings Nothing
     case accessTokenResult of

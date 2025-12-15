@@ -109,7 +109,7 @@ defaultExpiryConfig =
 
 -- | OAuth server state stored in memory using maps
 data OAuthState = OAuthState
-    { authCodes :: Map Text (AuthorizationCode UserId)
+    { authCodes :: Map Text (AuthorizationCode AuthUser)
     -- ^ Authorization codes keyed by unAuthCodeId
     , accessTokens :: Map Text AuthUser
     -- ^ Access tokens keyed by unAccessTokenId

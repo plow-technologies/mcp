@@ -102,9 +102,6 @@ runInMemory action = do
 oauthStateStoreLaws ::
     forall m.
     ( OAuthStateStore m
-    , Arbitrary (OAuthUserId m)
-    , Eq (OAuthUserId m)
-    , Show (OAuthUserId m)
     , Arbitrary (OAuthUser m)
     , Eq (OAuthUser m)
     , Show (OAuthUser m)
@@ -115,7 +112,7 @@ oauthStateStoreLaws ::
 oauthStateStoreLaws runM = describe "OAuthStateStore laws" $ do
     describe "AuthorizationCode" $ do
         prop "round-trip: lookup after store returns the value (non-expired)" $
-            \(code :: AuthorizationCode (OAuthUserId m)) -> ioProperty $ do
+            \(code :: AuthorizationCode (OAuthUser m)) -> ioProperty $ do
                 -- Ensure code is not expired by setting expiry far in future
                 let validCode = code{authExpiry = addUTCTime 86400 (authExpiry code)}
                 result <- runM $ do
@@ -124,7 +121,7 @@ oauthStateStoreLaws runM = describe "OAuthStateStore laws" $ do
                 pure $ result === Just validCode
 
         prop "delete: lookup after delete returns Nothing" $
-            \(code :: AuthorizationCode (OAuthUserId m)) -> ioProperty $ do
+            \(code :: AuthorizationCode (OAuthUser m)) -> ioProperty $ do
                 result <- runM $ do
                     storeAuthCode code
                     deleteAuthCode (authCodeId code)
@@ -132,7 +129,7 @@ oauthStateStoreLaws runM = describe "OAuthStateStore laws" $ do
                 pure $ result === Nothing
 
         prop "idempotence: store twice is same as store once" $
-            \(code :: AuthorizationCode (OAuthUserId m)) -> ioProperty $ do
+            \(code :: AuthorizationCode (OAuthUser m)) -> ioProperty $ do
                 let validCode = code{authExpiry = addUTCTime 86400 (authExpiry code)}
                 result <- runM $ do
                     storeAuthCode validCode
@@ -141,7 +138,7 @@ oauthStateStoreLaws runM = describe "OAuthStateStore laws" $ do
                 pure $ result === Just validCode
 
         prop "overwrite: second store with same key replaces first" $
-            \(code1 :: AuthorizationCode (OAuthUserId m)) (code2 :: AuthorizationCode (OAuthUserId m)) -> ioProperty $ do
+            \(code1 :: AuthorizationCode (OAuthUser m)) (code2 :: AuthorizationCode (OAuthUser m)) -> ioProperty $ do
                 let code2' =
                         code2
                             { authCodeId = authCodeId code1
@@ -154,7 +151,7 @@ oauthStateStoreLaws runM = describe "OAuthStateStore laws" $ do
                 pure $ result === Just code2'
 
         prop "expiry: lookup returns Nothing for expired codes" $
-            \(code :: AuthorizationCode (OAuthUserId m)) -> ioProperty $ do
+            \(code :: AuthorizationCode (OAuthUser m)) -> ioProperty $ do
                 -- Make code expired by setting expiry to a fixed past time (year 2019)
                 -- This ensures expiry < currentTime (2020-01-01) for all test runs
                 let pastTime = UTCTime (fromGregorian 2019 12 31) 0

@@ -178,7 +178,7 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
 
     Satisfies: Round-trip law, Idempotence law, Overwrite law
     -}
-    storeAuthCode :: AuthorizationCode (OAuthUserId m) -> m ()
+    storeAuthCode :: AuthorizationCode (OAuthUser m) -> m ()
 
     {- | Look up an authorization code by its identifier.
 
@@ -188,7 +188,7 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
 
     Satisfies: Round-trip law, Expiry law
     -}
-    lookupAuthCode :: AuthCodeId -> m (Maybe (AuthorizationCode (OAuthUserId m)))
+    lookupAuthCode :: AuthCodeId -> m (Maybe (AuthorizationCode (OAuthUser m)))
 
     {- | Delete an authorization code.
 
