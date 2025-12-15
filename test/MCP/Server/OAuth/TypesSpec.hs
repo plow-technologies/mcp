@@ -3,9 +3,18 @@
 module MCP.Server.OAuth.TypesSpec (spec) where
 
 import Data.Text (Text)
+import Data.Text qualified as T
 import MCP.Server.OAuth.Types
 import Network.HTTP.Types.Status (statusCode)
+import Network.URI (parseURI)
 import Test.Hspec
+
+-- Helper functions to extract fields from OAuthErrorResponse
+errorCode :: OAuthErrorResponse -> Text
+errorCode = oauthErrorCode
+
+errorDescription :: OAuthErrorResponse -> Maybe Text
+errorDescription = oauthErrorDescription
 
 spec :: Spec
 spec = do
@@ -132,10 +141,86 @@ spec = do
                     PKCEVerificationFailed -> pure ()
                     _ -> expectationFailure "Pattern match failed"
 
--- Helper functions to extract fields from OAuthErrorResponse
--- These will be defined once OAuthErrorResponse exists
-errorCode :: OAuthErrorResponse -> Text
-errorCode = oauthErrorCode
+    describe "ValidationError" $ do
+        describe "validationErrorToResponse" $ do
+            it "RedirectUriMismatch returns descriptive 400 error" $ do
+                let clientId = ClientId "client123"
+                    uri = case parseURI "https://example.com/callback" of
+                        Just u -> u
+                        Nothing -> error "Test URI parsing failed"
+                    redirectUri = RedirectUri uri
+                    err = RedirectUriMismatch clientId redirectUri
+                    (status, message) = validationErrorToResponse err
+                statusCode status `shouldBe` 400
+                T.unpack message `shouldContain` "redirect_uri"
+                T.unpack message `shouldContain` "client123"
 
-errorDescription :: OAuthErrorResponse -> Maybe Text
-errorDescription = oauthErrorDescription
+            it "UnsupportedResponseType returns descriptive 400 error" $ do
+                let err = UnsupportedResponseType "implicit"
+                    (status, message) = validationErrorToResponse err
+                statusCode status `shouldBe` 400
+                T.unpack message `shouldContain` "response_type"
+                T.unpack message `shouldContain` "implicit"
+
+            it "ClientNotRegistered returns descriptive 400 error" $ do
+                let clientId = ClientId "unknown_client"
+                    err = ClientNotRegistered clientId
+                    (status, message) = validationErrorToResponse err
+                statusCode status `shouldBe` 400
+                T.unpack message `shouldContain` "client_id"
+                T.unpack message `shouldContain` "unknown_client"
+
+            it "MissingRequiredScope returns descriptive 400 error" $ do
+                let scope = Scope "admin"
+                    err = MissingRequiredScope scope
+                    (status, message) = validationErrorToResponse err
+                statusCode status `shouldBe` 400
+                T.unpack message `shouldContain` "scope"
+                T.unpack message `shouldContain` "admin"
+
+            it "InvalidStateParameter returns descriptive 400 error" $ do
+                let err = InvalidStateParameter "invalid state"
+                    (status, message) = validationErrorToResponse err
+                statusCode status `shouldBe` 400
+                T.unpack message `shouldContain` "state"
+                T.unpack message `shouldContain` "invalid state"
+
+        describe "ValidationError constructors" $ do
+            it "RedirectUriMismatch can be constructed and pattern matched" $ do
+                let clientId = ClientId "client123"
+                    uri = case parseURI "https://example.com/callback" of
+                        Just u -> u
+                        Nothing -> error "Test URI parsing failed"
+                    redirectUri = RedirectUri uri
+                    err = RedirectUriMismatch clientId redirectUri
+                case err of
+                    RedirectUriMismatch cid ruri -> do
+                        cid `shouldBe` clientId
+                        ruri `shouldBe` redirectUri
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "UnsupportedResponseType can be constructed and pattern matched" $ do
+                let err = UnsupportedResponseType "implicit"
+                case err of
+                    UnsupportedResponseType rt -> rt `shouldBe` "implicit"
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "ClientNotRegistered can be constructed and pattern matched" $ do
+                let clientId = ClientId "unknown"
+                    err = ClientNotRegistered clientId
+                case err of
+                    ClientNotRegistered cid -> cid `shouldBe` clientId
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "MissingRequiredScope can be constructed and pattern matched" $ do
+                let scope = Scope "admin"
+                    err = MissingRequiredScope scope
+                case err of
+                    MissingRequiredScope s -> s `shouldBe` scope
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "InvalidStateParameter can be constructed and pattern matched" $ do
+                let err = InvalidStateParameter "bad state"
+                case err of
+                    InvalidStateParameter msg -> msg `shouldBe` "bad state"
+                    _ -> expectationFailure "Pattern match failed"
