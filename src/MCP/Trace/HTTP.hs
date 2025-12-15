@@ -16,6 +16,7 @@ module MCP.Trace.HTTP (
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
+import MCP.Server.OAuth.Boundary (OAuthBoundaryTrace (..))
 import MCP.Trace.OAuth (OAuthTrace, renderOAuthTrace)
 import MCP.Trace.Operation (OperationTrace, renderOperationTrace)
 import MCP.Trace.Protocol (ProtocolTrace, renderProtocolTrace)
@@ -84,6 +85,8 @@ data HTTPTrace
       HTTPServer ServerTrace
     | -- | Nested MCP operation events in HTTP context.
       HTTPOperation OperationTrace
+    | -- | OAuth boundary error translation events
+      HTTPOAuthBoundary OAuthBoundaryTrace
     deriving (Show, Eq)
 
 {- | Render an HTTPTrace to human-readable text.
@@ -121,3 +124,10 @@ renderHTTPTrace (HTTPProtocol pt) = "[HTTP:Protocol] " <> renderProtocolTrace pt
 renderHTTPTrace (HTTPOAuth ot) = "[HTTP:OAuth] " <> renderOAuthTrace ot
 renderHTTPTrace (HTTPServer st) = "[HTTP:Server] " <> renderServerTrace st
 renderHTTPTrace (HTTPOperation ot) = "[HTTP] " <> renderOperationTrace ot
+renderHTTPTrace (HTTPOAuthBoundary bt) = "[HTTP:OAuth:Boundary] " <> renderBoundaryTrace bt
+  where
+    renderBoundaryTrace :: OAuthBoundaryTrace -> Text
+    renderBoundaryTrace (BoundaryStoreError msg) = "Storage error (details logged): " <> msg
+    renderBoundaryTrace (BoundaryAuthError msg) = "Auth error (details logged): " <> msg
+    renderBoundaryTrace (BoundaryValidationError _) = "Validation error (safe to expose)"
+    renderBoundaryTrace (BoundaryAuthorizationError _) = "Authorization error (safe to expose)"

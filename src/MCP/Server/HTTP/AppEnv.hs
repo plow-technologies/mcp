@@ -86,6 +86,7 @@ import Servant.Auth.Server (JWTSettings)
 import MCP.Server.Auth (OAuthConfig, ProtectedResourceMetadata)
 import MCP.Server.Auth.Backend (AuthBackend (..))
 import MCP.Server.Auth.Demo (AuthUser, DemoAuthError (..), DemoCredentialEnv)
+import MCP.Server.OAuth.Boundary (domainErrorToServerError)
 import MCP.Server.OAuth.InMemory (
     ExpiryConfig (..),
     OAuthState (..),
@@ -104,7 +105,7 @@ import MCP.Server.OAuth.Types (
     authorizationErrorToResponse,
     validationErrorToResponse,
  )
-import MCP.Trace.HTTP (HTTPTrace)
+import MCP.Trace.HTTP (HTTPTrace (HTTPOAuthBoundary))
 import MCP.Types (Implementation, ServerCapabilities)
 import Plow.Logging (IOTracer)
 
@@ -211,6 +212,10 @@ newtype AppM a = AppM
 
 Executes the ReaderT and ExceptT layers, translating AppError to ServerError.
 
+Uses 'domainErrorToServerError' from OAuth.Boundary for centralized error
+translation with secure logging policy (associated types are logged but
+return generic errors, fixed types are safe to expose).
+
 @
 handler :: AppEnv -> AppM a -> Handler a
 handler env action = runAppM env action
@@ -220,7 +225,13 @@ runAppM :: AppEnv -> AppM a -> Handler a
 runAppM env action = do
     result <- runExceptT $ runReaderT (unAppM action) env
     case result of
-        Left err -> throwError (toServerError err)
+        Left err -> do
+            -- Use domainErrorToServerError for centralized translation
+            -- Type annotation helps resolve ambiguous associated types
+            mServerErr <- domainErrorToServerError @Handler @AppM (envTracer env) HTTPOAuthBoundary err
+            case mServerErr of
+                Just serverErr -> throwError serverErr
+                Nothing -> throwError err500{errBody = "Internal server error"}
         Right a -> pure a
 
 -- -----------------------------------------------------------------------------
