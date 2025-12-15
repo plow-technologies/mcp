@@ -336,8 +336,10 @@ customHandler = do
 oauthServer ::
     ( OAuthStateStore m
     , AuthBackend m
-    , AuthBackendUserId m ~ UserId
+    , AuthBackendUser m ~ OAuthUser m
+    , AuthBackendUserId m ~ OAuthUserId m
     , OAuthUserId m ~ UserId
+    , OAuthUser m ~ AuthUser
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m
@@ -829,7 +831,8 @@ by calling this handler via runAppM.
 handleLogin ::
     ( OAuthStateStore m
     , AuthBackend m
-    , AuthBackendUserId m ~ UserId
+    , AuthBackendUser m ~ OAuthUser m
+    , AuthBackendUserId m ~ OAuthUserId m
     , OAuthUserId m ~ UserId
     , MonadIO m
     , MonadReader env m
@@ -1096,6 +1099,7 @@ by calling this handler via runAppM.
 handleToken ::
     ( OAuthStateStore m
     , OAuthUserId m ~ UserId
+    , OAuthUser m ~ AuthUser
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m
@@ -1148,6 +1152,7 @@ migration.
 handleAuthCodeGrant ::
     ( OAuthStateStore m
     , OAuthUserId m ~ UserId
+    , OAuthUser m ~ AuthUser
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m
@@ -1277,6 +1282,7 @@ migration.
 -}
 handleRefreshTokenGrant ::
     ( OAuthStateStore m
+    , OAuthUser m ~ AuthUser
     , MonadIO m
     , MonadReader env m
     , MonadError AppError m
