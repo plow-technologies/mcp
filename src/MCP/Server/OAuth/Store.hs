@@ -211,7 +211,7 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
 
     Satisfies: Round-trip law, Idempotence law, Overwrite law
     -}
-    storeAccessToken :: AccessTokenId -> AuthUser -> m ()
+    storeAccessToken :: AccessTokenId -> OAuthUser m -> m ()
 
     {- | Look up an access token and retrieve the associated user.
 
@@ -220,7 +220,7 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
 
     Satisfies: Round-trip law
     -}
-    lookupAccessToken :: AccessTokenId -> m (Maybe AuthUser)
+    lookupAccessToken :: AccessTokenId -> m (Maybe (OAuthUser m))
 
     -- * Refresh Token Operations
 
@@ -232,7 +232,7 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
 
     Satisfies: Round-trip law, Idempotence law, Overwrite law
     -}
-    storeRefreshToken :: RefreshTokenId -> (ClientId, AuthUser) -> m ()
+    storeRefreshToken :: RefreshTokenId -> (ClientId, OAuthUser m) -> m ()
 
     {- | Look up a refresh token and retrieve the associated client and user.
 
@@ -240,7 +240,7 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
 
     Satisfies: Round-trip law
     -}
-    lookupRefreshToken :: RefreshTokenId -> m (Maybe (ClientId, AuthUser))
+    lookupRefreshToken :: RefreshTokenId -> m (Maybe (ClientId, OAuthUser m))
 
     {- | Update an existing refresh token with new client and user data.
 
@@ -250,7 +250,7 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
 
     Satisfies: Overwrite law
     -}
-    updateRefreshToken :: RefreshTokenId -> (ClientId, AuthUser) -> m ()
+    updateRefreshToken :: RefreshTokenId -> (ClientId, OAuthUser m) -> m ()
 
     -- * Client Registration Operations
 
