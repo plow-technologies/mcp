@@ -7,7 +7,7 @@
 
 ## Summary
 
-Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error, environment, user, and user ID types. `OAuthStateStore` requires `MonadTime m` for expiry filtering. `AuthBackend.validateCredentials` returns `Maybe (UserId, User)` tuple. Handlers requiring both typeclasses use type equality constraints (`AuthBackendUser m ~ OAuthUser m`, `AuthBackendUserId m ~ OAuthUserId m`). Provide reference in-memory (`TVar`) and hard-coded credential implementations. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation. **(Updated 2025-12-15: Added user type polymorphism per spec refinement; reference implementation types colocated with implementations per FR-042; error architecture refined with four domain error types and domainErrorToServerError boundary function per Phase 10)**
+Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error, environment, user, and user ID types. `OAuthStateStore` requires `MonadTime m` for expiry filtering. `AuthBackend.validateCredentials` returns `Maybe (UserId, User)` tuple. Handlers requiring both typeclasses use type equality constraints (`AuthBackendUser m ~ OAuthUser m`, `AuthBackendUserId m ~ OAuthUserId m`). Provide reference in-memory (`TVar`) and hard-coded credential implementations. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation. **(Updated 2025-12-15: Added user type polymorphism per spec refinement; reference implementation types colocated with implementations per FR-042; error architecture refined with four domain error types and domainErrorToServerError boundary function per Phase 10; mcpApp entry point accepts natural transformation per Phase 11/FR-046)**
 
 ## Technical Context
 
@@ -2105,3 +2105,194 @@ Before marking Phase 10 complete:
 | VI. Property-Based Testing | ✅ | Can test error mapping: each domain error → expected HTTP status |
 
 **Gate Status**: PASS - Phase 10 planning complete.
+
+---
+
+## Phase 11: Application Entry Point with Natural Transformation (FR-046)
+
+**Spec Refinement** (2025-12-15): The `mcpApp` function (or equivalent application entry point) MUST accept a natural transformation `(∀ a. m a -> Handler a)` as a parameter, enabling callers to select typeclass implementations at application composition time.
+
+### Rationale
+
+The current implementation likely has a concrete `mcpApp :: IO Application` or similar that internally constructs the environment and wires up implementations. FR-046 requires exposing the polymorphic server to callers, with the natural transformation as the mechanism for selecting backends.
+
+This follows standard Servant `hoistServer` patterns and enables:
+1. **Backend selection at composition time**: Callers choose in-memory, PostgreSQL, LDAP, etc.
+2. **Framework-agnostic handlers**: Same handlers work in Servant, Yesod, tests, CLI
+3. **Testability**: Test harnesses provide test-specific nat-trans with controllable time, mock backends
+
+### Design
+
+#### Step 1: Signature Pattern
+
+```haskell
+-- | Polymorphic OAuth application entry point.
+-- Callers provide the natural transformation that interprets handlers.
+mcpApp
+  :: forall m.
+     ( OAuthStateStore m
+     , AuthBackend m
+     , MonadTime m
+     , MonadIO m
+     , OAuthUser m ~ AuthBackendUser m
+     , OAuthUserId m ~ AuthBackendUserId m
+     , ToJWT (OAuthUser m)
+     , FromJWT (OAuthUser m)
+     )
+  => (forall a. m a -> Handler a)  -- Natural transformation
+  -> Application
+mcpApp runM = serve oauthAPI (hoistServer oauthAPI runM oauthServer)
+```
+
+**Key points**:
+- Rank-2 type for natural transformation (`forall a.`)
+- All typeclass constraints on `m` appear here (callers must satisfy them)
+- `oauthServer` remains fully polymorphic
+- `hoistServer` applies the nat-trans at this boundary only
+
+#### Step 2: Reference Implementation Entry Point
+
+```haskell
+-- | Reference implementation using in-memory TVar storage and demo credentials.
+-- This is what `cabal run mcp-http -- --oauth` uses.
+defaultMcpApp :: IO Application
+defaultMcpApp = do
+  -- Initialize reference implementation environment
+  env <- mkDefaultAppEnv
+  -- Construct natural transformation for reference implementation
+  let runAppM :: forall a. AppM a -> Handler a
+      runAppM action = do
+        result <- liftIO $ runExceptT $ runReaderT (unAppM action) env
+        case result of
+          Right a -> pure a
+          Left err -> do
+            -- Use boundary function for domain → HTTP error translation
+            mServerErr <- liftIO $ domainErrorToServerError (envTracer env) err
+            throwError $ fromMaybe err500 mServerErr
+  -- Apply to polymorphic mcpApp
+  pure $ mcpApp runAppM
+```
+
+**Separation of concerns**:
+- `mcpApp` is pure and polymorphic (library code)
+- `defaultMcpApp` does IO setup and provides the concrete nat-trans (application code)
+
+#### Step 3: Alternative Entry Point with Context
+
+For applications needing Servant's `Context` (e.g., JWT settings):
+
+```haskell
+-- | Polymorphic entry point with Servant Context for auth settings.
+mcpAppWithContext
+  :: forall m ctx.
+     ( OAuthStateStore m, AuthBackend m, MonadTime m, MonadIO m
+     , OAuthUser m ~ AuthBackendUser m, OAuthUserId m ~ AuthBackendUserId m
+     , ToJWT (OAuthUser m), FromJWT (OAuthUser m)
+     , HasContextEntry ctx JWTSettings
+     , HasContextEntry ctx CookieSettings
+     )
+  => Context ctx
+  -> (forall a. m a -> Handler a)
+  -> Application
+mcpAppWithContext ctx runM =
+  serveWithContext oauthAPI ctx (hoistServerWithContext oauthAPI (Proxy @ctx) runM oauthServer)
+```
+
+#### Step 4: Test Harness Integration
+
+The test harness's `makeTestApp` (FR-033) uses the same pattern:
+
+```haskell
+-- | Construct test Application with controllable time.
+makeTestApp
+  :: forall m.
+     ( OAuthStateStore m, AuthBackend m, ... )
+  => TestEnv m
+  -> IO (Application, NominalDiffTime -> IO ())
+makeTestApp testEnv = do
+  -- Test-specific environment setup
+  timeTVar <- newTVarIO testStartTime
+  let testRunM :: forall a. m a -> Handler a
+      testRunM = runTestM testEnv timeTVar
+      advanceTime dt = atomically $ modifyTVar timeTVar (addUTCTime dt)
+  pure (mcpApp testRunM, advanceTime)
+```
+
+This ensures the SAME `mcpApp` is used in both production and tests—only the nat-trans differs.
+
+#### Step 5: Custom Backend Example
+
+Third-party implementers use the same pattern:
+
+```haskell
+-- | PostgreSQL-backed OAuth application.
+postgresMcpApp :: PostgresConfig -> IO Application
+postgresMcpApp pgConfig = do
+  pool <- createPool pgConfig
+  env <- mkPostgresEnv pool
+  let runPostgresM :: forall a. PostgresM a -> Handler a
+      runPostgresM action = do
+        result <- liftIO $ runPostgres pool (runExceptT $ runReaderT action env)
+        case result of
+          Right a -> pure a
+          Left err -> do
+            -- Custom error handling for PostgresM's error type
+            mServerErr <- liftIO $ domainErrorToServerError (pgTracer env) err
+            throwError $ fromMaybe err500 mServerErr
+  pure $ mcpApp runPostgresM
+```
+
+### Module Organization Update
+
+```text
+src/MCP/Server/
+├── OAuth/
+│   ├── App.hs           # NEW: mcpApp, mcpAppWithContext (polymorphic entry points)
+│   ├── Server.hs        # oauthServer (polymorphic server, unchanged)
+│   ├── Boundary.hs      # domainErrorToServerError (unchanged)
+│   └── ...
+├── HTTP.hs              # MODIFY: Import and re-export mcpApp; defaultMcpApp here
+└── ...
+```
+
+### Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/MCP/Server/OAuth/App.hs` | NEW: `mcpApp`, `mcpAppWithContext` |
+| `src/MCP/Server/HTTP.hs` | MODIFY: Add `defaultMcpApp`, import from OAuth.App |
+| `app/Main.hs` | MODIFY: Use `defaultMcpApp` (or custom nat-trans if configured) |
+| `test/Spec/OAuth/...` | MODIFY: Use `mcpApp` with test nat-trans via `makeTestApp` |
+
+### Migration Path
+
+1. **Create `OAuth.App` module** with polymorphic `mcpApp`
+2. **Extract nat-trans construction** from current monolithic setup into `defaultMcpApp`
+3. **Update `Main.hs`** to use `defaultMcpApp` (behavior unchanged, structure improved)
+4. **Update test harness** to use `mcpApp` directly with test-specific nat-trans
+5. **Document pattern** for third-party implementers
+
+### Verification Checklist
+
+Before marking Phase 11 complete:
+
+- [ ] `mcpApp :: (∀ a. m a -> Handler a) -> Application` exists and compiles
+- [ ] `mcpApp` has all necessary typeclass constraints on `m`
+- [ ] `defaultMcpApp :: IO Application` uses `mcpApp` internally
+- [ ] `cabal run mcp-http -- --oauth` still works (uses `defaultMcpApp`)
+- [ ] Test harness uses `mcpApp` with test nat-trans
+- [ ] All existing OAuth tests pass
+- [ ] Third-party example (mock PostgresM) compiles and type-checks
+
+### Constitution Compliance (Phase 11)
+
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. Type-Driven Design | ✅ | Polymorphic signature encodes all requirements as constraints; callers must satisfy them |
+| II. Deep Module Architecture | ✅ | Single entry point hides server complexity; callers provide only the nat-trans |
+| III. Denotational Semantics | ✅ | Clear semantics: nat-trans interprets `m` actions in `Handler` |
+| IV. Total Functions | ✅ | Pure function; no partiality |
+| V. Pure Core, Impure Shell | ✅ | `mcpApp` is pure; IO lives in `defaultMcpApp` and caller's nat-trans construction |
+| VI. Property-Based Testing | ✅ | Same `mcpApp` used in tests with different nat-trans enables property testing |
+
+**Gate Status**: PASS - Phase 11 planning complete.
