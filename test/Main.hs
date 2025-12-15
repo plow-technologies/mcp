@@ -27,6 +27,7 @@ import Laws.AuthBackendSignatureSpec qualified as AuthBackendSignatureSpec
 import Laws.AuthBackendSpec (authBackendKnownCredentials, authBackendLaws)
 import Laws.AuthCodeFunctorSpec qualified as AuthCodeFunctorSpec
 import Laws.BoundarySpec qualified as BoundarySpec
+import Laws.ErrorBoundarySecuritySpec qualified as ErrorBoundarySecuritySpec
 import Laws.OAuthStateStoreSpec (oauthStateStoreLaws)
 import Laws.OAuthUserTypeSpec qualified as OAuthUserTypeSpec
 
@@ -93,6 +94,9 @@ spec = do
 
     -- Boundary layer tests (Servant FromHttpApiData/ToHttpApiData)
     BoundarySpec.spec
+
+    -- Error boundary security tests
+    ErrorBoundarySecuritySpec.spec
 
     -- Functional tests
     describe "Functional" OAuthFlowSpec.spec

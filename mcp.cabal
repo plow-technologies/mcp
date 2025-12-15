@@ -262,6 +262,7 @@ test-suite mcp-test
         Laws.AuthBackendAssociatedTypesSpec
         Laws.AuthBackendSignatureSpec
         Laws.BoundarySpec
+        Laws.ErrorBoundarySecuritySpec
         Trace.FilterSpec
         Trace.GoldenSpec
         Trace.OAuthSpec
@@ -301,4 +302,6 @@ test-suite mcp-test
         http-types >= 0.12 && < 0.13,
         servant-server >= 0.19 && < 0.21,
         servant-auth-server >= 0.4 && < 0.5,
-        stm >= 2.5 && < 2.6
+        stm >= 2.5 && < 2.6,
+        aeson >= 2.1 && < 2.3,
+        bytestring >= 0.11 && < 0.13
