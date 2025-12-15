@@ -84,7 +84,7 @@ import Servant.Auth.Server (JWTSettings)
 
 import MCP.Server.Auth (OAuthConfig, ProtectedResourceMetadata)
 import MCP.Server.Auth.Backend (AuthBackend (..))
-import MCP.Server.Auth.Demo (DemoAuthError (..), DemoCredentialEnv)
+import MCP.Server.Auth.Demo (AuthUser, DemoAuthError (..), DemoCredentialEnv)
 import MCP.Server.OAuth.InMemory (
     ExpiryConfig (..),
     OAuthState (..),
@@ -94,7 +94,6 @@ import MCP.Server.OAuth.InMemory (
 import MCP.Server.OAuth.Store (OAuthStateStore (..))
 import MCP.Server.OAuth.Types (
     AuthCodeId (..),
-    AuthUser,
     AuthorizationCode (..),
     PendingAuthorization (..),
     SessionId (..),

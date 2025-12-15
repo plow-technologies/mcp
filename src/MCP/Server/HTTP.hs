@@ -75,14 +75,12 @@ import MCP.Server.HTTP.AppEnv (AppEnv (..), HTTPServerConfig (..), runAppM)
 
 -- Import OAuthAPI from OAuth.Server (migration from duplication)
 
-import MCP.Server.Auth.Demo (DemoCredentialEnv (..))
+import MCP.Server.Auth.Demo (AuthUser (..), DemoCredentialEnv (..))
 import MCP.Server.OAuth.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
 import MCP.Server.OAuth.Server (LoginForm (..), OAuthAPI)
 import MCP.Server.OAuth.Server qualified as OAuthServer
 import MCP.Server.OAuth.Store ()
-
--- Import OAuthStateStore instance for AppM
-import MCP.Server.OAuth.Types (AuthUser (..), ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
+import MCP.Server.OAuth.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Operation (OperationTrace (..))
 import MCP.Trace.Server (ServerTrace (..))

@@ -1,5 +1,8 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
 
 {- |
@@ -54,17 +57,23 @@ module MCP.Server.Auth.Demo (
     -- * Error Type
     DemoAuthError (..),
 
+    -- * User Types
+    DemoUserId,
+    AuthUser (..),
+
     -- * Default Credentials
     defaultDemoCredentialStore,
 ) where
 
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Reader (ReaderT, asks)
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), (.=))
 import Data.ByteArray qualified as BA
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
+import Servant.Auth.Server (FromJWT, ToJWT)
 
 import MCP.Server.Auth.Backend (
     AuthBackend (..),
@@ -74,7 +83,42 @@ import MCP.Server.Auth.Backend (
     mkHashedPassword,
     mkPlaintextPassword,
  )
-import MCP.Server.OAuth.Types (AuthUser (..), UserId (..))
+import MCP.Server.OAuth.Types (UserId (..))
+
+-- -----------------------------------------------------------------------------
+-- User Types
+-- -----------------------------------------------------------------------------
+
+-- | Demo user ID type (alias for UserId)
+type DemoUserId = UserId
+
+-- | Authenticated user information
+data AuthUser = AuthUser
+    { userUserId :: UserId
+    , userUserEmail :: Maybe Text
+    , userUserName :: Maybe Text
+    }
+    deriving stock (Eq, Show, Generic)
+
+instance FromJSON AuthUser where
+    parseJSON = withObject "AuthUser" $ \v ->
+        AuthUser
+            <$> v .: "user_id"
+            <*> v .:? "user_email"
+            <*> v .:? "user_name"
+
+instance ToJSON AuthUser where
+    toJSON AuthUser{..} =
+        object
+            [ "user_id" .= userUserId
+            , "user_email" .= userUserEmail
+            , "user_name" .= userUserName
+            ]
+
+-- | JWT instances for AuthUser (rely on JSON instances above)
+instance ToJWT AuthUser
+
+instance FromJWT AuthUser
 
 -- -----------------------------------------------------------------------------
 -- Environment
