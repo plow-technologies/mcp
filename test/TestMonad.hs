@@ -73,7 +73,7 @@ module TestMonad (
     getOAuthState,
 
     -- * Re-exports for convenience
-    module MCP.Server.OAuth.Store,
+    module Servant.OAuth2.IDP.Store,
     module MCP.Server.Auth.Backend,
     module MCP.Server.Time,
 ) where
@@ -89,8 +89,8 @@ import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (UTCTime, addUTCTime)
 import MCP.Server.Auth.Backend
 import MCP.Server.Auth.Demo (AuthUser (..))
-import MCP.Server.OAuth.Store
-import MCP.Server.OAuth.Types
+import Servant.OAuth2.IDP.Store
+import Servant.OAuth2.IDP.Types
 import MCP.Server.Time
 
 -- -----------------------------------------------------------------------------

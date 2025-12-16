@@ -84,17 +84,17 @@ import Servant (Handler, ServerError, err400, err401, err500, errBody)
 import Servant.Auth.Server (JWTSettings)
 
 import MCP.Server.Auth (OAuthConfig, ProtectedResourceMetadata)
-import MCP.Server.Auth.Backend (AuthBackend (..))
-import MCP.Server.Auth.Demo (AuthUser, DemoAuthError (..), DemoCredentialEnv)
-import MCP.Server.OAuth.Boundary (domainErrorToServerError)
-import MCP.Server.OAuth.InMemory (
+import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
+import Servant.OAuth2.IDP.Auth.Demo (AuthUser, DemoAuthError (..), DemoCredentialEnv)
+import Servant.OAuth2.IDP.Boundary (domainErrorToServerError)
+import Servant.OAuth2.IDP.Store.InMemory (
     ExpiryConfig (..),
     OAuthState (..),
     OAuthStoreError (..),
     OAuthTVarEnv (..),
  )
-import MCP.Server.OAuth.Store (OAuthStateStore (..))
-import MCP.Server.OAuth.Types (
+import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
+import Servant.OAuth2.IDP.Types (
     AuthCodeId (..),
     AuthorizationCode (..),
     AuthorizationError (..),

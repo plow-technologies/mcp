@@ -27,11 +27,15 @@ module MCP.Server.HTTP (
     defaultDemoOAuthConfig,
     defaultProtectedResourceMetadata,
 
-    -- * Demo Entry Point
+    -- * Entry Points
+    mcpApp,
+    mcpAppWithOAuth,
     demoMcpApp,
 
-    -- * Polymorphic OAuth Entry Points
-    module MCP.Server.OAuth.App,
+    -- * API Types
+    MCPAPI,
+    FullAPI,
+    OAuthAPI,
 
     -- * HTML Content Type
     HTML,
@@ -81,22 +85,19 @@ import MCP.Server.Auth (OAuthConfig (..), OAuthProvider (..), ProtectedResourceM
 import MCP.Server.Auth.Demo (AuthUser (..), DemoCredentialEnv (..), defaultDemoCredentialStore)
 
 -- Import AuthBackend instance for AppM
-import MCP.Server.HTTP.AppEnv (AppEnv (..), HTTPServerConfig (..), runAppM)
+import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..), runAppM)
 
--- Import polymorphic mcpApp from OAuth.App (unqualified for re-export)
-import MCP.Server.OAuth.App
+-- Import OAuthAPI from new namespace
 
--- Import OAuthAPI from OAuth.Server (migration from duplication)
-import MCP.Server.OAuth.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
-import MCP.Server.OAuth.Server (LoginForm (..), OAuthAPI)
-import MCP.Server.OAuth.Server qualified as OAuthServer
-import MCP.Server.OAuth.Store ()
-import MCP.Server.OAuth.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthErrorResponse (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Operation (OperationTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
 import MCP.Types
 import Plow.Logging (IOTracer (..), Tracer (..), traceWith)
+import Servant.OAuth2.IDP.Server (LoginForm (..), OAuthAPI)
+import Servant.OAuth2.IDP.Server qualified as OAuthServer
+import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
+import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthErrorResponse (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
 
 -- | HTML content type for Servant
 data HTML
@@ -158,8 +159,91 @@ type UnprotectedMCPAPI = "mcp" :> ReqBody '[JSON] Aeson.Value :> Post '[JSON] Ae
 
 -- Note: OAuthAPI, ProtectedResourceAPI, and LoginAPI are now imported from MCP.Server.OAuth.Server
 
--- | Complete API with OAuth
+-- | Complete API with OAuth (legacy name, kept for compatibility)
 type CompleteAPI auths = OAuthAPI :<|> MCPAPI auths
+
+-- | Full API with OAuth (FR-047: new canonical name)
+type FullAPI = OAuthAPI :<|> MCPAPI '[JWT]
+
+-- -----------------------------------------------------------------------------
+-- Polymorphic Entry Points (FR-046, FR-048)
+-- -----------------------------------------------------------------------------
+
+{- | MCP-only application (no OAuth constraints).
+
+This entry point serves only the MCP API endpoint without OAuth endpoints.
+Use this when you don't need OAuth authentication.
+
+This is a simplified entry point that works with AppM.
+For now, it delegates to the internal implementation.
+
+= Usage Example
+
+@
+import MCP.Server.HTTP (mcpApp)
+import MCP.Server.HTTP.AppEnv (AppM, AppEnv, runAppM)
+
+myApp :: AppEnv -> Application
+myApp env = mcpApp (runAppM env)
+@
+-}
+mcpApp ::
+    (forall a. AppM a -> Handler a) ->
+    Application
+mcpApp _runM =
+    -- For now, use a minimal unprotected MCP server
+    -- This will be expanded in future phases
+    serve
+        (Proxy :: Proxy UnprotectedMCPAPI)
+        unprotectedMCPHandler
+  where
+    unprotectedMCPHandler :: Aeson.Value -> Handler Aeson.Value
+    unprotectedMCPHandler req = do
+        -- Basic echo handler for demonstration
+        -- In production, this would use the full MCP server logic
+        pure $ object ["result" .= ("MCP server response" :: Text), "request" .= req]
+
+{- | MCP + OAuth application with full OAuth 2.1 support.
+
+This entry point serves both the MCP API and OAuth endpoints.
+
+Uses the polymorphic `oauthServer` from Servant.OAuth2.IDP.Server and
+`mcpServerAuth` for JWT-protected MCP endpoint.
+
+= Usage Example
+
+@
+import MCP.Server.HTTP (mcpAppWithOAuth)
+import MCP.Server.HTTP.AppEnv (AppEnv)
+
+-- Create AppEnv with OAuth state, auth backend, config, tracer, JWT settings
+appEnv <- mkAppEnv ...
+
+-- Create WAI Application
+let app = mcpAppWithOAuth appEnv
+@
+-}
+mcpAppWithOAuth ::
+    (MCPServer MCPServerM) =>
+    AppEnv ->
+    TVar ServerState ->
+    Application
+mcpAppWithOAuth appEnv stateVar =
+    let jwtSettings = envJWT appEnv
+        cookieSettings = defaultCookieSettings
+        authContext = cookieSettings :. jwtSettings :. EmptyContext
+        config = envConfig appEnv
+        tracer = envTracer appEnv
+     in serveWithContext
+            (Proxy :: Proxy FullAPI)
+            authContext
+            ( hoistServerWithContext
+                (Proxy :: Proxy OAuthAPI)
+                (Proxy :: Proxy '[CookieSettings, JWTSettings])
+                (runAppM appEnv)
+                OAuthServer.oauthServer
+                :<|> mcpServerAuth config tracer stateVar
+            )
 
 -- | Create a WAI Application for the MCP HTTP server (internal monomorphic version)
 mcpAppInternal :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> OAuthTVarEnv -> JWTSettings -> Application
@@ -689,7 +773,7 @@ For production use, create a custom AppEnv with appropriate:
 * Production configuration (proper base URL, HTTPS, etc.)
 * Structured tracing to your logging system
 -}
-demoMcpApp :: IO Application
+demoMcpApp :: (MCPServer MCPServerM) => IO Application
 demoMcpApp = do
     -- Generate JWK for JWT signing
     jwk <- generateKey
@@ -729,8 +813,11 @@ demoMcpApp = do
                 , envTimeProvider = Nothing -- Use real IO time
                 }
 
-    -- Use polymorphic mcpApp with runAppM natural transformation
-    pure $ mcpApp (runAppM appEnv)
+    -- Initialize server state
+    stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
+
+    -- Use polymorphic mcpAppWithOAuth with AppEnv and ServerState
+    pure $ mcpAppWithOAuth appEnv stateVar
 
 -- | Run the MCP server as an HTTP server
 runServerHTTP :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> IO ()

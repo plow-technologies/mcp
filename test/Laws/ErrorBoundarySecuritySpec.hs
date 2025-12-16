@@ -51,12 +51,12 @@ import Test.Hspec (Spec, describe, it, shouldBe)
 import MCP.Server.Auth.Backend (Username (..))
 import MCP.Server.Auth.Demo (DemoAuthError (..))
 import MCP.Server.HTTP.AppEnv (AppError (..), AppM)
-import MCP.Server.OAuth.Boundary (
+import Servant.OAuth2.IDP.Boundary (
     OAuthBoundaryTrace (..),
     domainErrorToServerError,
  )
-import MCP.Server.OAuth.InMemory (OAuthStoreError (..))
-import MCP.Server.OAuth.Types (
+import Servant.OAuth2.IDP.Store.InMemory (OAuthStoreError (..))
+import Servant.OAuth2.IDP.Types (
     AuthorizationError (..),
     OAuthErrorResponse (..),
     ValidationError (..),

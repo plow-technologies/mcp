@@ -56,8 +56,8 @@ import Test.QuickCheck (Arbitrary, ioProperty, (===))
 import Generators ()
 
 -- OAuth domain types and typeclass
-import MCP.Server.OAuth.Store (OAuthStateStore (..))
-import MCP.Server.OAuth.Types (
+import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
+import Servant.OAuth2.IDP.Types (
     AccessTokenId,
     AuthorizationCode (..),
     ClientId,

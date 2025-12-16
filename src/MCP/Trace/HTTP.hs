@@ -16,7 +16,7 @@ module MCP.Trace.HTTP (
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
-import MCP.Server.OAuth.Boundary (OAuthBoundaryTrace (..))
+import Servant.OAuth2.IDP.Boundary (OAuthBoundaryTrace (..))
 import MCP.Trace.OAuth (OAuthTrace, renderOAuthTrace)
 import MCP.Trace.Operation (OperationTrace, renderOperationTrace)
 import MCP.Trace.Protocol (ProtocolTrace, renderProtocolTrace)

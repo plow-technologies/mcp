@@ -81,7 +81,7 @@ import Web.HttpApiData (FromHttpApiData (..), ToHttpApiData (..))
 import Generators ()
 
 -- OAuth domain types
-import MCP.Server.OAuth.Types (
+import Servant.OAuth2.IDP.Types (
     AccessTokenId,
     AuthCodeId,
     ClientAuthMethod,

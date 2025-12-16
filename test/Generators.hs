@@ -61,7 +61,7 @@ import MCP.Server.Auth.Backend (
     mkUsername,
  )
 import MCP.Server.Auth.Demo (AuthUser (..))
-import MCP.Server.OAuth.Types (
+import Servant.OAuth2.IDP.Types (
     AccessTokenId (..),
     AuthCodeId (..),
     AuthorizationCode (..),

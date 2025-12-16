@@ -96,13 +96,14 @@ library
         MCP.Server.Auth.Backend
         MCP.Server.Auth.Demo
         MCP.Server.Time
-        MCP.Server.OAuth.Types
-        MCP.Server.OAuth.Store
-        MCP.Server.OAuth.InMemory
-        MCP.Server.OAuth.Boundary
-        MCP.Server.OAuth.Server
-        MCP.Server.OAuth.App
-        MCP.Server.OAuth.Test.Internal
+        Servant.OAuth2.IDP.Types
+        Servant.OAuth2.IDP.Store
+        Servant.OAuth2.IDP.Store.InMemory
+        Servant.OAuth2.IDP.Boundary
+        Servant.OAuth2.IDP.Server
+        Servant.OAuth2.IDP.Test.Internal
+        Servant.OAuth2.IDP.Auth.Backend
+        Servant.OAuth2.IDP.Auth.Demo
         MCP.Trace.Types
         MCP.Trace.HTTP
         MCP.Trace.OAuth

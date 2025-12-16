@@ -22,8 +22,8 @@ import Test.Hspec (Spec, describe, it, shouldBe)
 import TestMonad (TestM)
 
 import MCP.Server.Auth.Demo (AuthUser)
-import MCP.Server.OAuth.Store (OAuthStateStore (OAuthUser, OAuthUserId))
-import MCP.Server.OAuth.Types (UserId)
+import Servant.OAuth2.IDP.Store (OAuthStateStore (OAuthUser, OAuthUserId))
+import Servant.OAuth2.IDP.Types (UserId)
 
 {- | Test that OAuthUser and OAuthUserId associated types exist.
 

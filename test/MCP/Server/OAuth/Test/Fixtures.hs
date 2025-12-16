@@ -51,14 +51,14 @@ import Plow.Logging (IOTracer (..), Tracer (..))
 import Servant.Auth.Server (defaultJWTSettings, generateKey)
 import Servant.Server.Internal.Handler (runHandler)
 
+import MCP.Server (MCPServer (..), MCPServerM, initialServerState)
 import MCP.Server.Auth.Demo (DemoCredentialEnv (..), defaultDemoCredentialStore)
-import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata)
+import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata, mcpAppWithOAuth)
 import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, runAppM)
-import MCP.Server.OAuth.App (mcpApp)
-import MCP.Server.OAuth.InMemory (defaultExpiryConfig, newOAuthTVarEnv)
-import MCP.Server.OAuth.Test.Internal (TestConfig (..), TestCredentials (..))
 import MCP.Server.Time (MonadTime (..))
 import MCP.Types (Implementation (..), ServerCapabilities (..), ToolsCapability (..))
+import Servant.OAuth2.IDP.Store.InMemory (defaultExpiryConfig, newOAuthTVarEnv)
+import Servant.OAuth2.IDP.Test.Internal (TestConfig (..), TestCredentials (..))
 
 -- -----------------------------------------------------------------------------
 -- Default Test Values
@@ -175,7 +175,7 @@ suite against the reference implementation.
 @
 import Test.Hspec
 import MCP.Server.OAuth.Test.Fixtures
-import MCP.Server.OAuth.Test.Internal (oauthConformanceSpec)
+import Servant.OAuth2.IDP.Test.Internal (oauthConformanceSpec)
 
 spec :: Spec
 spec = do
@@ -191,7 +191,7 @@ spec = do
 * Provides time advancement via TVar manipulation
 * Uses polymorphic mcpApp entry point from MCP.Server.OAuth.App
 -}
-referenceTestConfig :: IO (TestConfig AppM)
+referenceTestConfig :: (MCPServer MCPServerM) => IO (TestConfig AppM)
 referenceTestConfig = do
     let makeApp = do
             -- Create fresh time TVar for this test
@@ -200,9 +200,12 @@ referenceTestConfig = do
             -- Create fresh environment
             env <- mkTestEnv timeTVar
 
-            -- Build actual WAI Application using mcpApp polymorphic entry point
-            -- The natural transformation is runAppM env :: forall a. AppM a -> Handler a
-            let app = mcpApp (runAppM env)
+            -- Create fresh server state
+            let config = envConfig env
+            stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
+
+            -- Build actual WAI Application using mcpAppWithOAuth polymorphic entry point
+            let app = mcpAppWithOAuth env stateVar
 
             -- Time advancement callback - modifies the TVar that controls currentTime
             let advanceTime dt = atomically $ modifyTVar' timeTVar (addUTCTime dt)

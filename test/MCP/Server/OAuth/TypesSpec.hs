@@ -4,7 +4,7 @@ module MCP.Server.OAuth.TypesSpec (spec) where
 
 import Data.Text (Text)
 import Data.Text qualified as T
-import MCP.Server.OAuth.Types
+import Servant.OAuth2.IDP.Types
 import Network.HTTP.Types.Status (statusCode)
 import Network.URI (parseURI)
 import Test.Hspec

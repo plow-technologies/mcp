@@ -9,7 +9,7 @@ import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
 
 import Generators ()
-import MCP.Server.OAuth.Types (
+import Servant.OAuth2.IDP.Types (
     AuthCodeId (..),
     AuthorizationCode (..),
     ClientId (..),

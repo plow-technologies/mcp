@@ -79,7 +79,7 @@ import Network.HTTP.Simple (addRequestHeader, getResponseBody, httpJSON, parseRe
 import Plow.Logging (IOTracer)
 import System.Random (newStdGen, randomRs)
 
-import MCP.Server.OAuth.Types (
+import Servant.OAuth2.IDP.Types (
     ClientAuthMethod (..),
     CodeChallenge (..),
     CodeChallengeMethod (..),

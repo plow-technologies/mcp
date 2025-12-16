@@ -28,7 +28,7 @@ module MCP.Server.OAuth.AppSpec (spec) where
 import Test.Hspec (Spec, describe, it, shouldBe)
 
 -- Import the functions under test to verify they exist
-import MCP.Server.OAuth.App ()
+-- import MCP.Server.OAuth.App () -- Module removed, functionality moved to MCP.Server.HTTP
 
 {- | Test specification for MCP.Server.OAuth.App
 

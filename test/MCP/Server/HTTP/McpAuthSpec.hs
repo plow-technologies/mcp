@@ -31,7 +31,7 @@ import MCP.Server (MCPServer (..), MCPServerM, initialServerState)
 import MCP.Server.Auth.Demo (AuthUser (..))
 import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata)
 import MCP.Server.HTTP qualified as HTTP
-import MCP.Server.OAuth.Types (UserId (..))
+import Servant.OAuth2.IDP.Types (UserId (..))
 import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types (Implementation (..), ServerCapabilities (..))
 

@@ -42,7 +42,7 @@ import MCP.Server.Auth
 import MCP.Server.Auth.Demo (DemoCredentialEnv (..), defaultDemoCredentialStore)
 import MCP.Server.HTTP
 import MCP.Server.HTTP.AppEnv (AppEnv (..), runAppM)
-import MCP.Server.OAuth.InMemory (defaultExpiryConfig, newOAuthTVarEnv)
+import Servant.OAuth2.IDP.Store.InMemory (defaultExpiryConfig, newOAuthTVarEnv)
 import MCP.Trace.Types (MCPTrace (..), isOAuthTrace, renderMCPTrace)
 import MCP.Types
 import Servant.Auth.Server (defaultJWTSettings, generateKey)
