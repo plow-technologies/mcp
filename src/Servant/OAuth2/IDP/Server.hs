@@ -3,7 +3,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeOperators #-}
 
 {- |
@@ -54,12 +53,13 @@ to use the typeclass-based design.
 Current status: Skeleton created, handlers not yet ported.
 -}
 module Servant.OAuth2.IDP.Server (
-    -- * API Definition
+    -- * API Definition (re-exported from API module)
     OAuthAPI,
     ProtectedResourceAPI,
     LoginAPI,
+    HTML,
 
-    -- * Request/Response Types
+    -- * Request/Response Types (re-exported from API module)
     ClientRegistrationRequest (..),
     ClientRegistrationResponse (..),
     LoginForm (..),
@@ -86,8 +86,6 @@ import Control.Monad (unless, when)
 import Control.Monad.Error.Class (MonadError, throwError)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, asks)
-import Data.Aeson ((.=))
-import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as LBS
 import Data.Functor.Contravariant (contramap)
 import Data.Generics.Product (HasType)
@@ -102,31 +100,16 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (addUTCTime)
 import Data.UUID.V4 qualified as UUID
-import GHC.Generics (Generic)
-import Network.HTTP.Media ((//), (/:))
 import Network.URI (parseURI)
 import Servant (
-    FormUrlEncoded,
-    Get,
     Header,
     Headers,
-    JSON,
     NoContent (..),
-    Post,
-    QueryParam,
-    QueryParam',
-    ReqBody,
-    Required,
     ServerT,
-    StdMethod (POST),
-    Verb,
     addHeader,
     (:<|>) (..),
-    (:>),
  )
-import Servant.API (Accept (..), MimeRender (..))
 import Servant.Auth.Server (JWTSettings, ToJWT, makeJWT)
-import Web.FormUrlEncoded (FromForm (..), parseUnique)
 import Web.HttpApiData (ToHttpApiData (..), parseUrlPiece)
 
 import Data.UUID qualified as UUID
@@ -139,16 +122,29 @@ import MCP.Server.Auth (
     refreshTokenPrefix,
     validateCodeVerifier,
  )
-import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..), PlaintextPassword, Username (..), mkPlaintextPassword, mkUsername)
-import Servant.OAuth2.IDP.Auth.Demo (DemoAuthError (..))
 import MCP.Server.HTTP.AppEnv (AppError (..), HTTPServerConfig (..))
+import MCP.Server.Time (MonadTime (..))
+import MCP.Trace.HTTP (HTTPTrace (..))
+import MCP.Trace.OAuth qualified as OAuthTrace
+import Plow.Logging (IOTracer, traceWith)
+import Servant.OAuth2.IDP.API (
+    ClientRegistrationRequest (..),
+    ClientRegistrationResponse (..),
+    HTML,
+    LoginAPI,
+    LoginForm (..),
+    OAuthAPI,
+    ProtectedResourceAPI,
+    TokenResponse (..),
+ )
+import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..), Username (..))
+import Servant.OAuth2.IDP.Auth.Demo (DemoAuthError (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     AccessTokenId (..),
     AuthCodeId (..),
     AuthorizationCode (..),
     AuthorizationError (..),
-    ClientAuthMethod,
     ClientId (..),
     ClientInfo (..),
     CodeChallenge,
@@ -171,95 +167,10 @@ import Servant.OAuth2.IDP.Types (
     unCodeVerifier,
     unRefreshTokenId,
     unScope,
-    unSessionId,
  )
-import MCP.Server.Time (MonadTime (..))
-import MCP.Trace.HTTP (HTTPTrace (..))
-import MCP.Trace.OAuth qualified as OAuthTrace
-import Plow.Logging (IOTracer, traceWith)
 
--- -----------------------------------------------------------------------------
--- HTML Content Type (imported from HTTP.hs for now)
--- -----------------------------------------------------------------------------
-
--- | HTML content type for Servant (will be moved to separate module later)
-data HTML
-
-instance Accept HTML where
-    contentType _ = "text" // "html" /: ("charset", "utf-8")
-
-instance MimeRender HTML Text where
-    mimeRender _ = LBS.fromStrict . TE.encodeUtf8
-
--- -----------------------------------------------------------------------------
--- API Types
--- -----------------------------------------------------------------------------
-
-{- | Protected Resource Metadata API (RFC 9728).
-
-Provides metadata about OAuth-protected resources including:
-
-* Resource identifier
-* List of authorization servers
-* Supported scopes
-* Supported bearer token methods
--}
-type ProtectedResourceAPI =
-    ".well-known" :> "oauth-protected-resource" :> Get '[JSON] ProtectedResourceMetadata
-
-{- | Login API endpoints.
-
-Handles the interactive login flow:
-
-1. User submits credentials via form
-2. Server validates credentials
-3. On success: redirects with authorization code
-4. On failure: returns error page
-
-Returns HTTP 302 redirect with:
-
-* @Location@ header: redirect URI with code or error
-* @Set-Cookie@ header: session cookie (cleared after use)
--}
-type LoginAPI =
-    "login"
-        :> Header "Cookie" Text
-        :> ReqBody '[FormUrlEncoded] LoginForm
-        :> Verb 'POST 302 '[HTML] (Headers '[Header "Location" RedirectTarget, Header "Set-Cookie" SessionCookie] NoContent)
-
-{- | Complete OAuth 2.1 API.
-
-Provides all OAuth endpoints:
-
-* @/.well-known/oauth-protected-resource@: Protected resource metadata
-* @/.well-known/oauth-authorization-server@: Authorization server metadata
-* @/register@: Dynamic client registration
-* @/authorize@: Authorization endpoint (returns login page)
-* @/login@: Login form submission endpoint
-* @/token@: Token exchange endpoint
-
-All endpoints follow RFC 6749, RFC 8414, and MCP OAuth specification.
--}
-type OAuthAPI =
-    ProtectedResourceAPI
-        :<|> ".well-known" :> "oauth-authorization-server" :> Get '[JSON] OAuthMetadata
-        :<|> "register"
-            :> ReqBody '[JSON] ClientRegistrationRequest
-            :> Verb 'POST 201 '[JSON] ClientRegistrationResponse
-        :<|> "authorize"
-            :> QueryParam' '[Required] "response_type" ResponseType
-            :> QueryParam' '[Required] "client_id" ClientId
-            :> QueryParam' '[Required] "redirect_uri" RedirectUri
-            :> QueryParam' '[Required] "code_challenge" CodeChallenge
-            :> QueryParam' '[Required] "code_challenge_method" CodeChallengeMethod
-            :> QueryParam "scope" Text
-            :> QueryParam "state" Text
-            :> QueryParam "resource" Text
-            :> Get '[HTML] (Headers '[Header "Set-Cookie" SessionCookie] Text)
-        :<|> LoginAPI
-        :<|> "token"
-            :> ReqBody '[FormUrlEncoded] [(Text, Text)]
-            :> Post '[JSON] TokenResponse
+-- Note: API types (OAuthAPI, ProtectedResourceAPI, LoginAPI, HTML) are now
+-- imported from Servant.OAuth2.IDP.API and re-exported from this module.
 
 -- -----------------------------------------------------------------------------
 -- Constraint Alias
@@ -354,99 +265,9 @@ oauthServer =
         :<|> handleLogin
         :<|> handleToken
 
--- -----------------------------------------------------------------------------
--- Request/Response Types (moved from HTTP.hs)
--- -----------------------------------------------------------------------------
-
--- | Login form data
-data LoginForm = LoginForm
-    { formUsername :: Username
-    , formPassword :: PlaintextPassword
-    , formSessionId :: SessionId
-    , formAction :: Text
-    }
-    deriving (Generic)
-
--- | Custom Show instance that redacts password
-instance Show LoginForm where
-    show (LoginForm u _p s a) = "LoginForm {formUsername = " <> show u <> ", formPassword = <redacted>, formSessionId = " <> show s <> ", formAction = " <> show a <> "}"
-
-instance FromForm LoginForm where
-    fromForm form = do
-        userText <- parseUnique "username" form
-        passText <- parseUnique "password" form
-        sessText <- parseUnique "session_id" form
-        action <- parseUnique "action" form
-
-        username <- case mkUsername userText of
-            Just u -> Right u
-            Nothing -> Left "Invalid username"
-        let password = mkPlaintextPassword passText
-        sessionId <- case mkSessionId sessText of
-            Just s -> Right s
-            Nothing -> Left "Invalid session_id (must be UUID)"
-
-        pure $ LoginForm username password sessionId action
-
--- | Client registration request
-data ClientRegistrationRequest = ClientRegistrationRequest
-    { client_name :: Text
-    , redirect_uris :: [RedirectUri]
-    , grant_types :: [GrantType]
-    , response_types :: [ResponseType]
-    , token_endpoint_auth_method :: ClientAuthMethod
-    }
-    deriving (Show, Generic)
-
-instance Aeson.FromJSON ClientRegistrationRequest where
-    parseJSON = Aeson.withObject "ClientRegistrationRequest" $ \v -> do
-        name <- v Aeson..: "client_name"
-        uris <- v Aeson..: "redirect_uris"
-        when (null uris) $
-            fail "redirect_uris must contain at least one URI"
-        grants <- v Aeson..: "grant_types"
-        when (null grants) $
-            fail "grant_types must not be empty"
-        responses <- v Aeson..: "response_types"
-        when (null responses) $
-            fail "response_types must not be empty"
-        authMethod <- v Aeson..: "token_endpoint_auth_method"
-        pure $ ClientRegistrationRequest name uris grants responses authMethod
-
--- | Client registration response
-data ClientRegistrationResponse = ClientRegistrationResponse
-    { client_id :: Text
-    , client_secret :: Text -- Empty string for public clients
-    , client_name :: Text
-    , redirect_uris :: [RedirectUri]
-    , grant_types :: [GrantType]
-    , response_types :: [ResponseType]
-    , token_endpoint_auth_method :: ClientAuthMethod
-    }
-    deriving (Show, Generic)
-
-instance Aeson.ToJSON ClientRegistrationResponse where
-    toJSON = Aeson.genericToJSON Aeson.defaultOptions
-
--- | Token response
-data TokenResponse = TokenResponse
-    { access_token :: Text
-    , token_type :: Text
-    , expires_in :: Maybe Int
-    , refresh_token :: Maybe Text
-    , scope :: Maybe Text
-    }
-    deriving (Show, Generic)
-
-instance Aeson.ToJSON TokenResponse where
-    toJSON TokenResponse{..} =
-        Aeson.object $
-            [ "access_token" .= access_token
-            , "token_type" .= token_type
-            ]
-                ++ maybe [] (\e -> ["expires_in" .= e]) expires_in
-                ++ maybe [] (\r -> ["refresh_token" .= r]) refresh_token
-                ++ maybe [] (\s -> ["scope" .= s]) scope
+-- Note: Request/Response types (LoginForm, ClientRegistrationRequest,
+-- ClientRegistrationResponse, TokenResponse) are now imported from
+-- Servant.OAuth2.IDP.API and re-exported from this module.
 
 -- -----------------------------------------------------------------------------
 -- Polymorphic Handlers
@@ -605,7 +426,8 @@ handleRegister (ClientRegistrationRequest reqName reqRedirects reqGrants reqResp
     -- Validate redirect_uris is not empty
     when (null reqRedirects) $
         throwError $
-            AuthorizationErr $ InvalidRequest "redirect_uris must not be empty"
+            AuthorizationErr $
+                InvalidRequest "redirect_uris must not be empty"
 
     -- Generate client ID
     let prefix = maybe "client_" clientIdPrefix (httpOAuthConfig config)
