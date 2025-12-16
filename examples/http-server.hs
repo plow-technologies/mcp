@@ -24,6 +24,7 @@ cabal run mcp-http -- --oauth --oauth-traces-only  # Filter to show only OAuth e
 -}
 module Main where
 
+import Control.Concurrent.STM (newTVarIO)
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Functor.Contravariant (contramap)
@@ -40,7 +41,7 @@ import MCP.Protocol
 import MCP.Server
 import MCP.Server.Auth
 import MCP.Server.HTTP
-import MCP.Server.HTTP.AppEnv (AppEnv (..), runAppM)
+import MCP.Server.HTTP.AppEnv (AppEnv (..))
 import MCP.Trace.Types (MCPTrace (..), isOAuthTrace, renderMCPTrace)
 import MCP.Types
 import Servant.Auth.Server (defaultJWTSettings, generateKey)
@@ -310,8 +311,11 @@ main = do
                             , envTimeProvider = Nothing -- Use real IO time
                             }
 
-                -- Use polymorphic mcpApp with runAppM natural transformation
-                let app = mcpApp (runAppM appEnv)
+                -- Initialize server state
+                stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
+
+                -- Use mcpAppWithOAuth for full OAuth support
+                let app = mcpAppWithOAuth appEnv stateVar
                 run (httpPort config) app
             else
                 -- Use runServerHTTP for non-OAuth mode
