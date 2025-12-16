@@ -93,7 +93,6 @@ library
         MCP.Server.HTTP
         MCP.Server.HTTP.AppEnv
         MCP.Server.Auth
-        MCP.Server.Auth.Backend
         MCP.Server.Time
         Servant.OAuth2.IDP.API
         Servant.OAuth2.IDP.Types

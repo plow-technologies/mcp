@@ -18,12 +18,12 @@ and re-exports the credential authentication backend types.
 
 == Re-exports
 
-* "MCP.Server.Auth.Backend" - AuthBackend typeclass for pluggable credential validation
-* "MCP.Server.Auth.Demo" - Demo implementation with hardcoded credentials
+* "Servant.OAuth2.IDP.Auth.Backend" - AuthBackend typeclass for pluggable credential validation
+* "Servant.OAuth2.IDP.Auth.Demo" - Demo implementation with hardcoded credentials
 -}
 module MCP.Server.Auth (
-    -- * AuthBackend typeclass (re-exported from MCP.Server.Auth.Backend)
-    module MCP.Server.Auth.Backend,
+    -- * AuthBackend typeclass (re-exported from Servant.OAuth2.IDP.Auth.Backend)
+    module Servant.OAuth2.IDP.Auth.Backend,
 
     -- * OAuth Configuration
     OAuthConfig (..),
@@ -57,7 +57,7 @@ module MCP.Server.Auth (
 ) where
 
 -- Re-exports
-import MCP.Server.Auth.Backend
+import Servant.OAuth2.IDP.Auth.Backend
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Crypto.Hash (hashWith)
@@ -79,6 +79,7 @@ import Network.HTTP.Simple (addRequestHeader, getResponseBody, httpJSON, parseRe
 import Plow.Logging (IOTracer)
 import System.Random (newStdGen, randomRs)
 
+import MCP.Trace.OAuth (OAuthTrace (..))
 import Servant.OAuth2.IDP.Types (
     ClientAuthMethod (..),
     CodeChallenge (..),
@@ -88,7 +89,6 @@ import Servant.OAuth2.IDP.Types (
     ResponseType (..),
     Scope (..),
  )
-import MCP.Trace.OAuth (OAuthTrace (..))
 
 -- | OAuth grant types supported by MCP
 data OAuthGrantType
