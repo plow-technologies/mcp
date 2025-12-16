@@ -7,7 +7,7 @@
 
 ## Summary
 
-Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error, environment, user, and user ID types. `OAuthStateStore` requires `MonadTime m` for expiry filtering. `AuthBackend.validateCredentials` returns `Maybe (UserId, User)` tuple. Handlers requiring both typeclasses use type equality constraints (`AuthBackendUser m ~ OAuthUser m`, `AuthBackendUserId m ~ OAuthUserId m`). Provide reference in-memory (`TVar`) and hard-coded credential implementations. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation. **(Updated 2025-12-15: Added user type polymorphism per spec refinement; reference implementation types colocated with implementations per FR-042; error architecture refined with four domain error types and domainErrorToServerError boundary function per Phase 10; mcpApp entry point accepts natural transformation per Phase 11/FR-046)**
+Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error, environment, user, and user ID types. `OAuthStateStore` requires `MonadTime m` for expiry filtering. `AuthBackend.validateCredentials` returns `Maybe (UserId, User)` tuple. Handlers requiring both typeclasses use type equality constraints (`AuthBackendUser m ~ OAuthUser m`, `AuthBackendUserId m ~ OAuthUserId m`). Provide reference in-memory (`TVar`) and hard-coded credential implementations. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation. **(Updated 2025-12-15: Added user type polymorphism per spec refinement; reference implementation types colocated with implementations per FR-042; error architecture refined with four domain error types and domainErrorToServerError boundary function per Phase 10; mcpApp entry point accepts natural transformation per Phase 11/FR-046)** **(Updated 2025-12-16: OAuth modules relocated to `Servant.OAuth2.IDP.*` namespace per FR-049; two entry points `mcpApp`/`mcpAppWithOAuth` in `MCP.Server.HTTP` per FR-048; type-level route composition per FR-047)**
 
 ## Technical Context
 
@@ -86,7 +86,7 @@ test/
 └── Trace/                    # Unchanged
 ```
 
-**Structure Decision**: Single project structure. New modules added under `src/MCP/Server/Auth/` and `src/MCP/Server/OAuth/` for typeclass definitions and implementations. Reference implementation concrete types (`AuthUser`, `UserId`, errors) colocated with their implementations per Phase 9 (FR-042). Test modules added under `test/Laws/` for property-based law verification using polymorphic specs with `prop` combinator. `Arbitrary` instances in `test/Generators.hs`.
+**Structure Decision**: Single project structure. New modules added under `src/MCP/Server/Auth/` and `src/MCP/Server/OAuth/` for typeclass definitions and implementations. Reference implementation concrete types (`AuthUser`, `UserId`, errors) colocated with their implementations per Phase 9 (FR-042). Test modules added under `test/Laws/` for property-based law verification using polymorphic specs with `prop` combinator. `Arbitrary` instances in `test/Generators.hs`. **(Phase 12 Refinement**: OAuth modules will be relocated to `Servant.OAuth2.IDP.*` namespace per FR-049; see Phase 12 for updated module structure.)
 
 ## Complexity Tracking
 
@@ -2242,12 +2242,12 @@ postgresMcpApp pgConfig = do
   pure $ mcpApp runPostgresM
 ```
 
-### Module Organization Update
+### Module Organization Update (Phase 11 — Superseded by Phase 12)
 
 ```text
 src/MCP/Server/
 ├── OAuth/
-│   ├── App.hs           # NEW: mcpApp, mcpAppWithContext (polymorphic entry points)
+│   ├── App.hs           # Phase 11: mcpApp here; Phase 12: moved to HTTP.hs
 │   ├── Server.hs        # oauthServer (polymorphic server, unchanged)
 │   ├── Boundary.hs      # domainErrorToServerError (unchanged)
 │   └── ...
@@ -2296,3 +2296,258 @@ Before marking Phase 11 complete:
 | VI. Property-Based Testing | ✅ | Same `mcpApp` used in tests with different nat-trans enables property testing |
 
 **Gate Status**: PASS - Phase 11 planning complete.
+
+> **⚠️ Superseded**: Phase 11's module organization (`OAuth.App` with `mcpApp`) was revised
+> in Phase 12 (2025-12-16 spec refinement). The `mcpApp` entry point now lives in
+> `MCP.Server.HTTP` per FR-046, not in `OAuth.App`. Phase 12 also introduces the
+> `Servant.OAuth2.IDP.*` namespace. See Phase 12 for current architecture.
+
+---
+
+## Phase 12: Namespace Migration & Entry Point Separation (Spec Refinement 2025-12-16)
+
+**Trigger**: Clarification session revealed that:
+1. MCP functionality was lost after implementing `mcpApp` in OAuth2 namespace (mcp-nyr.23)
+2. OAuth2 modules need explicit package boundaries for future extraction
+3. Two entry points needed to make OAuth2 optional via CLI flag
+
+**Spec Requirements**:
+- FR-046: `mcpApp` must be in `MCP.Server.HTTP`
+- FR-047: Type-level route composition (`type FullAPI = MCPAPI :<|> OAuthAPI`)
+- FR-048: Two entry points (`mcpApp`, `mcpAppWithOAuth`)
+- FR-049: All OAuth2 modules relocated to `Servant.OAuth2.IDP.*` namespace
+
+### Updated Module Structure (Phase 12)
+
+```text
+src/
+├── MCP/
+│   ├── Types.hs                    # Core MCP protocol types (unchanged)
+│   ├── Protocol.hs                 # JSON-RPC message types (unchanged)
+│   ├── Server.hs                   # MCPServer typeclass (unchanged)
+│   └── Server/
+│       ├── HTTP.hs                 # MODIFIED: mcpApp, mcpAppWithOAuth entry points
+│       ├── StdIO.hs                # Unchanged (no OAuth)
+│       └── Time.hs                 # MonadTime re-export (unchanged)
+│
+├── Servant/
+│   └── OAuth2/
+│       └── IDP/                    # NEW namespace (was MCP.Server.OAuth.* + MCP.Server.Auth.*)
+│           ├── Types.hs            # AuthCodeId, ClientId, AuthorizationError, ValidationError, etc.
+│           ├── Store.hs            # OAuthStateStore typeclass
+│           ├── Store/
+│           │   └── InMemory.hs     # TVar-based implementation + OAuthStoreError, OAuthTVarEnv
+│           ├── Boundary.hs         # domainErrorToServerError, OAuthBoundaryTrace
+│           ├── Server.hs           # oauthServer (polymorphic Servant server)
+│           ├── API.hs              # OAuthAPI type definition
+│           ├── Handlers.hs         # Polymorphic OAuth handlers (extracted from HTTP.hs)
+│           ├── Auth/
+│           │   ├── Backend.hs      # AuthBackend typeclass + Username, PlaintextPassword
+│           │   └── Demo.hs         # Demo credentials + AuthUser, UserId, DemoAuthError
+│           └── Test/
+│               └── Internal.hs     # Polymorphic conformance test specs (FR-029)
+
+test/
+├── Main.hs                         # Modified: import from new namespace
+├── Laws/
+│   ├── OAuthStateStoreSpec.hs      # Updated imports
+│   └── AuthBackendSpec.hs          # Updated imports
+├── Generators.hs                   # Updated imports
+└── TestMonad.hs                    # Unchanged
+```
+
+### Module Mapping (Old → New)
+
+| Old Module | New Module |
+|------------|------------|
+| `MCP.Server.OAuth.Types` | `Servant.OAuth2.IDP.Types` |
+| `MCP.Server.OAuth.Store` | `Servant.OAuth2.IDP.Store` |
+| `MCP.Server.OAuth.InMemory` | `Servant.OAuth2.IDP.Store.InMemory` |
+| `MCP.Server.OAuth.Boundary` | `Servant.OAuth2.IDP.Boundary` |
+| `MCP.Server.OAuth.App` | REMOVED (merged into `MCP.Server.HTTP`) |
+| `MCP.Server.Auth.Backend` | `Servant.OAuth2.IDP.Auth.Backend` |
+| `MCP.Server.Auth.Demo` | `Servant.OAuth2.IDP.Auth.Demo` |
+| `MCP.Server.OAuth.Test.Internal` | `Servant.OAuth2.IDP.Test.Internal` |
+| NEW | `Servant.OAuth2.IDP.Server` (oauthServer) |
+| NEW | `Servant.OAuth2.IDP.API` (OAuthAPI type) |
+| NEW | `Servant.OAuth2.IDP.Handlers` (polymorphic handlers) |
+
+### Entry Point Architecture
+
+#### MCP.Server.HTTP
+
+```haskell
+module MCP.Server.HTTP
+  ( -- * Entry Points
+    mcpApp           -- MCP-only (no OAuth2 constraints)
+  , mcpAppWithOAuth  -- MCP + OAuth2 (requires OAuthStateStore/AuthBackend)
+    -- * Demo Entry Point
+  , demoMcpApp       -- Convenience: mcpAppWithOAuth with in-memory backends
+    -- * API Types
+  , MCPAPI
+  , FullAPI          -- MCPAPI :<|> OAuthAPI
+  ) where
+
+import Servant.OAuth2.IDP.API (OAuthAPI)
+import Servant.OAuth2.IDP.Server (oauthServer)
+
+-- | MCP-only application (no OAuth2).
+-- Use when --oauth flag is NOT provided.
+mcpApp
+  :: (∀ a. m a -> Handler a)  -- ^ Natural transformation for MCP handlers
+  -> Application
+mcpApp runM = serve (Proxy @MCPAPI) $ hoistServer (Proxy @MCPAPI) runM mcpServer
+
+-- | MCP + OAuth2 application.
+-- Use when --oauth flag IS provided.
+mcpAppWithOAuth
+  :: ( OAuthStateStore m, AuthBackend m
+     , AuthBackendUser m ~ OAuthUser m
+     , AuthBackendUserId m ~ OAuthUserId m
+     , MonadTime m, MonadIO m, MonadError e m, MonadReader env m
+     , AsType (OAuthStateError m) e, AsType (AuthBackendError m) e
+     , AsType ValidationError e, AsType AuthorizationError e
+     , HasType (OAuthStateEnv m) env, HasType (AuthBackendEnv m) env
+     , ToJWT (OAuthUser m)
+     )
+  => (∀ a. m a -> Handler a)  -- ^ Natural transformation
+  -> Application
+mcpAppWithOAuth runM = serve (Proxy @FullAPI) $ hoistServer (Proxy @FullAPI) runM fullServer
+  where
+    fullServer = mcpServer :<|> oauthServer
+
+-- | Type-level route composition (FR-047)
+type FullAPI = MCPAPI :<|> OAuthAPI
+```
+
+#### CLI Flag Selection (app/Main.hs)
+
+```haskell
+main :: IO ()
+main = do
+  opts <- parseOptions
+  if optOAuth opts
+    then do
+      -- Initialize OAuth backends
+      oauthEnv <- initOAuthTVarEnv
+      authEnv <- initDemoCredentialEnv
+      let runM = mkDemoRunM oauthEnv authEnv
+      Warp.run (optPort opts) (mcpAppWithOAuth runM)
+    else do
+      -- MCP-only mode
+      let runM = mkMcpOnlyRunM
+      Warp.run (optPort opts) (mcpApp runM)
+```
+
+### Implementation Steps
+
+#### Step 1: Create Servant.OAuth2.IDP Namespace
+
+1. Create directory structure: `src/Servant/OAuth2/IDP/`
+2. Move and rename modules per mapping table
+3. Update all internal imports within moved modules
+4. Add `Servant.OAuth2.IDP` to cabal `exposed-modules`
+
+#### Step 2: Extract Handlers and API
+
+1. Create `Servant.OAuth2.IDP.API` with `OAuthAPI` type definition
+2. Create `Servant.OAuth2.IDP.Handlers` with polymorphic handler implementations
+3. Create `Servant.OAuth2.IDP.Server` with `oauthServer`
+4. These were previously interleaved in `MCP.Server.HTTP`
+
+#### Step 3: Update MCP.Server.HTTP
+
+1. Remove OAuth handler implementations (now in `Servant.OAuth2.IDP.Handlers`)
+2. Import `OAuthAPI`, `oauthServer` from `Servant.OAuth2.IDP`
+3. Add `mcpApp` (MCP-only entry point)
+4. Rename existing polymorphic entry point to `mcpAppWithOAuth`
+5. Add `FullAPI` type alias
+6. Keep `demoMcpApp` as convenience wrapper
+
+#### Step 4: Update app/Main.hs
+
+1. Import both entry points
+2. Add CLI flag check for `--oauth`
+3. Call `mcpApp` or `mcpAppWithOAuth` based on flag
+
+#### Step 5: Update Tests
+
+1. Update all imports to use `Servant.OAuth2.IDP.*`
+2. Update test harness to use appropriate entry point
+3. Verify all tests pass
+
+#### Step 6: Update Cabal File
+
+1. Add new modules under `Servant.OAuth2.IDP.*`
+2. Remove old `MCP.Server.OAuth.*` and `MCP.Server.Auth.*` module declarations
+3. Ensure clean build
+
+### Files to Create
+
+| File | Purpose |
+|------|---------|
+| `src/Servant/OAuth2/IDP/Types.hs` | Relocated from `MCP.Server.OAuth.Types` |
+| `src/Servant/OAuth2/IDP/Store.hs` | Relocated from `MCP.Server.OAuth.Store` |
+| `src/Servant/OAuth2/IDP/Store/InMemory.hs` | Relocated from `MCP.Server.OAuth.InMemory` |
+| `src/Servant/OAuth2/IDP/Boundary.hs` | Relocated from `MCP.Server.OAuth.Boundary` |
+| `src/Servant/OAuth2/IDP/API.hs` | NEW: `OAuthAPI` type definition |
+| `src/Servant/OAuth2/IDP/Server.hs` | NEW: `oauthServer` polymorphic server |
+| `src/Servant/OAuth2/IDP/Handlers.hs` | NEW: Extracted OAuth handlers |
+| `src/Servant/OAuth2/IDP/Auth/Backend.hs` | Relocated from `MCP.Server.Auth.Backend` |
+| `src/Servant/OAuth2/IDP/Auth/Demo.hs` | Relocated from `MCP.Server.Auth.Demo` |
+| `src/Servant/OAuth2/IDP/Test/Internal.hs` | Relocated test specs |
+
+### Files to Modify
+
+| File | Change |
+|------|--------|
+| `src/MCP/Server/HTTP.hs` | Add `mcpApp`, rename to `mcpAppWithOAuth`, import from new namespace |
+| `app/Main.hs` | CLI flag selection between entry points |
+| `mcp-haskell.cabal` | Update exposed-modules |
+| `test/Main.hs` | Update imports |
+| `test/Laws/*.hs` | Update imports |
+| `test/Generators.hs` | Update imports |
+
+### Files to Delete
+
+| File | Reason |
+|------|--------|
+| `src/MCP/Server/OAuth/App.hs` | Merged into `MCP.Server.HTTP` |
+| `src/MCP/Server/OAuth/*.hs` | Relocated to `Servant.OAuth2.IDP.*` |
+| `src/MCP/Server/Auth/*.hs` | Relocated to `Servant.OAuth2.IDP.Auth.*` |
+
+### Verification Checklist
+
+Before marking Phase 12 complete:
+
+- [ ] All modules relocated to `Servant.OAuth2.IDP.*` namespace
+- [ ] `mcpApp` entry point exists in `MCP.Server.HTTP` (MCP-only)
+- [ ] `mcpAppWithOAuth` entry point exists in `MCP.Server.HTTP` (MCP + OAuth2)
+- [ ] `type FullAPI = MCPAPI :<|> OAuthAPI` defined
+- [ ] `cabal run mcp-http` works (MCP-only mode)
+- [ ] `cabal run mcp-http -- --oauth` works (full mode)
+- [ ] All existing OAuth tests pass with updated imports
+- [ ] No `MCP.Server.OAuth.*` or `MCP.Server.Auth.*` modules remain
+- [ ] `Servant.OAuth2.IDP.*` namespace appears clean for future package extraction
+- [ ] CLAUDE.md updated with new module paths
+
+### Constitution Compliance (Phase 12)
+
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. Type-Driven Design | ✅ | Two entry points with different type signatures encode OAuth optionality at type level |
+| II. Deep Module Architecture | ✅ | `Servant.OAuth2.IDP` is self-contained; MCP imports only what it needs |
+| III. Denotational Semantics | ✅ | Clear semantics: `mcpApp` = MCP only, `mcpAppWithOAuth` = full functionality |
+| IV. Total Functions | ✅ | No new partiality introduced |
+| V. Pure Core, Impure Shell | ✅ | Namespace reorganization doesn't change purity boundaries |
+| VI. Property-Based Testing | ✅ | Test infrastructure relocated, not changed |
+
+**Gate Status**: PASS - Phase 12 planning complete.
+
+### Benefits of This Refactoring
+
+1. **MCP Independence**: `mcpApp` works without any OAuth2 dependencies
+2. **Explicit Boundaries**: `Servant.OAuth2.IDP.*` namespace makes package extraction trivial
+3. **Self-Documenting**: Entry point names clearly indicate capability (`mcpApp` vs `mcpAppWithOAuth`)
+4. **Type Safety**: Attempting to use OAuth features with `mcpApp` is a compile error
+5. **Future-Proof**: OAuth2 package extraction is "cut along the dotted line"
