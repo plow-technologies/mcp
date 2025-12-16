@@ -21,7 +21,7 @@ import Data.Typeable (typeRep)
 import Test.Hspec (Spec, describe, it, shouldBe)
 import TestMonad (TestM)
 
-import MCP.Server.Auth.Demo (AuthUser)
+import Servant.OAuth2.IDP.Auth.Demo (AuthUser)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (OAuthUser, OAuthUserId))
 import Servant.OAuth2.IDP.Types (UserId)
 

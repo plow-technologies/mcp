@@ -140,7 +140,7 @@ import MCP.Server.Auth (
     validateCodeVerifier,
  )
 import MCP.Server.Auth.Backend (AuthBackend (..), PlaintextPassword, Username (..), mkPlaintextPassword, mkUsername)
-import MCP.Server.Auth.Demo (DemoAuthError (..))
+import Servant.OAuth2.IDP.Auth.Demo (DemoAuthError (..))
 import MCP.Server.HTTP.AppEnv (AppError (..), HTTPServerConfig (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (

@@ -28,12 +28,12 @@ import Servant.Server.Internal.Handler (runHandler)
 import Test.Hspec
 
 import MCP.Server (MCPServer (..), MCPServerM, initialServerState)
-import MCP.Server.Auth.Demo (AuthUser (..))
 import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata)
 import MCP.Server.HTTP qualified as HTTP
-import Servant.OAuth2.IDP.Types (UserId (..))
 import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types (Implementation (..), ServerCapabilities (..))
+import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..))
+import Servant.OAuth2.IDP.Types (UserId (..))
 
 -- | Minimal MCPServer instance for testing (uses default implementations)
 instance MCPServer MCPServerM

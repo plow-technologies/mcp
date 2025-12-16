@@ -60,7 +60,7 @@ import MCP.Server.Auth.Backend (
     mkPlaintextPassword,
     mkUsername,
  )
-import MCP.Server.Auth.Demo (AuthUser (..))
+import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..))
 import Servant.OAuth2.IDP.Types (
     AccessTokenId (..),
     AuthCodeId (..),

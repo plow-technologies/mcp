@@ -49,8 +49,10 @@ import Servant.Server (ServerError (..))
 import Test.Hspec (Spec, describe, it, shouldBe)
 
 import MCP.Server.Auth.Backend (Username (..))
-import MCP.Server.Auth.Demo (DemoAuthError (..))
 import MCP.Server.HTTP.AppEnv (AppError (..), AppM)
+import MCP.Trace.HTTP (HTTPTrace (..))
+import Plow.Logging (IOTracer (..), Tracer (..))
+import Servant.OAuth2.IDP.Auth.Demo (DemoAuthError (..))
 import Servant.OAuth2.IDP.Boundary (
     OAuthBoundaryTrace (..),
     domainErrorToServerError,
@@ -63,8 +65,6 @@ import Servant.OAuth2.IDP.Types (
     mkClientId,
     mkScope,
  )
-import MCP.Trace.HTTP (HTTPTrace (..))
-import Plow.Logging (IOTracer (..), Tracer (..))
 
 -- -----------------------------------------------------------------------------
 -- Test Helpers

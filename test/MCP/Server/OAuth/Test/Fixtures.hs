@@ -52,11 +52,11 @@ import Servant.Auth.Server (defaultJWTSettings, generateKey)
 import Servant.Server.Internal.Handler (runHandler)
 
 import MCP.Server (MCPServer (..), MCPServerM, initialServerState)
-import MCP.Server.Auth.Demo (DemoCredentialEnv (..), defaultDemoCredentialStore)
 import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata, mcpAppWithOAuth)
 import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, runAppM)
 import MCP.Server.Time (MonadTime (..))
 import MCP.Types (Implementation (..), ServerCapabilities (..), ToolsCapability (..))
+import Servant.OAuth2.IDP.Auth.Demo (DemoCredentialEnv (..), defaultDemoCredentialStore)
 import Servant.OAuth2.IDP.Store.InMemory (defaultExpiryConfig, newOAuthTVarEnv)
 import Servant.OAuth2.IDP.Test.Internal (TestConfig (..), TestCredentials (..))
 

@@ -63,8 +63,8 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Time.Clock (NominalDiffTime, addUTCTime)
-import MCP.Server.Auth.Demo (AuthUser)
 import MCP.Server.Time (MonadTime (..))
+import Servant.OAuth2.IDP.Auth.Demo (AuthUser)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     AuthorizationCode (..),
