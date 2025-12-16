@@ -79,10 +79,10 @@ import Data.Monoid (First (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import MCP.Server.Auth.Backend (AuthBackend (..))
 import Network.HTTP.Types.Status (Status, statusCode)
 import Network.URI (parseURI)
 import Plow.Logging (IOTracer (..), traceWith)
+import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types
 import Servant.Server (ServerError (..), err401, err500)

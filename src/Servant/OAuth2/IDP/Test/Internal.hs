@@ -88,7 +88,7 @@ import System.Random (newStdGen, randomRs)
 import Test.Hspec (Spec, describe, expectationFailure, it, runIO, shouldSatisfy)
 import Test.Hspec.Wai (WaiSession, get, liftIO, postHtmlForm, request, shouldRespondWith, with)
 
-import MCP.Server.Auth.Backend (AuthBackend (..))
+import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (AuthCodeId (..), ClientId (..), mkAuthCodeId)
 import MCP.Server.Time (MonadTime)
