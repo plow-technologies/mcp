@@ -35,7 +35,7 @@ import Network.Wai.Handler.Warp (run)
 import Options.Applicative
 import Plow.Logging (IOTracer (..), Tracer (..), filterTracer)
 import Plow.Logging.Async (withAsyncHandleTracer)
-import System.IO (stdout)
+import System.IO (hFlush, stdout)
 
 import MCP.Protocol
 import MCP.Server
@@ -274,6 +274,7 @@ main = do
             putStrLn "  -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}'"
 
     putStrLn ""
+    hFlush stdout
 
     -- Setup async tracing to stdout with 1000-message buffer
     withAsyncHandleTracer stdout 1000 $ \textTracer -> do
