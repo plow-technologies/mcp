@@ -89,7 +89,7 @@ import Test.Hspec (Spec, describe, expectationFailure, it, runIO, shouldSatisfy)
 import Test.Hspec.Wai (WaiSession, get, liftIO, postHtmlForm, request, shouldRespondWith, with)
 
 import MCP.Server.Auth.Backend (AuthBackend (..))
-import MCP.Server.OAuth.Store (OAuthStateStore (..))
+import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (AuthCodeId (..), ClientId (..), mkAuthCodeId)
 import MCP.Server.Time (MonadTime)
 import Servant.Auth.Server (ToJWT)

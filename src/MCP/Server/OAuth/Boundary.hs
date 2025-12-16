@@ -80,7 +80,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import MCP.Server.Auth.Backend (AuthBackend (..))
-import MCP.Server.OAuth.Store (OAuthStateStore (..))
+import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types
 import Network.HTTP.Types.Status (Status, statusCode)
 import Network.URI (parseURI)

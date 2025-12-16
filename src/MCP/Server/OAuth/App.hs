@@ -84,9 +84,9 @@ import Servant.Server.Internal.ErrorFormatter (DefaultErrorFormatters, ErrorForm
 import MCP.Server.Auth.Backend (AuthBackend (..))
 import MCP.Server.HTTP.AppEnv (AppError, HTTPServerConfig)
 import MCP.Server.OAuth.Server (OAuthAPI, oauthServer)
-import MCP.Server.OAuth.Store (OAuthStateStore (..))
 import MCP.Trace.HTTP (HTTPTrace)
 import Plow.Logging (IOTracer)
+import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 
 {- | Polymorphic OAuth application entry point.
 
