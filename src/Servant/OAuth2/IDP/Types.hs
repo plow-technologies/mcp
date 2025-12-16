@@ -8,7 +8,7 @@
 
 {- |
 Module      : Servant.OAuth2.IDP.Types
-Description : OAuth 2.1 domain types for Identity Provider
+Description : OAuth 2.1 domain types for Servant IDP
 Copyright   : (C) 2025 Matthias Pall Gissurarson
 License     : MIT
 Maintainer  : mpg@mpg.is

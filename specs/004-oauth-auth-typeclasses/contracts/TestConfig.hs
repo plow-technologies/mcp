@@ -97,7 +97,7 @@ import Network.Wai (Application)
 import Test.Hspec (Spec)
 import Test.Hspec.Wai (WaiSession)
 
-import MCP.Server.OAuth.Types (AccessTokenId, AuthCodeId, ClientId)
+import Servant.OAuth2.IDP.Types (AccessTokenId, AuthCodeId, ClientId)
 
 {- | Configuration for the polymorphic OAuth conformance test suite.
 

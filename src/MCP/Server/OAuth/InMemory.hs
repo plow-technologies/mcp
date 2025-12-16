@@ -65,7 +65,7 @@ import Data.Text (Text)
 import Data.Time.Clock (NominalDiffTime, addUTCTime)
 import MCP.Server.Auth.Demo (AuthUser)
 import MCP.Server.OAuth.Store (OAuthStateStore (..))
-import MCP.Server.OAuth.Types (
+import Servant.OAuth2.IDP.Types (
     AuthorizationCode (..),
     ClientId,
     ClientInfo,

@@ -102,7 +102,8 @@ module MCP.Server.OAuth.Store (
 ) where
 
 import Data.Kind (Type)
-import MCP.Server.OAuth.Types (
+import MCP.Server.Time (MonadTime (..))
+import Servant.OAuth2.IDP.Types (
     AccessTokenId,
     AuthCodeId,
     AuthorizationCode,
@@ -112,7 +113,6 @@ import MCP.Server.OAuth.Types (
     RefreshTokenId,
     SessionId,
  )
-import MCP.Server.Time (MonadTime (..))
 
 {- | Storage interface for OAuth 2.1 server state.
 
