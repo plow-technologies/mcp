@@ -9,12 +9,12 @@ import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (UTCTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeM)
 
--- Old Auth module (for existing tests)
+-- Old Auth module (for legacy tests - DEPRECATED API)
 import MCP.Server.Auth qualified as Auth
 import Servant.OAuth2.IDP.Auth.Demo qualified as Auth
 
 -- New typeclass modules (for law tests)
-import MCP.Server.Auth.Backend (Username (..), mkPlaintextPassword)
+import Servant.OAuth2.IDP.Auth.Backend (Username (..), mkPlaintextPassword)
 
 import Test.Hspec
 

@@ -37,7 +37,7 @@ import Data.Proxy (Proxy (..))
 import Test.Hspec (Spec, describe, it, shouldBe)
 
 -- Auth backend typeclass
-import MCP.Server.Auth.Backend (AuthBackend (..))
+import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 
 {- | Compilation test suite for AuthBackend associated types.
 

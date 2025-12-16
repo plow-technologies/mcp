@@ -62,7 +62,7 @@ import Test.QuickCheck (arbitrary, forAllShrinkShow, ioProperty, property, (===)
 import Generators ()
 
 -- Auth backend types and typeclass
-import MCP.Server.Auth.Backend (
+import Servant.OAuth2.IDP.Auth.Backend (
     AuthBackend (..),
     PlaintextPassword,
     Username,

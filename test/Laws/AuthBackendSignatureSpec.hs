@@ -34,7 +34,7 @@ module Laws.AuthBackendSignatureSpec (
 import Test.Hspec (Spec, describe, it, shouldBe, shouldSatisfy)
 
 -- Auth backend types and typeclass
-import MCP.Server.Auth.Backend (
+import Servant.OAuth2.IDP.Auth.Backend (
     AuthBackend (..),
     PlaintextPassword,
     Username,

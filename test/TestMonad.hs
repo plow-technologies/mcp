@@ -74,7 +74,7 @@ module TestMonad (
 
     -- * Re-exports for convenience
     module Servant.OAuth2.IDP.Store,
-    module MCP.Server.Auth.Backend,
+    module Servant.OAuth2.IDP.Auth.Backend,
     module MCP.Server.Time,
 ) where
 
@@ -87,8 +87,8 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (UTCTime, addUTCTime)
-import MCP.Server.Auth.Backend
 import MCP.Server.Time
+import Servant.OAuth2.IDP.Auth.Backend
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..))
 import Servant.OAuth2.IDP.Store
 import Servant.OAuth2.IDP.Types

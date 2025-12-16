@@ -48,10 +48,10 @@ import Data.Text.Encoding.Error (lenientDecode)
 import Servant.Server (ServerError (..))
 import Test.Hspec (Spec, describe, it, shouldBe)
 
-import MCP.Server.Auth.Backend (Username (..))
 import MCP.Server.HTTP.AppEnv (AppError (..), AppM)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import Plow.Logging (IOTracer (..), Tracer (..))
+import Servant.OAuth2.IDP.Auth.Backend (Username (..))
 import Servant.OAuth2.IDP.Auth.Demo (DemoAuthError (..))
 import Servant.OAuth2.IDP.Boundary (
     OAuthBoundaryTrace (..),

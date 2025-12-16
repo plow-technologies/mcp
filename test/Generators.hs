@@ -50,7 +50,7 @@ import Network.URI (URI, parseURI)
 import Test.QuickCheck
 
 -- OAuth domain types
-import MCP.Server.Auth.Backend (
+import Servant.OAuth2.IDP.Auth.Backend (
     CredentialStore (..),
     HashedPassword,
     PlaintextPassword (..),
