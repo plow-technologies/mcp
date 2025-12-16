@@ -94,8 +94,9 @@ import MCP.Trace.Operation (OperationTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
 import MCP.Types
 import Plow.Logging (IOTracer (..), Tracer (..), traceWith)
-import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI)
-import Servant.OAuth2.IDP.Server qualified as OAuthServer
+
+-- Import OAuthAPI type and oauthServer from IDP namespace
+import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI, oauthServer)
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
 import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthErrorResponse (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
 
@@ -241,7 +242,7 @@ mcpAppWithOAuth appEnv stateVar =
                 (Proxy :: Proxy OAuthAPI)
                 (Proxy :: Proxy '[CookieSettings, JWTSettings])
                 (runAppM appEnv)
-                OAuthServer.oauthServer
+                oauthServer
                 :<|> mcpServerAuth config tracer stateVar
             )
 
@@ -280,7 +281,7 @@ mcpAppInternal config tracer stateVar oauthEnv jwtSettings =
                 (Proxy :: Proxy OAuthAPI)
                 (Proxy :: Proxy '[CookieSettings, JWTSettings])
                 (runAppM appEnv)
-                OAuthServer.oauthServer
+                oauthServer
 
     mcpServerNoAuth :: HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> Aeson.Value -> Handler Aeson.Value
     mcpServerNoAuth httpConfig httpTracer stateTVar = handleHTTPRequest httpConfig httpTracer stateTVar Nothing
