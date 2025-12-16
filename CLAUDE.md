@@ -117,35 +117,43 @@ The implementation supports two transport methods:
 
 Both transports use the same MCPServer typeclass, so server implementations work with either transport method.
 
+### Entry Points (MCP.Server.HTTP)
+
+The HTTP module provides two entry points:
+- **mcpApp**: Basic MCP HTTP server without OAuth (unprotected `/mcp` endpoint)
+- **mcpAppWithOAuth**: Full OAuth 2.1-protected server with login flow, imported from `Servant.OAuth2.IDP`
+
+Use `mcpApp` for development/testing, `mcpAppWithOAuth` for production with authentication.
+
 ## OAuth Implementation Details
 
 The OAuth implementation uses a **typeclass-based architecture** for pluggable backends.
 
 ### Typeclass Architecture (004-oauth-auth-typeclasses)
 
-**OAuthStateStore** (`MCP.Server.OAuth.Store`):
+**OAuthStateStore** (`Servant.OAuth2.IDP.Store`):
 - Manages OAuth state persistence (codes, tokens, clients, sessions)
 - Associated types: `OAuthStateError m`, `OAuthStateEnv m`, `OAuthUser m`, `OAuthUserId m`
 - Methods: `storeAuthCode`, `lookupAuthCode`, `deleteAuthCode`, `storeAccessToken`, `lookupAccessToken`, `storeRefreshToken`, `lookupRefreshToken`, `updateRefreshToken`, `storeClient`, `lookupClient`, `storePendingAuth`, `lookupPendingAuth`, `deletePendingAuth`
-- Default: In-memory TVar implementation (`MCP.Server.OAuth.InMemory`)
+- Default: In-memory TVar implementation (`Servant.OAuth2.IDP.Store.InMemory`)
 
-**AuthBackend** (`MCP.Server.Auth.Backend`):
+**AuthBackend** (`Servant.OAuth2.IDP.Auth.Backend`):
 - Validates user credentials and returns authenticated user data
 - Associated types: `AuthBackendError m`, `AuthBackendEnv m`, `AuthBackendUser m`, `AuthBackendUserId m`
 - Method: `validateCredentials :: Username -> PlaintextPassword -> m (Maybe (AuthBackendUserId m, AuthBackendUser m))`
-- Default: Demo hardcoded credentials (`MCP.Server.Auth.Demo`)
+- Default: Demo hardcoded credentials (`Servant.OAuth2.IDP.Auth.Demo`)
 
-**MonadTime** (`MCP.Server.Time`):
+**MonadTime** (`Control.Monad.Time`):
 - Re-export of `Control.Monad.Time.MonadTime`
 - Used by OAuthStateStore for expiry checks
 
 ### OAuth Modules:
-- **MCP.Server.OAuth.Types** - Newtypes: `AuthCodeId`, `ClientId`, `SessionId`, `AccessTokenId`, `RefreshTokenId`, `UserId`, `RedirectUri`, `Scope`, `CodeChallenge`, `CodeVerifier`
-- **MCP.Server.OAuth.Store** - OAuthStateStore typeclass definition
-- **MCP.Server.OAuth.InMemory** - TVar-based default implementation
-- **MCP.Server.OAuth.Boundary** - Servant handler boundary translation
-- **MCP.Server.Auth.Backend** - AuthBackend typeclass definition
-- **MCP.Server.Auth.Demo** - Demo credentials implementation
+- **Servant.OAuth2.IDP.Types** - Newtypes: `AuthCodeId`, `ClientId`, `SessionId`, `AccessTokenId`, `RefreshTokenId`, `UserId`, `RedirectUri`, `Scope`, `CodeChallenge`, `CodeVerifier`
+- **Servant.OAuth2.IDP.Store** - OAuthStateStore typeclass definition
+- **Servant.OAuth2.IDP.Store.InMemory** - TVar-based default implementation
+- **Servant.OAuth2.IDP.Boundary** - Servant handler boundary translation
+- **Servant.OAuth2.IDP.Auth.Backend** - AuthBackend typeclass definition
+- **Servant.OAuth2.IDP.Auth.Demo** - Demo credentials implementation
 
 ### Composite Types (Three-Layer Cake Pattern)
 
@@ -214,7 +222,7 @@ handleLogin :: (AuthBackend m, OAuthStateStore m,
 
 ### Important Implementation Notes:
 1. **Client Registration**: Returns configurable client_secret (default empty string for public clients)
-2. **PKCE Validation**: Uses validateCodeVerifier from MCP.Server.Auth
+2. **PKCE Validation**: Uses validateCodeVerifier from Servant.OAuth2.IDP.Auth
 3. **Token Generation**:
    - Authorization codes: UUID v4 with configurable prefix (default "code_")
    - Access tokens: JWT tokens using servant-auth-server's makeJWT
