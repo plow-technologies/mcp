@@ -42,7 +42,7 @@ module MCP.Server.HTTP (
 
     -- * Login Types
     PendingAuthorization (..),
-    LoginForm (..),
+    LoginForm,
     LoginError (..),
     LoginResult (..),
 
@@ -94,7 +94,7 @@ import MCP.Trace.Operation (OperationTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
 import MCP.Types
 import Plow.Logging (IOTracer (..), Tracer (..), traceWith)
-import Servant.OAuth2.IDP.Server (LoginForm (..), OAuthAPI)
+import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI)
 import Servant.OAuth2.IDP.Server qualified as OAuthServer
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
 import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthErrorResponse (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
