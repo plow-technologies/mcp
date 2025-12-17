@@ -133,14 +133,14 @@ The OAuth implementation uses a **typeclass-based architecture** for pluggable b
 
 **OAuthStateStore** (`Servant.OAuth2.IDP.Store`):
 - Manages OAuth state persistence (codes, tokens, clients, sessions)
-- Associated types: `OAuthStateError m`, `OAuthStateEnv m`, `OAuthUser m`, `OAuthUserId m`
+- Associated types: `OAuthStateError m`, `OAuthStateEnv m`, `OAuthUser m`
 - Methods: `storeAuthCode`, `lookupAuthCode`, `deleteAuthCode`, `storeAccessToken`, `lookupAccessToken`, `storeRefreshToken`, `lookupRefreshToken`, `updateRefreshToken`, `storeClient`, `lookupClient`, `storePendingAuth`, `lookupPendingAuth`, `deletePendingAuth`
 - Default: In-memory TVar implementation (`Servant.OAuth2.IDP.Store.InMemory`)
 
 **AuthBackend** (`Servant.OAuth2.IDP.Auth.Backend`):
 - Validates user credentials and returns authenticated user data
-- Associated types: `AuthBackendError m`, `AuthBackendEnv m`, `AuthBackendUser m`, `AuthBackendUserId m`
-- Method: `validateCredentials :: Username -> PlaintextPassword -> m (Maybe (AuthBackendUserId m, AuthBackendUser m))`
+- Associated types: `AuthBackendError m`, `AuthBackendEnv m`, `AuthBackendUser m`
+- Method: `validateCredentials :: Username -> PlaintextPassword -> m (Maybe (AuthBackendUser m))`
 - Default: Demo hardcoded credentials (`Servant.OAuth2.IDP.Auth.Demo`)
 
 **MonadTime** (`Control.Monad.Time`):
@@ -148,7 +148,7 @@ The OAuth implementation uses a **typeclass-based architecture** for pluggable b
 - Used by OAuthStateStore for expiry checks
 
 ### OAuth Modules:
-- **Servant.OAuth2.IDP.Types** - Newtypes: `AuthCodeId`, `ClientId`, `SessionId`, `AccessTokenId`, `RefreshTokenId`, `UserId`, `RedirectUri`, `Scope`, `CodeChallenge`, `CodeVerifier`
+- **Servant.OAuth2.IDP.Types** - Newtypes: `AuthCodeId`, `ClientId`, `SessionId`, `AccessTokenId`, `RefreshTokenId`, `RedirectUri`, `Scope`, `CodeChallenge`, `CodeVerifier`
 - **Servant.OAuth2.IDP.Store** - OAuthStateStore typeclass definition
 - **Servant.OAuth2.IDP.Store.InMemory** - TVar-based default implementation
 - **Servant.OAuth2.IDP.Boundary** - Servant handler boundary translation
@@ -181,7 +181,7 @@ Uses `generic-lens` with `HasType` constraints for composable environment/error 
 ### Key Data Types:
 - **HTTPServerConfig** - Server config with httpBaseUrl, httpProtocolVersion
 - **OAuthConfig** - OAuth settings (timing, demo settings, parameters)
-- **AuthorizationCode userId** - PKCE code with expiry, client, user, scopes (parameterized by user ID type)
+- **AuthorizationCode user** - PKCE code with expiry, client, user, scopes (parameterized by user type)
 - **ClientInfo** - Registered client metadata (redirect URIs, grant types)
 - **PendingAuthorization** - OAuth params awaiting login approval
 - **AuthUser** - Authenticated user (ToJWT/FromJWT)
@@ -194,8 +194,7 @@ Uses `generic-lens` with `HasType` constraints for composable environment/error 
 instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT PostgresEnv m) where
   type OAuthStateError (ReaderT PostgresEnv m) = SqlError
   type OAuthStateEnv (ReaderT PostgresEnv m) = PostgresEnv
-  type OAuthUser (ReaderT PostgresEnv m) = DbUser      -- Your user type
-  type OAuthUserId (ReaderT PostgresEnv m) = DbUserId  -- Your user ID type
+  type OAuthUser (ReaderT PostgresEnv m) = DbUser  -- Your user type (contains user ID as field)
   storeAuthCode = ...  -- INSERT into auth_codes table
   lookupAuthCode = ... -- SELECT with expiry check
 ```
@@ -205,19 +204,17 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT PostgresEnv m) whe
 instance MonadIO m => AuthBackend (ReaderT LdapConfig m) where
   type AuthBackendError (ReaderT LdapConfig m) = LdapError
   type AuthBackendEnv (ReaderT LdapConfig m) = LdapConfig
-  type AuthBackendUser (ReaderT LdapConfig m) = LdapUser    -- Your user type
-  type AuthBackendUserId (ReaderT LdapConfig m) = LdapUid   -- Your user ID type
+  type AuthBackendUser (ReaderT LdapConfig m) = LdapUser  -- Your user type (contains user ID as field)
   validateCredentials user pass = do
     result <- ldapBind user pass
-    pure $ fmap (\u -> (ldapUid u, u)) result  -- Return (userId, user) tuple
+    pure result  -- Return user on success, Nothing on failure
 ```
 
-**Type Bridging**: When using both typeclasses together, ensure the associated types align:
+**Type Bridging**: When using both typeclasses together, ensure the user types align:
 ```haskell
--- Handlers requiring both backends use type equality constraints:
+-- Handlers requiring both backends use type equality constraint:
 handleLogin :: (AuthBackend m, OAuthStateStore m,
-                AuthBackendUser m ~ OAuthUser m,
-                AuthBackendUserId m ~ OAuthUserId m) => ...
+                AuthBackendUser m ~ OAuthUser m) => ...
 ```
 
 ### Important Implementation Notes:

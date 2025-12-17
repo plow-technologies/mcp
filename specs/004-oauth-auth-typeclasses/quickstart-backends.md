@@ -2,8 +2,6 @@
 
 **Feature Branch**: `004-oauth-auth-typeclasses`
 
-> **PARTIALLY SUPERSEDED (2025-12-17)**: Phase 14 removes `AuthBackendUserId m` and `OAuthUserId m` associated types. `validateCredentials` now returns `Maybe (AuthBackendUser m)` instead of a tuple. User IDs are fields within user types, encoded into JWT via `ToJWT`. See `plan.md` Phase 14 for updated design. Code examples below showing `AuthBackendUserId` or `OAuthUserId` are outdated.
-
 This guide walks through implementing custom `OAuthStateStore` and `AuthBackend` backends. The default in-memory implementations work for development, but production deployments typically need PostgreSQL, Redis, or LDAP backends.
 
 ## Prerequisites
@@ -84,7 +82,7 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
   -- Your environment type (configuration/connections)
   type OAuthStateEnv m :: Type
 
-  -- Your user type (stored in auth codes and tokens)
+  -- Your user type (stored in auth codes and tokens, contains user ID as field)
   type OAuthUser m :: Type
 ```
 
@@ -237,11 +235,8 @@ class Monad m => AuthBackend m where
   -- Your environment type (e.g., LdapEnv, DbConnectionPool)
   type AuthBackendEnv m :: Type
 
-  -- Your user type (returned on successful auth)
+  -- Your user type (returned on successful auth, contains user ID as field)
   type AuthBackendUser m :: Type
-
-  -- Your user ID type (lightweight identifier)
-  type AuthBackendUserId m :: Type
 ```
 
 ### Required Method
@@ -249,10 +244,10 @@ class Monad m => AuthBackend m where
 ```haskell
 validateCredentials :: Username
                     -> PlaintextPassword
-                    -> m (Maybe (AuthBackendUserId m, AuthBackendUser m))
+                    -> m (Maybe (AuthBackendUser m))
 ```
 
-Returns `Just (userId, user)` on valid credentials, `Nothing` otherwise.
+Returns `Just user` on valid credentials, `Nothing` otherwise. The user type should contain a user ID field that gets encoded into JWT via `ToJWT`.
 
 ### LDAP Implementation Example
 
@@ -265,22 +260,22 @@ import Control.Monad.Reader (ReaderT, asks)
 import qualified LDAP.Search as LDAP
 import Servant.OAuth2.IDP.Auth.Backend
 
--- Your LDAP user type
+-- Your LDAP user type (contains user ID as field, encoded to JWT via ToJWT)
 data LdapUser = LdapUser
-  { ldapUid :: Text
+  { ldapUid :: Text           -- User ID field
   , ldapEmail :: Text
   , ldapDisplayName :: Text
   , ldapGroups :: [Text]
-  } deriving (Show, Eq)
+  } deriving (Show, Eq, Generic)
 
-newtype LdapUserId = LdapUserId { unLdapUserId :: Text }
-  deriving (Show, Eq)
+-- ToJWT instance encodes user ID into JWT claims
+instance ToJWT LdapUser where
+  -- Implementation encodes ldapUid into "sub" claim
 
 instance MonadIO m => AuthBackend (ReaderT LdapEnv m) where
   type AuthBackendError (ReaderT LdapEnv m) = LdapAuthError
   type AuthBackendEnv (ReaderT LdapEnv m) = LdapEnv
   type AuthBackendUser (ReaderT LdapEnv m) = LdapUser
-  type AuthBackendUserId (ReaderT LdapEnv m) = LdapUserId
 
   validateCredentials username password = do
     env <- ask
@@ -309,7 +304,7 @@ instance MonadIO m => AuthBackend (ReaderT LdapEnv m) where
                     , ldapDisplayName = LDAP.attr entry "displayName"
                     , ldapGroups = LDAP.attrs entry "memberOf"
                     }
-              pure $ Just (LdapUserId (ldapUid user), user)
+              pure $ Just user
 
     case result of
       Left _ -> pure Nothing  -- Connection/search errors -> auth failure
@@ -331,7 +326,7 @@ module MyApp.AppEnv where
 import GHC.Generics (Generic)
 import Data.Generics.Product (HasType)
 import MyApp.OAuth.PostgresStore (PostgresEnv, PostgresStoreError)
-import MyApp.OAuth.LdapAuth (LdapEnv, LdapAuthError, LdapUser, LdapUserId)
+import MyApp.OAuth.LdapAuth (LdapEnv, LdapAuthError, LdapUser)
 
 -- Composite environment
 data MyAppEnv = MyAppEnv
@@ -381,7 +376,6 @@ instance AuthBackend MyAppM where
   type AuthBackendError MyAppM = LdapAuthError
   type AuthBackendEnv MyAppM = LdapEnv
   type AuthBackendUser MyAppM = LdapUser
-  type AuthBackendUserId MyAppM = LdapUserId
 
   validateCredentials username password = do
     env <- asks envLdap
@@ -393,12 +387,11 @@ instance AuthBackend MyAppM where
 When using both `OAuthStateStore` and `AuthBackend`, ensure user types align:
 
 ```haskell
--- Handlers may require type equality constraints
+-- Handlers may require type equality constraint
 handleTokenExchange
   :: ( OAuthStateStore m
      , AuthBackend m
-     , OAuthUser m ~ AuthBackendUser m      -- User types must match
-     , OAuthUserId m ~ AuthBackendUserId m  -- User ID types must match
+     , OAuthUser m ~ AuthBackendUser m  -- User types must match
      )
   => TokenRequest
   -> m TokenResponse
