@@ -115,12 +115,11 @@ data TestEnv = TestEnv
 Contains all OAuth-related data structures.
 -}
 data OAuthState = OAuthState
-    { oauthAuthCodes :: Map AuthCodeId (AuthorizationCode UserId)
+    { oauthAuthCodes :: Map AuthCodeId (AuthorizationCode AuthUser)
     , oauthAccessTokens :: Map AccessTokenId AuthUser
     , oauthRefreshTokens :: Map RefreshTokenId (ClientId, AuthUser)
     , oauthClients :: Map ClientId ClientInfo
     , oauthPendingAuths :: Map SessionId PendingAuthorization
-    , oauthUserCache :: Map UserId AuthUser
     }
 
 -- | Create an empty OAuth state.
@@ -132,7 +131,6 @@ emptyOAuthState =
         , oauthRefreshTokens = Map.empty
         , oauthClients = Map.empty
         , oauthPendingAuths = Map.empty
-        , oauthUserCache = Map.empty
         }
 
 {- | Create a test environment with initial time and credentials.
@@ -204,7 +202,6 @@ instance OAuthStateStore TestM where
     type OAuthStateError TestM = ()
     type OAuthStateEnv TestM = TestEnv
     type OAuthUser TestM = AuthUser
-    type OAuthUserId TestM = UserId
 
     -- Authorization Code Operations
     storeAuthCode code = TestM $ do
@@ -240,16 +237,6 @@ instance OAuthStateStore TestM where
                         -- Delete and return the code atomically
                         let newState = s{oauthAuthCodes = Map.delete codeId (oauthAuthCodes s)}
                          in (newState, Just code)
-
-    lookupUserById userId = TestM $ do
-        env <- ask
-        state <- liftIO $ readIORef (testOAuthState env)
-        pure $ Map.lookup userId (oauthUserCache state)
-
-    storeUserInCache userId user = TestM $ do
-        env <- ask
-        liftIO $ modifyIORef' (testOAuthState env) $ \s ->
-            s{oauthUserCache = Map.insert userId user (oauthUserCache s)}
 
     -- Access Token Operations
     storeAccessToken tokenId user = TestM $ do

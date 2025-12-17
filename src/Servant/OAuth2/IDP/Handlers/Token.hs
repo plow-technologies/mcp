@@ -216,15 +216,9 @@ handleAuthCodeGrant params = do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
         throwError $ injectTyped @AuthorizationError PKCEVerificationFailed
 
-    -- Extract userId from auth code and lookup full user
-    let userId = authUserId authCode
+    -- Extract user directly from auth code (no lookup needed)
+    let user = authUserId authCode
         clientId = authClientId authCode
-
-    -- Lookup full user by ID (needed for JWT generation)
-    mUser <- lookupUserById userId
-    user <- case mUser of
-        Nothing -> throwError $ injectTyped @AuthorizationError $ InvalidGrant "User not found for authorization code"
-        Just u -> pure u
 
     -- Generate tokens
     accessTokenText <- generateJWTAccessToken user jwtSettings

@@ -1186,7 +1186,6 @@ oauthConformanceSpec ::
     , AuthBackend m
     , MonadTime m
     , AuthBackendUser m ~ OAuthUser m
-    , AuthBackendUserId m ~ OAuthUserId m
     , ToJWT (OAuthUser m)
     ) =>
     TestConfig m ->
@@ -1195,8 +1194,8 @@ oauthConformanceSpec config = describe "OAuth Conformance Suite" $ do
     -- Type witness: compile-time verification that constraints hold
     -- This ensures the test suite can be extended to use these constraints
     -- without breaking existing tests.
-    let _typeWitness :: Maybe (AuthBackendUser m, AuthBackendUserId m)
-        _typeWitness = Nothing :: Maybe (OAuthUser m, OAuthUserId m)
+    let _typeWitness :: Maybe (AuthBackendUser m)
+        _typeWitness = Nothing :: Maybe (OAuthUser m)
 
     clientRegistrationSpec config
     loginFlowSpec config

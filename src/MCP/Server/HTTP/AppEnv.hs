@@ -394,7 +394,6 @@ instance OAuthStateStore AppM where
     type OAuthStateError AppM = OAuthStoreError
     type OAuthStateEnv AppM = OAuthTVarEnv
     type OAuthUser AppM = AuthUser
-    type OAuthUserId AppM = UserId
 
     storeAuthCode code = do
         oauthEnv <- asks envOAuth
@@ -435,14 +434,6 @@ instance OAuthStateStore AppM where
                         let newState = state{authCodes = Map.delete key (authCodes state)}
                         writeTVar (oauthStateVar oauthEnv) newState
                         pure (Just code)
-
-    lookupUserById userId = do
-        oauthEnv <- asks envOAuth
-        liftIO $ runReaderT (lookupUserById userId) oauthEnv
-
-    storeUserInCache userId user = do
-        oauthEnv <- asks envOAuth
-        liftIO $ runReaderT (storeUserInCache userId user) oauthEnv
 
     storeAccessToken tokenId user = do
         oauthEnv <- asks envOAuth

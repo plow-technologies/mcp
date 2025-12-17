@@ -26,7 +26,6 @@ import Laws.AuthBackendAssociatedTypesSpec qualified as AuthBackendAssociatedTyp
 import Laws.AuthBackendSignatureSpec qualified as AuthBackendSignatureSpec
 import Laws.AuthBackendSpec (authBackendKnownCredentials, authBackendLaws)
 import Laws.AuthCodeFunctorSpec qualified as AuthCodeFunctorSpec
-import Laws.AuthCodeUserIdSpec qualified as AuthCodeUserIdSpec
 import Laws.BoundarySpec qualified as BoundarySpec
 import Laws.ConsumeAuthCodeSpec (consumeAuthCodeConcurrencySpec, consumeAuthCodeSpec)
 import Laws.ErrorBoundarySecuritySpec qualified as ErrorBoundarySecuritySpec
@@ -121,7 +120,6 @@ spec = do
         consumeAuthCodeSpec runTestM'
         consumeAuthCodeConcurrencySpec
         OAuthUserTypeSpec.spec
-        AuthCodeUserIdSpec.spec
 
     -- Functor laws
     AuthCodeFunctorSpec.spec

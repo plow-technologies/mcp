@@ -114,7 +114,6 @@ handleLogin ::
     ( OAuthStateStore m
     , AuthBackend m
     , AuthBackendUser m ~ OAuthUser m
-    , AuthBackendUserId m ~ OAuthUserId m
     , MonadIO m
     , MonadReader env m
     , MonadError e m
@@ -190,10 +189,7 @@ handleLogin mCookie loginForm = do
             validationResult <- validateCredentials username password
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt (unUsername username) (isJust validationResult)
             case validationResult of
-                Just (userId, authUser) -> do
-                    -- Cache the user for later lookup during token exchange
-                    storeUserInCache userId authUser
-
+                Just (_userId, authUser) -> do
                     -- Emit authorization granted trace
                     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (unClientId $ pendingClientId pending) (unUsername username)
 
@@ -214,7 +210,7 @@ handleLogin mCookie loginForm = do
                                 , authCodeChallenge = pendingCodeChallenge pending
                                 , authCodeChallengeMethod = pendingCodeChallengeMethod pending
                                 , authScopes = scopes
-                                , authUserId = userId -- Store user ID, not full user
+                                , authUserId = authUser -- Store full user, not just ID
                                 , authExpiry = expiry
                                 }
 

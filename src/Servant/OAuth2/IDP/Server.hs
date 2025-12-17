@@ -197,7 +197,6 @@ oauthServer ::
     ( OAuthStateStore m
     , AuthBackend m
     , AuthBackendUser m ~ OAuthUser m
-    , AuthBackendUserId m ~ OAuthUserId m
     , ToJWT (OAuthUser m)
     , MonadIO m
     , MonadReader env m

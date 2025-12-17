@@ -22,16 +22,13 @@ import Test.Hspec (Spec, describe, it, shouldBe)
 import TestMonad (TestM)
 
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser)
-import Servant.OAuth2.IDP.Store (OAuthStateStore (OAuthUser, OAuthUserId))
-import Servant.OAuth2.IDP.Types (UserId)
+import Servant.OAuth2.IDP.Store (OAuthStateStore (OAuthUser))
 
-{- | Test that OAuthUser and OAuthUserId associated types exist.
+{- | Test that OAuthUser associated type exists.
 
 This test verifies that:
 1. OAuthStateStore has OAuthUser associated type
-2. OAuthStateStore has OAuthUserId associated type
-3. For TestM, OAuthUser TestM is AuthUser
-4. For TestM, OAuthUserId TestM is UserId
+2. For TestM, OAuthUser TestM is AuthUser
 -}
 spec :: Spec
 spec = describe "OAuthStateStore associated types" $ do
@@ -39,8 +36,3 @@ spec = describe "OAuthStateStore associated types" $ do
         let userType = typeRep (Proxy @(OAuthUser TestM))
             expectedType = typeRep (Proxy @AuthUser)
         userType `shouldBe` expectedType
-
-    it "has OAuthUserId associated type for TestM" $ do
-        let userIdType = typeRep (Proxy @(OAuthUserId TestM))
-            expectedType = typeRep (Proxy @UserId)
-        userIdType `shouldBe` expectedType

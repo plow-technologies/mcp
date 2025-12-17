@@ -29,8 +29,9 @@ import Test.QuickCheck (Arbitrary, ioProperty, (.&&.), (===))
 -- Import orphan Arbitrary instances
 import Generators ()
 
+import Servant.OAuth2.IDP.Auth.Demo (AuthUser)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
-import Servant.OAuth2.IDP.Types (AuthorizationCode (..), UserId)
+import Servant.OAuth2.IDP.Types (AuthorizationCode (..))
 
 -- Import TestM infrastructure for creating shared environments
 import TestMonad (mkTestEnv, runTestM)
@@ -45,16 +46,16 @@ This spec tests that consumeAuthCode:
 consumeAuthCodeSpec ::
     forall m.
     ( OAuthStateStore m
-    , Arbitrary (OAuthUserId m)
-    , Eq (OAuthUserId m)
-    , Show (OAuthUserId m)
+    , Arbitrary (OAuthUser m)
+    , Eq (OAuthUser m)
+    , Show (OAuthUser m)
     ) =>
     -- | Runner function to execute 'm' in 'IO'
     (forall a. m a -> IO a) ->
     Spec
 consumeAuthCodeSpec runM = describe "consumeAuthCode" $ do
     prop "returns Just for valid code and deletes it atomically" $
-        \(code :: AuthorizationCode (OAuthUserId m)) -> ioProperty $ do
+        \(code :: AuthorizationCode (OAuthUser m)) -> ioProperty $ do
             -- Make code valid (not expired)
             let validCode = code{authExpiry = addUTCTime 86400 (authExpiry code)}
 
@@ -69,7 +70,7 @@ consumeAuthCodeSpec runM = describe "consumeAuthCode" $ do
             pure $ (result === Just validCode) .&&. (secondResult === Nothing)
 
     prop "returns Nothing for expired code" $
-        \(code :: AuthorizationCode (OAuthUserId m)) -> ioProperty $ do
+        \(code :: AuthorizationCode (OAuthUser m)) -> ioProperty $ do
             -- Make code expired by setting expiry to a fixed past time (year 2019)
             -- This ensures expiry < currentTime (2020-01-01) for all test runs
             let pastTime = UTCTime (fromGregorian 2019 12 31) 0
@@ -95,7 +96,7 @@ a fresh environment on each call.
 consumeAuthCodeConcurrencySpec :: Spec
 consumeAuthCodeConcurrencySpec = describe "consumeAuthCode (concurrency)" $ do
     prop "only one concurrent consumer succeeds (atomicity)" $
-        \(code :: AuthorizationCode UserId) -> ioProperty $ do
+        \(code :: AuthorizationCode AuthUser) -> ioProperty $ do
             -- Make code valid (not expired) - add far future time to ensure validity
             let validCode = code{authExpiry = addUTCTime 86400 (authExpiry code)}
 

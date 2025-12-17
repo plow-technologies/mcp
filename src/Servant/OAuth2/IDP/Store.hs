@@ -145,23 +145,13 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
 
     {- | User type for JWT tokens and authentication.
 
-    This is the full user record stored with tokens.
+    This is the full user record stored with tokens and authorization codes.
 
     Examples:
     * Simple: @type OAuthUser MyMonad = AuthUser@
     * Custom: @type OAuthUser MyMonad = MyCustomUser@
     -}
     type OAuthUser m :: Type
-
-    {- | User identifier type for authorization codes and state structures.
-
-    This is typically a lighter-weight identifier embedded in codes.
-
-    Examples:
-    * Simple: @type OAuthUserId MyMonad = UserId@
-    * Custom: @type OAuthUserId MyMonad = UUID@
-    -}
-    type OAuthUserId m :: Type
 
     -- * Authorization Code Operations
 
@@ -172,11 +162,11 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
     {- | Store an authorization code.
 
     The implementation should store the code along with its expiry time, PKCE challenge,
-    client ID, redirect URI, and associated user ID.
+    client ID, redirect URI, and associated user.
 
     Satisfies: Round-trip law, Idempotence law, Overwrite law
     -}
-    storeAuthCode :: AuthorizationCode (OAuthUserId m) -> m ()
+    storeAuthCode :: AuthorizationCode (OAuthUser m) -> m ()
 
     {- | Look up an authorization code by its identifier.
 
@@ -186,7 +176,7 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
 
     Satisfies: Round-trip law, Expiry law
     -}
-    lookupAuthCode :: AuthCodeId -> m (Maybe (AuthorizationCode (OAuthUserId m)))
+    lookupAuthCode :: AuthCodeId -> m (Maybe (AuthorizationCode (OAuthUser m)))
 
     {- | Delete an authorization code.
 
@@ -214,31 +204,7 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
 
     Satisfies: Round-trip law, Expiry law, Atomicity (single-use enforcement)
     -}
-    consumeAuthCode :: AuthCodeId -> m (Maybe (AuthorizationCode (OAuthUserId m)))
-
-    {- | Look up a user by their user ID.
-
-    This is used during token exchange to reconstruct the full user object
-    from the user ID stored in the authorization code.
-
-    Returns 'Nothing' if the user ID is not found.
-
-    Note: Implementations may cache user data or query an external source.
-    -}
-    lookupUserById :: OAuthUserId m -> m (Maybe (OAuthUser m))
-
-    {- | Store a user in the cache.
-
-    This is used during login to cache the user for later lookup during
-    token exchange. The user ID is extracted from authorization codes,
-    and this cache allows reconstructing the full user object.
-
-    Implementations may:
-    * Store in memory (for simple cases)
-    * Skip caching and query from external source during lookup
-    * Implement with TTL/expiry
-    -}
-    storeUserInCache :: OAuthUserId m -> OAuthUser m -> m ()
+    consumeAuthCode :: AuthCodeId -> m (Maybe (AuthorizationCode (OAuthUser m)))
 
     -- * Access Token Operations
 
