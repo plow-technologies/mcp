@@ -310,7 +310,6 @@ instance AuthBackend TestM where
     type AuthBackendError TestM = ()
     type AuthBackendEnv TestM = TestEnv
     type AuthBackendUser TestM = AuthUser
-    type AuthBackendUserId TestM = UserId
 
     validateCredentials username password = TestM $ do
         env <- ask
@@ -328,7 +327,7 @@ instance AuthBackend TestM where
                                     , userUserEmail = Just (unUsername username <> "@test.local")
                                     , userUserName = Just (unUsername username)
                                     }
-                        pure $ Just (userId, authUser)
+                        pure $ Just authUser
                     else pure Nothing
 
 -- -----------------------------------------------------------------------------
