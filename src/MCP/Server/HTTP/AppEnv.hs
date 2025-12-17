@@ -104,7 +104,6 @@ import Servant.OAuth2.IDP.Types (
     AuthorizationError (..),
     PendingAuthorization (..),
     SessionId (..),
-    UserId,
     ValidationError (..),
     authorizationErrorToResponse,
     validationErrorToResponse,
@@ -497,7 +496,6 @@ instance AuthBackend AppM where
     type AuthBackendError AppM = DemoAuthError
     type AuthBackendEnv AppM = DemoCredentialEnv
     type AuthBackendUser AppM = AuthUser
-    type AuthBackendUserId AppM = UserId
 
     validateCredentials username password = do
         authEnv <- asks envAuth
