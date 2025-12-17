@@ -167,16 +167,20 @@ spec = do
             -- not just AppM. We use Identity as a simple example monad.
             --
             -- The key requirement: mcpApp's signature should be:
-            --   mcpApp :: (forall a. m a -> Handler a) -> Application
+            --   mcpApp :: (forall a. m a -> Handler a) -> ServerT UnprotectedMCPAPI m -> Application
             -- NOT:
-            --   mcpApp :: (forall a. AppM a -> Handler a) -> Application
+            --   mcpApp :: (forall a. AppM a -> Handler a) -> ServerT UnprotectedMCPAPI AppM -> Application
             --
             -- If this compiles and runs, the polymorphism requirement is satisfied.
             let identityTransform :: forall a. Identity a -> Handler a
                 identityTransform (Identity x) = pure x
 
+            -- Provide a dummy server implementation in Identity monad
+            let dummyServer :: Value -> Identity Value
+                dummyServer req = pure $ object ["echo" .= req]
+
             -- This should create a valid Application
-            let app = HTTP.mcpApp identityTransform
+            let app = HTTP.mcpApp identityTransform dummyServer
 
             -- Verify it's non-bottom
             app `seq` True `shouldBe` True

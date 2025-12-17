@@ -80,7 +80,7 @@ import Network.HTTP.Media ((//), (/:))
 import Network.Wai (Application)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
-import Servant (Context (..), Handler, Proxy (..), Server, ServerT, hoistServerWithContext, serve, serveWithContext, throwError)
+import Servant (Context (..), Handler, Proxy (..), Server, ServerT, hoistServer, hoistServerWithContext, serve, serveWithContext, throwError)
 import Servant.API (Accept (..), JSON, MimeRender (..), Post, ReqBody, (:<|>) (..), (:>))
 import Servant.Auth.Server (Auth, AuthResult (..), CookieSettings, JWT, JWTSettings, ToJWT, defaultCookieSettings, defaultJWTSettings, generateKey)
 import Servant.Server (err400, err401, err500, errBody, errHeaders)
@@ -177,34 +177,31 @@ type FullAPI = OAuthAPI :<|> MCPAPI '[JWT]
 This entry point serves only the MCP API endpoint without OAuth endpoints.
 Use this when you don't need OAuth authentication.
 
-This is a simplified entry point that accepts a polymorphic natural transformation.
-For now, it delegates to the internal implementation.
+This is a simplified entry point that accepts a polymorphic natural transformation
+and a polymorphic server implementation.
 
 = Usage Example
 
 @
 import MCP.Server.HTTP (mcpApp)
 import MCP.Server.HTTP.AppEnv (AppM, AppEnv, runAppM)
+import Servant (ServerT)
+
+myServer :: ServerT UnprotectedMCPAPI AppM
+myServer = myMcpHandler
 
 myApp :: AppEnv -> Application
-myApp env = mcpApp (runAppM env)
+myApp env = mcpApp (runAppM env) myServer
 @
 -}
 mcpApp ::
     (forall a. m a -> Handler a) ->
+    ServerT UnprotectedMCPAPI m ->
     Application
-mcpApp _runM =
-    -- For now, use a minimal unprotected MCP server
-    -- This will be expanded in future phases
+mcpApp runM serverImpl =
     serve
         (Proxy :: Proxy UnprotectedMCPAPI)
-        unprotectedMCPHandler
-  where
-    unprotectedMCPHandler :: Aeson.Value -> Handler Aeson.Value
-    unprotectedMCPHandler req = do
-        -- Basic echo handler for demonstration
-        -- In production, this would use the full MCP server logic
-        pure $ object ["result" .= ("MCP server response" :: Text), "request" .= req]
+        (hoistServer (Proxy :: Proxy UnprotectedMCPAPI) runM serverImpl)
 
 {- | MCP + OAuth application with full OAuth 2.1 support.
 
