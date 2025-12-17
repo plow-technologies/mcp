@@ -156,7 +156,6 @@ instance (MonadIO m) => AuthBackend (ReaderT DemoCredentialEnv m) where
     type AuthBackendError (ReaderT DemoCredentialEnv m) = DemoAuthError
     type AuthBackendEnv (ReaderT DemoCredentialEnv m) = DemoCredentialEnv
     type AuthBackendUser (ReaderT DemoCredentialEnv m) = AuthUser
-    type AuthBackendUserId (ReaderT DemoCredentialEnv m) = UserId
 
     validateCredentials username password = do
         store <- asks credentialStore
@@ -175,7 +174,7 @@ instance (MonadIO m) => AuthBackend (ReaderT DemoCredentialEnv m) where
                                     , userUserEmail = Just (unUsername username <> "@demo.local")
                                     , userUserName = Just (unUsername username)
                                     }
-                        pure $ Just (userId, authUser)
+                        pure $ Just authUser
                     else pure Nothing
 
 -- -----------------------------------------------------------------------------
