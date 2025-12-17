@@ -28,6 +28,7 @@ import Laws.AuthBackendSpec (authBackendKnownCredentials, authBackendLaws)
 import Laws.AuthCodeFunctorSpec qualified as AuthCodeFunctorSpec
 import Laws.AuthCodeUserIdSpec qualified as AuthCodeUserIdSpec
 import Laws.BoundarySpec qualified as BoundarySpec
+import Laws.ConsumeAuthCodeSpec (consumeAuthCodeSpec)
 import Laws.ErrorBoundarySecuritySpec qualified as ErrorBoundarySecuritySpec
 import Laws.OAuthStateStoreSpec (oauthStateStoreLaws)
 import Laws.OAuthUserTypeSpec qualified as OAuthUserTypeSpec
@@ -111,6 +112,7 @@ spec = do
     -- Typeclass law tests (using TestM with controlled time)
     describe "TestM OAuthStateStore" $ do
         oauthStateStoreLaws runTestM'
+        consumeAuthCodeSpec runTestM'
         OAuthUserTypeSpec.spec
         AuthCodeUserIdSpec.spec
 

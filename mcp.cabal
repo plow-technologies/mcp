@@ -262,6 +262,7 @@ test-suite mcp-test
         TestMonad
         Laws.AuthCodeFunctorSpec
         Laws.AuthCodeUserIdSpec
+        Laws.ConsumeAuthCodeSpec
         Laws.OAuthStateStoreSpec
         Laws.OAuthUserTypeSpec
         Laws.AuthBackendSpec

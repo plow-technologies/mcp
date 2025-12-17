@@ -65,7 +65,7 @@ module MCP.Server.HTTP.AppEnv (
     toServerError,
 ) where
 
-import Control.Concurrent.STM (TVar, atomically, readTVar)
+import Control.Concurrent.STM (TVar, atomically, readTVar, writeTVar)
 import Control.Concurrent.STM.TVar (readTVarIO)
 import Control.Monad.Except (ExceptT, MonadError, runExceptT, throwError)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -379,6 +379,24 @@ instance OAuthStateStore AppM where
     deleteAuthCode codeId = do
         oauthEnv <- asks envOAuth
         liftIO $ runReaderT (deleteAuthCode codeId) oauthEnv
+
+    consumeAuthCode codeId = do
+        oauthEnv <- asks envOAuth
+        -- consumeAuthCode uses MonadTime - run in AppM context
+        now <- currentTime
+        liftIO $ atomically $ do
+            state <- readTVar (oauthStateVar oauthEnv)
+            let key = unAuthCodeId codeId
+            case Map.lookup key (authCodes state) of
+                Nothing -> pure Nothing
+                Just code
+                    -- Check if expired
+                    | now >= authExpiry code -> pure Nothing
+                    | otherwise -> do
+                        -- Delete the code atomically within the same transaction
+                        let newState = state{authCodes = Map.delete key (authCodes state)}
+                        writeTVar (oauthStateVar oauthEnv) newState
+                        pure (Just code)
 
     lookupUserById userId = do
         oauthEnv <- asks envOAuth

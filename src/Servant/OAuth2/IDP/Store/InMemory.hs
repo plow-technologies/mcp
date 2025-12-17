@@ -199,6 +199,23 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) wh
             let newState = state{authCodes = Map.delete key (authCodes state)}
             writeTVar (oauthStateVar env) newState
 
+    consumeAuthCode codeId = do
+        env <- ask
+        now <- currentTime
+        liftIO . atomically $ do
+            state <- readTVar (oauthStateVar env)
+            let key = unAuthCodeId codeId
+            case Map.lookup key (authCodes state) of
+                Nothing -> pure Nothing
+                Just code
+                    -- Check if expired
+                    | now >= authExpiry code -> pure Nothing
+                    | otherwise -> do
+                        -- Delete the code atomically within the same transaction
+                        let newState = state{authCodes = Map.delete key (authCodes state)}
+                        writeTVar (oauthStateVar env) newState
+                        pure (Just code)
+
     lookupUserById userId = do
         env <- ask
         liftIO . atomically $ do

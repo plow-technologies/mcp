@@ -82,7 +82,7 @@ import Control.Monad.IO.Class (MonadIO (..))
 import Control.Monad.Reader (MonadReader (..), ReaderT (..))
 import Data.ByteArray (ScrubbedBytes)
 import Data.ByteArray qualified as BA
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text.Encoding qualified as TE
@@ -226,6 +226,20 @@ instance OAuthStateStore TestM where
         env <- ask
         liftIO $ modifyIORef' (testOAuthState env) $ \s ->
             s{oauthAuthCodes = Map.delete codeId (oauthAuthCodes s)}
+
+    consumeAuthCode codeId = TestM $ do
+        env <- ask
+        now <- liftIO $ readIORef (testTime env)
+        -- Use atomicModifyIORef' for atomicity
+        liftIO $ atomicModifyIORef' (testOAuthState env) $ \s ->
+            case Map.lookup codeId (oauthAuthCodes s) of
+                Nothing -> (s, Nothing)
+                Just code
+                    | authExpiry code < now -> (s, Nothing) -- Expired
+                    | otherwise ->
+                        -- Delete and return the code atomically
+                        let newState = s{oauthAuthCodes = Map.delete codeId (oauthAuthCodes s)}
+                         in (newState, Just code)
 
     lookupUserById userId = TestM $ do
         env <- ask

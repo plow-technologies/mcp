@@ -197,6 +197,25 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
     -}
     deleteAuthCode :: AuthCodeId -> m ()
 
+    {- | Atomically look up and delete an authorization code.
+
+    This operation combines 'lookupAuthCode' and 'deleteAuthCode' into a single
+    atomic operation to prevent race conditions. Per RFC 6749 §4.1.2, authorization
+    codes MUST be single-use. This method ensures that exactly one concurrent consumer
+    can successfully retrieve the code.
+
+    Returns 'Nothing' if:
+    * The code does not exist
+    * The code has expired (implementation must check expiry time)
+    * The code was already consumed by another request
+
+    MUST be implemented atomically to prevent replay attacks. Two concurrent calls
+    with the same code ID must result in exactly one returning Just and one returning Nothing.
+
+    Satisfies: Round-trip law, Expiry law, Atomicity (single-use enforcement)
+    -}
+    consumeAuthCode :: AuthCodeId -> m (Maybe (AuthorizationCode (OAuthUserId m)))
+
     {- | Look up a user by their user ID.
 
     This is used during token exchange to reconstruct the full user object

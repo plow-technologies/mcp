@@ -114,7 +114,9 @@ import Servant.OAuth2.IDP.API (
     TokenResponse (..),
  )
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..), Username (..))
-import Servant.OAuth2.IDP.Auth.Demo () -- Instance only
+import Servant.OAuth2.IDP.Auth.Demo ()
+
+-- Instance only
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     AccessTokenId (..),
@@ -801,20 +803,14 @@ handleAuthCodeGrant params = do
                 throwError $ injectTyped @AuthorizationError $ InvalidRequest "Invalid code_verifier"
             Right verifier -> return verifier
 
-    -- Look up authorization code
-    mAuthCode <- lookupAuthCode code
+    -- Atomically consume authorization code (lookup + delete, prevents replay attacks)
+    mAuthCode <- consumeAuthCode code
     authCode <- case mAuthCode of
         Just ac -> return ac
         Nothing -> do
+            -- consumeAuthCode returns Nothing if code doesn't exist, is expired, or already used
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
-            throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid authorization code"
-
-    -- Verify code hasn't expired
-    now <- currentTime
-    when (now > authExpiry authCode) $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "auth_code" "Authorization code expired"
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
-        throwError $ injectTyped @AuthorizationError ExpiredCode
+            throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid or expired authorization code"
 
     -- Verify PKCE
     let authChallenge = authCodeChallenge authCode
@@ -839,10 +835,9 @@ handleAuthCodeGrant params = do
     refreshTokenText <- liftIO $ generateRefreshTokenWithConfig config
     let refreshToken = RefreshTokenId refreshTokenText
 
-    -- Store tokens
+    -- Store tokens (code already deleted by consumeAuthCode)
     storeAccessToken (AccessTokenId accessTokenText) user
     storeRefreshToken refreshToken (clientId, user)
-    deleteAuthCode code
 
     -- Emit successful token exchange trace
     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" True
