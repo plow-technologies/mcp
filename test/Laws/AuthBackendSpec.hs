@@ -104,8 +104,6 @@ runInMemory action = do
 authBackendLaws ::
     forall m.
     ( AuthBackend m
-    , Eq (AuthBackendUserId m)
-    , Show (AuthBackendUserId m)
     , Eq (AuthBackendUser m)
     , Show (AuthBackendUser m)
     ) =>
@@ -172,8 +170,6 @@ the rejection behavior.
 authBackendKnownCredentials ::
     forall m.
     ( AuthBackend m
-    , Eq (AuthBackendUserId m)
-    , Show (AuthBackendUserId m)
     , Eq (AuthBackendUser m)
     , Show (AuthBackendUser m)
     ) =>
@@ -187,7 +183,7 @@ authBackendKnownCredentials ::
     PlaintextPassword ->
     Spec
 authBackendKnownCredentials runM validUser validPass invalidPass = describe "Known credentials" $ do
-    it "accepts valid credentials (returns Just (userId, user))" $ do
+    it "accepts valid credentials (returns Just user)" $ do
         result <- runM $ validateCredentials validUser validPass
         result `shouldSatisfy` isJust
 
