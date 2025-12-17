@@ -101,6 +101,13 @@ library
         Servant.OAuth2.IDP.Boundary
         Servant.OAuth2.IDP.Server
         Servant.OAuth2.IDP.Handlers
+        Servant.OAuth2.IDP.Handlers.HTML
+        Servant.OAuth2.IDP.Handlers.Helpers
+        Servant.OAuth2.IDP.Handlers.Metadata
+        Servant.OAuth2.IDP.Handlers.Registration
+        Servant.OAuth2.IDP.Handlers.Authorization
+        Servant.OAuth2.IDP.Handlers.Login
+        Servant.OAuth2.IDP.Handlers.Token
         Servant.OAuth2.IDP.Test.Internal
         Servant.OAuth2.IDP.Auth.Backend
         Servant.OAuth2.IDP.Auth.Demo
