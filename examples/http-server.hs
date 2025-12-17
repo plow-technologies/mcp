@@ -41,7 +41,7 @@ import MCP.Protocol
 import MCP.Server
 import MCP.Server.Auth
 import MCP.Server.HTTP
-import MCP.Server.HTTP.AppEnv (AppEnv (..))
+import MCP.Server.HTTP.AppEnv (AppEnv (..), runAppM)
 import MCP.Trace.Types (MCPTrace (..), isOAuthTrace, renderMCPTrace)
 import MCP.Types
 import Servant.Auth.Server (defaultJWTSettings, generateKey)
@@ -301,7 +301,10 @@ main = do
                 -- Create demo credential environment
                 let authEnv = DemoCredentialEnv defaultDemoCredentialStore
 
-                -- Create AppEnv with configured settings
+                -- Initialize server state
+                stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
+
+                -- Create AppEnv with configured settings (including stateVar)
                 let appEnv =
                         AppEnv
                             { envOAuth = oauthEnv
@@ -309,14 +312,12 @@ main = do
                             , envConfig = config
                             , envTracer = httpTracer
                             , envJWT = jwtSettings
+                            , envServerState = stateVar
                             , envTimeProvider = Nothing -- Use real IO time
                             }
 
-                -- Initialize server state
-                stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
-
-                -- Use mcpAppWithOAuth for full OAuth support
-                let app = mcpAppWithOAuth appEnv stateVar
+                -- Use mcpAppWithOAuth for full OAuth support (polymorphic version)
+                let app = mcpAppWithOAuth (runAppM appEnv) jwtSettings
                 run (httpPort config) app
             else
                 -- Use runServerHTTP for non-OAuth mode

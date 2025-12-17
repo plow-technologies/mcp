@@ -4,6 +4,9 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
@@ -57,13 +60,16 @@ module MCP.Server.HTTP (
 ) where
 
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
-import Control.Monad.IO.Class (liftIO)
-import Control.Monad.Reader (ask)
+import Control.Monad (when)
+import Control.Monad.Except (MonadError)
+import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Reader (MonadReader, ask, asks)
 import Control.Monad.State.Strict (get, put)
 import Data.Aeson (encode, fromJSON, object, toJSON, (.=))
 import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as LBS
 import Data.Functor.Contravariant (contramap)
+import Data.Generics.Product (HasType, getTyped)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -73,32 +79,27 @@ import Network.HTTP.Media ((//), (/:))
 import Network.Wai (Application)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
-import Servant (Context (..), Handler, Proxy (..), Server, hoistServerWithContext, serve, serveWithContext, throwError)
+import Servant (Context (..), Handler, Proxy (..), Server, ServerT, hoistServerWithContext, serve, serveWithContext, throwError)
 import Servant.API (Accept (..), JSON, MimeRender (..), Post, ReqBody, (:<|>) (..), (:>))
-import Servant.Auth.Server (Auth, AuthResult (..), CookieSettings, JWT, JWTSettings, defaultCookieSettings, defaultJWTSettings, generateKey)
+import Servant.Auth.Server (Auth, AuthResult (..), CookieSettings, JWT, JWTSettings, ToJWT, defaultCookieSettings, defaultJWTSettings, generateKey)
 import Servant.Server (err400, err401, err500, errBody, errHeaders)
+import Servant.Server.Internal.Handler (runHandler)
 
-import Control.Monad (when)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
 import MCP.Server.Auth (OAuthConfig (..), OAuthProvider (..), ProtectedResourceMetadata (..))
-import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..), DemoCredentialEnv (..), defaultDemoCredentialStore)
-
--- Import AuthBackend instance for AppM
-import MCP.Server.HTTP.AppEnv (AppEnv (..), HTTPServerConfig (..), runAppM)
-
--- Import OAuthAPI from new namespace
-
+import MCP.Server.HTTP.AppEnv (AppEnv (..), AppError (..), HTTPServerConfig (..), runAppM)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Operation (OperationTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
 import MCP.Types
 import Plow.Logging (IOTracer (..), Tracer (..), traceWith)
-
--- Import OAuthAPI type and oauthServer from IDP namespace
+import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
+import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..), DemoCredentialEnv (..), defaultDemoCredentialStore)
 import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI, oauthServer)
+import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
-import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthErrorResponse (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
+import Servant.OAuth2.IDP.Types (AuthorizationError (..), ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthErrorResponse (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
 
 -- | HTML content type for Servant
 data HTML
@@ -208,43 +209,80 @@ mcpApp _runM =
 
 This entry point serves both the MCP API and OAuth endpoints.
 
-Uses the polymorphic `oauthServer` from Servant.OAuth2.IDP.Server and
-`mcpServerAuth` for JWT-protected MCP endpoint.
+Accepts a natural transformation to run the polymorphic monad `m` in Servant's Handler.
+The monad `m` must satisfy all constraints needed by the OAuth server and MCP authentication.
 
 = Usage Example
 
 @
 import MCP.Server.HTTP (mcpAppWithOAuth)
-import MCP.Server.HTTP.AppEnv (AppEnv)
+import MCP.Server.HTTP.AppEnv (AppM, AppEnv, runAppM)
 
 -- Create AppEnv with OAuth state, auth backend, config, tracer, JWT settings
 appEnv <- mkAppEnv ...
 
--- Create WAI Application
-let app = mcpAppWithOAuth appEnv
+-- Create WAI Application with natural transformation
+let app = mcpAppWithOAuth (runAppM appEnv)
 @
+
+= Type Parameter
+
+The function is polymorphic over the monad `m`. The natural transformation
+`(forall a. m a -> Handler a)` determines how to execute `m` actions in Servant's Handler.
+
+This enables:
+
+* Production: Use @AppM@ with real PostgreSQL/LDAP backends
+* Testing: Use test monads with in-memory/mock backends
+* Custom: Use your own monad stack with custom backends
 -}
 mcpAppWithOAuth ::
-    (MCPServer MCPServerM) =>
-    AppEnv ->
-    TVar ServerState ->
+    forall m env.
+    ( MCPServer MCPServerM
+    , OAuthStateStore m
+    , AuthBackend m
+    , AuthBackendUser m ~ OAuthUser m
+    , AuthBackendUserId m ~ OAuthUserId m
+    , ToJWT (OAuthUser m)
+    , MonadIO m
+    , MonadReader env m
+    , MonadError AppError m
+    , HasType HTTPServerConfig env
+    , HasType (IOTracer HTTPTrace) env
+    , HasType JWTSettings env
+    , HasType (TVar ServerState) env
+    ) =>
+    (forall a. m a -> Handler a) ->
+    JWTSettings ->
     Application
-mcpAppWithOAuth appEnv stateVar =
-    let jwtSettings = envJWT appEnv
-        cookieSettings = defaultCookieSettings
-        authContext = cookieSettings :. jwtSettings :. EmptyContext
-        config = envConfig appEnv
-        tracer = envTracer appEnv
-     in serveWithContext
+mcpAppWithOAuth runM jwtSettings =
+    serveWithContext
+        (Proxy :: Proxy FullAPI)
+        authContext
+        ( hoistServerWithContext
             (Proxy :: Proxy FullAPI)
-            authContext
-            ( hoistServerWithContext
-                (Proxy :: Proxy OAuthAPI)
-                (Proxy :: Proxy '[CookieSettings, JWTSettings])
-                (runAppM appEnv)
-                oauthServer
-                :<|> mcpServerAuth config tracer stateVar
-            )
+            (Proxy :: Proxy '[CookieSettings, JWTSettings])
+            runM
+            fullServer
+        )
+  where
+    authContext :: Context '[CookieSettings, JWTSettings]
+    authContext = defaultCookieSettings :. jwtSettings :. EmptyContext
+
+    fullServer :: ServerT FullAPI m
+    fullServer = oauthServer :<|> mcpServerAuthPolymorphic
+
+    -- Polymorphic version of mcpServerAuth that works in monad m
+    mcpServerAuthPolymorphic :: AuthResult AuthUser -> Aeson.Value -> m Aeson.Value
+    mcpServerAuthPolymorphic authResult requestValue = do
+        config <- asks (getTyped @HTTPServerConfig)
+        tracer <- asks (getTyped @(IOTracer HTTPTrace))
+        stateVar <- asks (getTyped @(TVar ServerState))
+        -- Call mcpServerAuth by lifting from Handler back to m
+        result <- liftIO $ runHandler $ mcpServerAuth config tracer stateVar authResult requestValue
+        case result of
+            Left err -> throwError (AuthorizationErr (InvalidGrant $ T.pack $ show err))
+            Right val -> pure val
 
 -- | Create a WAI Application for the MCP HTTP server (internal monomorphic version)
 mcpAppInternal :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> TVar ServerState -> OAuthTVarEnv -> JWTSettings -> Application
@@ -275,6 +313,7 @@ mcpAppInternal config tracer stateVar oauthEnv jwtSettings =
                     , envConfig = cfg
                     , envTracer = httpTracer
                     , envJWT = jwtSet
+                    , envServerState = stateVar
                     , envTimeProvider = Nothing -- Use real IO time for production
                     }
          in hoistServerWithContext
@@ -803,7 +842,10 @@ demoMcpApp = do
     -- Create demo credential environment
     let authEnv = DemoCredentialEnv defaultDemoCredentialStore
 
-    -- Create AppEnv
+    -- Initialize server state
+    stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
+
+    -- Create AppEnv with all fields including stateVar
     let appEnv =
             AppEnv
                 { envOAuth = oauthEnv
@@ -811,14 +853,12 @@ demoMcpApp = do
                 , envConfig = config
                 , envTracer = tracer
                 , envJWT = jwtSettings
+                , envServerState = stateVar
                 , envTimeProvider = Nothing -- Use real IO time
                 }
 
-    -- Initialize server state
-    stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
-
-    -- Use polymorphic mcpAppWithOAuth with AppEnv and ServerState
-    pure $ mcpAppWithOAuth appEnv stateVar
+    -- Use polymorphic mcpAppWithOAuth with natural transformation and JWTSettings
+    pure $ mcpAppWithOAuth (runAppM appEnv) jwtSettings
 
 -- | Run the MCP server as an HTTP server
 runServerHTTP :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTrace -> IO ()

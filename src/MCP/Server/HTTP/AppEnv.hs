@@ -83,6 +83,7 @@ import Network.Wai.Handler.Warp (Port)
 import Servant (Handler, ServerError, err400, err401, err500, errBody)
 import Servant.Auth.Server (JWTSettings)
 
+import MCP.Server (ServerState)
 import MCP.Server.Auth (OAuthConfig, ProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser, DemoAuthError (..), DemoCredentialEnv)
@@ -160,6 +161,8 @@ data AppEnv = AppEnv
     -- ^ Tracer for HTTP and OAuth events
     , envJWT :: JWTSettings
     -- ^ JWT settings for token signing and validation
+    , envServerState :: TVar ServerState
+    -- ^ MCP server state (for HTTP OAuth entry point)
     , envTimeProvider :: Maybe (TVar UTCTime)
     -- ^ Optional time provider for testing (Nothing = use IO time)
     }

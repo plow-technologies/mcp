@@ -126,6 +126,9 @@ mkTestEnv timeTVar = do
         Just jwk -> return $ defaultJWTSettings jwk
         Nothing -> defaultJWTSettings <$> generateKey
 
+    -- Create placeholder server state (will be replaced in referenceTestConfig)
+    placeholderStateVar <- newTVarIO $ initialServerState (httpCapabilities serverConfig)
+
     return
         AppEnv
             { envOAuth = oauthEnv
@@ -133,6 +136,7 @@ mkTestEnv timeTVar = do
             , envConfig = serverConfig
             , envTracer = tracer
             , envJWT = jwtSettings
+            , envServerState = placeholderStateVar
             , envTimeProvider = Just timeTVar -- Use controllable time for tests
             }
 
@@ -204,8 +208,12 @@ referenceTestConfig = do
             let config = envConfig env
             stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
 
+            -- Add stateVar to env
+            let envWithState = env{envServerState = stateVar}
+            let jwtSettings = envJWT env
+
             -- Build actual WAI Application using mcpAppWithOAuth polymorphic entry point
-            let app = mcpAppWithOAuth env stateVar
+            let app = mcpAppWithOAuth (runAppM envWithState) jwtSettings
 
             -- Time advancement callback - modifies the TVar that controls currentTime
             let advanceTime dt = atomically $ modifyTVar' timeTVar (addUTCTime dt)
