@@ -12,18 +12,17 @@ Maintainer  : mpg@mpg.is
 Stability   : experimental
 Portability : GHC
 
-This module verifies that validateCredentials returns Maybe (userId, user)
-instead of Bool, as required by FR-002/FR-039.
+This module verifies that validateCredentials returns Maybe user
+instead of Bool, as required by FR-002.
 
 == Related Requirements
 
-* FR-002: Change validateCredentials to return Maybe (userId, user)
-* FR-039: Use AuthBackendUser/AuthBackendUserId associated types
+* FR-002: Change validateCredentials to return Maybe user
 
 == Tested Properties
 
-* Signature returns Maybe (AuthBackendUserId m, AuthBackendUser m)
-* Success case returns Just (userId, user) tuple
+* Signature returns Maybe (AuthBackendUser m)
+* Success case returns Just user
 * Failure case returns Nothing
 -}
 module Laws.AuthBackendSignatureSpec (
@@ -46,14 +45,14 @@ Verifies that the signature has been changed from:
   validateCredentials :: Username -> PlaintextPassword -> m Bool
 
 To:
-  validateCredentials :: Username -> PlaintextPassword -> m (Maybe (AuthBackendUserId m, AuthBackendUser m))
+  validateCredentials :: Username -> PlaintextPassword -> m (Maybe (AuthBackendUser m))
 
 These tests verify the interface at the type level and runtime behavior.
 -}
 spec :: Spec
 spec = describe "AuthBackend validateCredentials signature" $ do
     describe "type signature verification" $ do
-        it "returns Maybe tuple instead of Bool" $ do
+        it "returns Maybe user instead of Bool" $ do
             -- This is a compilation test - if this module compiles with
             -- the usage below, the signature is correct
             True `shouldBe` True
@@ -62,9 +61,8 @@ spec = describe "AuthBackend validateCredentials signature" $ do
 
 Requires a concrete AuthBackend instance and runner function.
 Tests that:
-1. Valid credentials return Just (userId, user)
+1. Valid credentials return Just user
 2. Invalid credentials return Nothing
-3. The returned tuple contains both userId and user
 
 Usage:
 @
@@ -74,8 +72,6 @@ authBackendSignatureTests runM validUser validPass invalidPass
 authBackendSignatureTests ::
     forall m.
     ( AuthBackend m
-    , Eq (AuthBackendUserId m)
-    , Show (AuthBackendUserId m)
     , Eq (AuthBackendUser m)
     , Show (AuthBackendUser m)
     ) =>
@@ -89,10 +85,10 @@ authBackendSignatureTests ::
     PlaintextPassword ->
     Spec
 authBackendSignatureTests runM validUser validPass invalidPass = describe "validateCredentials signature behavior" $ do
-    it "returns Just (userId, user) for valid credentials" $ do
+    it "returns Just user for valid credentials" $ do
         result <- runM $ validateCredentials validUser validPass
         result `shouldSatisfy` \case
-            Just (_userId, _user) -> True
+            Just _user -> True
             Nothing -> False
 
     it "returns Nothing for invalid credentials" $ do
