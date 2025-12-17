@@ -7,6 +7,11 @@ __DISCLAIMER__: This is a design contract, not production code. Code samples
 are illustrative pseudo-code. Function bodies have not been compiled or tested.
 Focus on type signatures, interfaces, and structural intent.
 
+__PARTIALLY SUPERSEDED (2025-12-17)__: Phase 14 removes 'AuthBackendUserId m'
+associated type. 'validateCredentials' now returns @Maybe (AuthBackendUser m)@
+instead of tuple. User IDs are fields within 'AuthBackendUser m', encoded into
+JWT via 'ToJWT'. See plan.md Phase 14 for updated design.
+
 This module defines the abstract interface for user credential validation,
 enabling integration with external identity providers (LDAP, Active Directory,
 Okta, etc.) while maintaining backward compatibility with the existing

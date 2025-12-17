@@ -2,6 +2,8 @@
 
 **Feature Branch**: `004-oauth-auth-typeclasses`
 
+> **PARTIALLY SUPERSEDED (2025-12-17)**: Phase 14 removes `AuthBackendUserId m` and `OAuthUserId m` associated types. `validateCredentials` now returns `Maybe (AuthBackendUser m)` instead of a tuple. User IDs are fields within user types, encoded into JWT via `ToJWT`. See `plan.md` Phase 14 for updated design. Code examples below showing `AuthBackendUserId` or `OAuthUserId` are outdated.
+
 This guide walks through implementing custom `OAuthStateStore` and `AuthBackend` backends. The default in-memory implementations work for development, but production deployments typically need PostgreSQL, Redis, or LDAP backends.
 
 ## Prerequisites

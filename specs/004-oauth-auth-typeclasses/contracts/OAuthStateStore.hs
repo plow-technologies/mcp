@@ -7,6 +7,10 @@ __DISCLAIMER__: This is a design contract, not production code. Code samples
 are illustrative pseudo-code. Function bodies have not been compiled or tested.
 Focus on type signatures, interfaces, and structural intent.
 
+__PARTIALLY SUPERSEDED (2025-12-17)__: Phase 14 removes 'OAuthUserId m'
+associated type. 'AuthorizationCode' is parameterized by @OAuthUser m@ (full user)
+directly, not by a separate user ID type. See plan.md Phase 14 for updated design.
+
 This module defines the abstract interface for OAuth state persistence,
 enabling swappable production implementations (PostgreSQL, Redis, etc.)
 while maintaining backward compatibility with the existing TVar-based

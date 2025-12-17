@@ -12,6 +12,11 @@ This module specifies the interface for the polymorphic OAuth conformance test s
 Implementations of OAuthStateStore and AuthBackend can use this interface to verify
 their implementations against the same test suite used for the reference implementation.
 
+__PARTIALLY SUPERSEDED (2025-12-17)__: Phase 14 removes the
+@AuthBackendUserId m ~ OAuthUserId m@ type equality constraint from
+'oauthConformanceSpec'. Only @AuthBackendUser m ~ OAuthUser m@ is required.
+See plan.md Phase 14 for updated design.
+
 == Usage
 
 Third-party implementers provide a 'TestConfig' that wires up their implementation:
