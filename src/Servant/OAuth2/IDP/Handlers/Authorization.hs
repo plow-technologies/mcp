@@ -200,7 +200,11 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
 
     -- Build session cookie
     let sessionExpirySeconds = maybe 600 loginSessionExpirySeconds (httpOAuthConfig config)
-        cookieValue = SessionCookie $ "mcp_session=" <> sessionIdText <> "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" <> T.pack (show sessionExpirySeconds)
+        -- Add Secure flag if requireHTTPS is True in OAuth config
+        secureFlag = case httpOAuthConfig config of
+            Just oauthConf | requireHTTPS oauthConf -> "; Secure"
+            _ -> ""
+        cookieValue = SessionCookie $ "mcp_session=" <> sessionIdText <> "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" <> T.pack (show sessionExpirySeconds) <> secureFlag
         scopes = fromMaybe "default access" mScope
         loginHtml = renderLoginPage displayName scopes mResource sessionIdText
 

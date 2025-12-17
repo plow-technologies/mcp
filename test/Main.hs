@@ -51,6 +51,9 @@ import MCP.Server.HTTP.McpAuthSpec qualified as McpAuthSpec
 -- Functional tests
 import Functional.OAuthFlowSpec qualified as OAuthFlowSpec
 
+-- Security tests
+import Security.SessionCookieSpec qualified as SessionCookieSpec
+
 main :: IO ()
 main = hspec spec
 
@@ -108,6 +111,9 @@ spec = do
 
     -- Functional tests
     describe "Functional" OAuthFlowSpec.spec
+
+    -- Security tests
+    describe "Security" SessionCookieSpec.spec
 
     -- Typeclass law tests (using TestM with controlled time)
     describe "TestM OAuthStateStore" $ do
