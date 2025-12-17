@@ -189,7 +189,7 @@ handleLogin mCookie loginForm = do
             validationResult <- validateCredentials username password
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt (unUsername username) (isJust validationResult)
             case validationResult of
-                Just (_userId, authUser) -> do
+                Just authUser -> do
                     -- Emit authorization granted trace
                     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (unClientId $ pendingClientId pending) (unUsername username)
 
