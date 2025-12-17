@@ -85,7 +85,7 @@ import MCP.Server.Auth (OAuthConfig (..), OAuthProvider (..), ProtectedResourceM
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..), DemoCredentialEnv (..), defaultDemoCredentialStore)
 
 -- Import AuthBackend instance for AppM
-import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, HTTPServerConfig (..), runAppM)
+import MCP.Server.HTTP.AppEnv (AppEnv (..), HTTPServerConfig (..), runAppM)
 
 -- Import OAuthAPI from new namespace
 
@@ -175,7 +175,7 @@ type FullAPI = OAuthAPI :<|> MCPAPI '[JWT]
 This entry point serves only the MCP API endpoint without OAuth endpoints.
 Use this when you don't need OAuth authentication.
 
-This is a simplified entry point that works with AppM.
+This is a simplified entry point that accepts a polymorphic natural transformation.
 For now, it delegates to the internal implementation.
 
 = Usage Example
@@ -189,7 +189,7 @@ myApp env = mcpApp (runAppM env)
 @
 -}
 mcpApp ::
-    (forall a. AppM a -> Handler a) ->
+    (forall a. m a -> Handler a) ->
     Application
 mcpApp _runM =
     -- For now, use a minimal unprotected MCP server

@@ -19,9 +19,11 @@ module MCP.Server.HTTP.McpAuthSpec (spec) where
 import Control.Concurrent.STM (newTVarIO)
 import Data.Aeson (Value, object, (.=))
 import Data.ByteString.Char8 qualified as BS
+import Data.Functor.Identity (Identity (..))
 import Data.List (isInfixOf)
 import Data.Text qualified as T
 import Plow.Logging (IOTracer (..), Tracer (..))
+import Servant (Handler)
 import Servant.Auth.Server (AuthResult (..))
 import Servant.Server (ServerError (..))
 import Servant.Server.Internal.Handler (runHandler)
@@ -157,4 +159,24 @@ spec = do
             -- This tests that demoMcpApp can be called and returns a WAI Application
             -- We verify it's non-bottom by evaluating to WHNF with seq
             app <- HTTP.demoMcpApp
+            app `seq` True `shouldBe` True
+
+    describe "mcpApp polymorphism (FR-048)" $ do
+        it "accepts a polymorphic natural transformation (not just AppM)" $ do
+            -- This test demonstrates that mcpApp should work with ANY monad m,
+            -- not just AppM. We use Identity as a simple example monad.
+            --
+            -- The key requirement: mcpApp's signature should be:
+            --   mcpApp :: (forall a. m a -> Handler a) -> Application
+            -- NOT:
+            --   mcpApp :: (forall a. AppM a -> Handler a) -> Application
+            --
+            -- If this compiles and runs, the polymorphism requirement is satisfied.
+            let identityTransform :: forall a. Identity a -> Handler a
+                identityTransform (Identity x) = pure x
+
+            -- This should create a valid Application
+            let app = HTTP.mcpApp identityTransform
+
+            -- Verify it's non-bottom
             app `seq` True `shouldBe` True
