@@ -85,16 +85,19 @@ import Servant.Auth.Server (JWTSettings)
 
 import MCP.Server (ServerState)
 import MCP.Server.Auth (OAuthConfig, ProtectedResourceMetadata)
+import MCP.Trace.HTTP (HTTPTrace (HTTPOAuthBoundary))
+import MCP.Types (Implementation, ServerCapabilities)
+import Plow.Logging (IOTracer)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser, DemoAuthError (..), DemoCredentialEnv)
 import Servant.OAuth2.IDP.Boundary (domainErrorToServerError)
+import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (
     ExpiryConfig (..),
     OAuthState (..),
     OAuthStoreError (..),
     OAuthTVarEnv (..),
  )
-import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     AuthCodeId (..),
     AuthorizationCode (..),
@@ -106,9 +109,6 @@ import Servant.OAuth2.IDP.Types (
     authorizationErrorToResponse,
     validationErrorToResponse,
  )
-import MCP.Trace.HTTP (HTTPTrace (HTTPOAuthBoundary))
-import MCP.Types (Implementation, ServerCapabilities)
-import Plow.Logging (IOTracer)
 
 -- -----------------------------------------------------------------------------
 -- HTTP Server Configuration
@@ -351,6 +351,44 @@ instance MonadTime AppM where
 Delegates operations to the in-memory TVar-based implementation via
 the OAuthTVarEnv in the AppEnv. Uses ReaderT transformation to access
 the OAuth environment component.
+
+= IMPORTANT: Intentional Code Duplication
+
+This instance duplicates expiry logic from "Servant.OAuth2.IDP.Store.InMemory"
+in 'lookupAuthCode', 'consumeAuthCode', and 'lookupPendingAuth'. This is
+INTENTIONAL and NECESSARY for correct test behavior.
+
+== The MonadTime Context Issue
+
+AppM implements 'MonadTime' via the @envTimeProvider@ TVar (see line 341-346),
+which allows tests to control time by advancing the TVar. This is essential
+for testing time-dependent OAuth flows (code expiry, token expiry, etc.).
+
+However, if we delegated expiry-checking methods to InMemory via:
+
+@
+lookupAuthCode codeId = do
+  oauthEnv <- asks envOAuth
+  liftIO $ runReaderT (lookupAuthCode codeId) oauthEnv
+@
+
+The @runReaderT ... oauthEnv@ creates a @ReaderT OAuthTVarEnv IO@ context
+where 'MonadTime' resolves to IO's instance (real system time), NOT AppM's
+test time provider. This would break test time control completely.
+
+== Why Not Alternatives?
+
+1. Pass time explicitly: Would require changing OAuthStateStore API signatures
+2. Remove MonadTime: Too radical, loses composability
+3. Custom ReaderT wrapper: Complex, obscures the actual issue
+
+== Consequence
+
+The duplicated methods must be kept in sync manually with InMemory.hs.
+When InMemory's expiry logic changes, this instance must be updated.
+
+See: ADR-005 (specs\/004-oauth-auth-typeclasses\/adr\/ADR-005-time-provider-limitation.md)
+See: Bead mcp-2z6.9
 -}
 instance OAuthStateStore AppM where
     type OAuthStateError AppM = OAuthStoreError
