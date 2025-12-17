@@ -90,7 +90,7 @@ END PROCEDURE
 
 ## DELEGATION PROTOCOL
 
-All subagents receive a '@'-link to the relevant documents for full context.
+All subagents receive a '@'-link to the relevant documents from the `./spec` directory for full context.
 
 ### Implementer Subagent Requirements
 
@@ -104,21 +104,31 @@ Skill invocation: Use the Skill tool with skill: "test-driven-development"
 ```
 
 **Implementer prompt template**:
+
+Use '@'-links for _essential_ files, refer to them normally for progressive
+disclosure (be judicious)
+
 ```
 ## Task
-<task details from bead>
+<full task description and details from bead>
 
 ## Context
-@spec.md @plan.md @constitution.md (if exists)
+./specs/XXX-feature-name/spec.md ./specs/XXX-feature-name/plan.md ./.specify/memory/constitution.md
 
 ## MANDATORY: Test-Driven Development
 You MUST invoke the `test-driven-development` skill BEFORE writing ANY implementation code.
 Follow the RED-GREEN-REFACTOR cycle strictly:
 1. Write a failing test first
 2. Watch it fail (verify RED)
+3. Use the commit skill, clearly mention it is an intentional failing test
 3. Write minimal code to pass
 4. Watch it pass (verify GREEN)
 5. Refactor if needed
+
+**CRITICAL**
+- NO tests without assertions ("this test proves code compiles": tautology if typed language!)
+- NO trivial assertions (eg: True `shouldBe` True)
+- NO tests for trivial things a strongly typed language prevents
 
 Violation of TDD = task rejection. Code written before tests = delete and restart.
 
@@ -139,10 +149,10 @@ Violation of TDD = task rejection. Code written before tests = delete and restar
 Review implementation for task: <task-id>
 
 ## Review Against
-@spec.md - Feature specification (AUTHORITATIVE)
-@constitution.md - Project principles and constraints (if exists)
-@plan.md - Technical architecture
-@CLAUDE.md - Style and coding standards (if exists)
+- specs/XXX-feature-name/spec.md - Feature specification (AUTHORITATIVE)
+- .specify/memory/constitution.md - Project principles and constraints (if exists)
+- specs/XXX-feature-name/plan.md - Technical architecture
+- CLAUDE.md - Style and coding standards (if exists)
 
 ## Review Checklist
 1. **Spec Conformance**: Does implementation match spec requirements exactly?
@@ -304,7 +314,7 @@ REMINDER: You CANNOT analyze code to understand it. Every technical question nee
    - **Terraform**: `.terraform/`, `*.tfstate*`, `*.tfvars`, `.terraform.lock.hcl`
    - **Kubernetes/k8s**: `*.secret.yaml`, `secrets/`, `.kube/`, `kubeconfig*`, `*.key`, `*.crt`
 
-6. **Find ready work** (with guardrails):
+6. **Find ready work**:
 
    ```bash
    bd ready --json | jq '.[0]'
@@ -452,14 +462,17 @@ Create a bead immediately when you:
 
 ### How to Create Discovery Beads
 
+**MANDATORY**: All discovery beads MUST use `--parent $EPIC_ID` to maintain epic hierarchy.
+
 ```bash
-# 1. Create the discovered issue
+# Create discovered issue (MUST be under feature epic)
 bd create "TODO: Add input validation for edge case" -t task -p 3 \
   -l discovered \
+  --parent $EPIC_ID \
   -d "Found in src/handlers/user.py:142. Need to validate email format before processing." \
   --json
 
-# 2. Link it to the task where it was discovered
+# Link to task where discovered
 bd dep add <new-id> <current-task-id> --type discovered-from
 ```
 
