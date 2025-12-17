@@ -167,7 +167,11 @@ handleLogin mCookie loginForm = do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationDenied (unClientId $ pendingClientId pending) "User denied authorization"
 
             -- Clear session and redirect with error
-            let clearCookie = SessionCookie "mcp_session=; Max-Age=0; Path=/"
+            -- Add Secure flag if requireHTTPS is True in OAuth config
+            let secureFlag = case httpOAuthConfig config of
+                    Just oauthConf | requireHTTPS oauthConf -> "; Secure"
+                    _ -> ""
+                clearCookie = SessionCookie $ "mcp_session=; Max-Age=0; Path=/" <> secureFlag
                 errorParams = "error=access_denied&error_description=User%20denied%20access"
                 stateParam = case pendingState pending of
                     Just s -> "&state=" <> s
@@ -219,11 +223,15 @@ handleLogin mCookie loginForm = do
                     deletePendingAuth sessionId
 
                     -- Build redirect URL with code
-                    let stateParam = case pendingState pending of
+                    -- Add Secure flag if requireHTTPS is True in OAuth config
+                    let secureFlag = case httpOAuthConfig config of
+                            Just oauthConf | requireHTTPS oauthConf -> "; Secure"
+                            _ -> ""
+                        stateParam = case pendingState pending of
                             Just s -> "&state=" <> s
                             Nothing -> ""
                         redirectUrl = RedirectTarget $ toUrlPiece (pendingRedirectUri pending) <> "?code=" <> code <> stateParam
-                        clearCookie = SessionCookie "mcp_session=; Max-Age=0; Path=/"
+                        clearCookie = SessionCookie $ "mcp_session=; Max-Age=0; Path=/" <> secureFlag
 
                     return $ addHeader redirectUrl $ addHeader clearCookie NoContent
                 Nothing ->
