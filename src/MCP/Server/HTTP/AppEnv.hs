@@ -380,6 +380,14 @@ instance OAuthStateStore AppM where
         oauthEnv <- asks envOAuth
         liftIO $ runReaderT (deleteAuthCode codeId) oauthEnv
 
+    lookupUserById userId = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (lookupUserById userId) oauthEnv
+
+    storeUserInCache userId user = do
+        oauthEnv <- asks envOAuth
+        liftIO $ runReaderT (storeUserInCache userId user) oauthEnv
+
     storeAccessToken tokenId user = do
         oauthEnv <- asks envOAuth
         liftIO $ runReaderT (storeAccessToken tokenId user) oauthEnv

@@ -617,7 +617,10 @@ handleLogin mCookie loginForm = do
             validationResult <- validateCredentials username password
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt (unUsername username) (isJust validationResult)
             case validationResult of
-                Just (_userId, authUser) -> do
+                Just (userId, authUser) -> do
+                    -- Cache the user for later lookup during token exchange
+                    storeUserInCache userId authUser
+
                     -- Emit authorization granted trace
                     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (unClientId $ pendingClientId pending) (unUsername username)
 
@@ -638,7 +641,7 @@ handleLogin mCookie loginForm = do
                                 , authCodeChallenge = pendingCodeChallenge pending
                                 , authCodeChallengeMethod = pendingCodeChallengeMethod pending
                                 , authScopes = scopes
-                                , authUserId = authUser
+                                , authUserId = userId -- Store user ID, not full user
                                 , authExpiry = expiry
                                 }
 
@@ -821,9 +824,15 @@ handleAuthCodeGrant params = do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
         throwError $ injectTyped @AuthorizationError PKCEVerificationFailed
 
-    -- Extract user from auth code (now stores full user, not just ID)
-    let user = authUserId authCode
+    -- Extract userId from auth code and lookup full user
+    let userId = authUserId authCode
         clientId = authClientId authCode
+
+    -- Lookup full user by ID (needed for JWT generation)
+    mUser <- lookupUserById userId
+    user <- case mUser of
+        Nothing -> throwError $ injectTyped @AuthorizationError $ InvalidGrant "User not found for authorization code"
+        Just u -> pure u
 
     -- Generate tokens
     accessTokenText <- generateJWTAccessToken user jwtSettings

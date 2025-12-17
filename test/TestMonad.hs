@@ -115,11 +115,12 @@ data TestEnv = TestEnv
 Contains all OAuth-related data structures.
 -}
 data OAuthState = OAuthState
-    { oauthAuthCodes :: Map AuthCodeId (AuthorizationCode AuthUser)
+    { oauthAuthCodes :: Map AuthCodeId (AuthorizationCode UserId)
     , oauthAccessTokens :: Map AccessTokenId AuthUser
     , oauthRefreshTokens :: Map RefreshTokenId (ClientId, AuthUser)
     , oauthClients :: Map ClientId ClientInfo
     , oauthPendingAuths :: Map SessionId PendingAuthorization
+    , oauthUserCache :: Map UserId AuthUser
     }
 
 -- | Create an empty OAuth state.
@@ -131,6 +132,7 @@ emptyOAuthState =
         , oauthRefreshTokens = Map.empty
         , oauthClients = Map.empty
         , oauthPendingAuths = Map.empty
+        , oauthUserCache = Map.empty
         }
 
 {- | Create a test environment with initial time and credentials.
@@ -224,6 +226,16 @@ instance OAuthStateStore TestM where
         env <- ask
         liftIO $ modifyIORef' (testOAuthState env) $ \s ->
             s{oauthAuthCodes = Map.delete codeId (oauthAuthCodes s)}
+
+    lookupUserById userId = TestM $ do
+        env <- ask
+        state <- liftIO $ readIORef (testOAuthState env)
+        pure $ Map.lookup userId (oauthUserCache state)
+
+    storeUserInCache userId user = TestM $ do
+        env <- ask
+        liftIO $ modifyIORef' (testOAuthState env) $ \s ->
+            s{oauthUserCache = Map.insert userId user (oauthUserCache s)}
 
     -- Access Token Operations
     storeAccessToken tokenId user = TestM $ do

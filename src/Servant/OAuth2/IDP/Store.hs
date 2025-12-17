@@ -172,11 +172,11 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
     {- | Store an authorization code.
 
     The implementation should store the code along with its expiry time, PKCE challenge,
-    client ID, redirect URI, and associated user.
+    client ID, redirect URI, and associated user ID.
 
     Satisfies: Round-trip law, Idempotence law, Overwrite law
     -}
-    storeAuthCode :: AuthorizationCode (OAuthUser m) -> m ()
+    storeAuthCode :: AuthorizationCode (OAuthUserId m) -> m ()
 
     {- | Look up an authorization code by its identifier.
 
@@ -186,7 +186,7 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
 
     Satisfies: Round-trip law, Expiry law
     -}
-    lookupAuthCode :: AuthCodeId -> m (Maybe (AuthorizationCode (OAuthUser m)))
+    lookupAuthCode :: AuthCodeId -> m (Maybe (AuthorizationCode (OAuthUserId m)))
 
     {- | Delete an authorization code.
 
@@ -196,6 +196,30 @@ class (Monad m, MonadTime m) => OAuthStateStore m where
     Satisfies: Delete law
     -}
     deleteAuthCode :: AuthCodeId -> m ()
+
+    {- | Look up a user by their user ID.
+
+    This is used during token exchange to reconstruct the full user object
+    from the user ID stored in the authorization code.
+
+    Returns 'Nothing' if the user ID is not found.
+
+    Note: Implementations may cache user data or query an external source.
+    -}
+    lookupUserById :: OAuthUserId m -> m (Maybe (OAuthUser m))
+
+    {- | Store a user in the cache.
+
+    This is used during login to cache the user for later lookup during
+    token exchange. The user ID is extracted from authorization codes,
+    and this cache allows reconstructing the full user object.
+
+    Implementations may:
+    * Store in memory (for simple cases)
+    * Skip caching and query from external source during lookup
+    * Implement with TTL/expiry
+    -}
+    storeUserInCache :: OAuthUserId m -> OAuthUser m -> m ()
 
     -- * Access Token Operations
 

@@ -261,6 +261,7 @@ test-suite mcp-test
         Generators
         TestMonad
         Laws.AuthCodeFunctorSpec
+        Laws.AuthCodeUserIdSpec
         Laws.OAuthStateStoreSpec
         Laws.OAuthUserTypeSpec
         Laws.AuthBackendSpec

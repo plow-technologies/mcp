@@ -77,6 +77,7 @@ import Servant.OAuth2.IDP.Types (
     unClientId,
     unRefreshTokenId,
     unSessionId,
+    unUserId,
  )
 
 -- -----------------------------------------------------------------------------
@@ -109,8 +110,8 @@ defaultExpiryConfig =
 
 -- | OAuth server state stored in memory using maps
 data OAuthState = OAuthState
-    { authCodes :: Map Text (AuthorizationCode AuthUser)
-    -- ^ Authorization codes keyed by unAuthCodeId
+    { authCodes :: Map Text (AuthorizationCode UserId)
+    -- ^ Authorization codes keyed by unAuthCodeId (stores userId, not full user)
     , accessTokens :: Map Text AuthUser
     -- ^ Access tokens keyed by unAccessTokenId
     , refreshTokens :: Map Text (ClientId, AuthUser)
@@ -119,6 +120,8 @@ data OAuthState = OAuthState
     -- ^ Registered clients keyed by unClientId
     , pendingAuthorizations :: Map Text PendingAuthorization
     -- ^ Pending authorizations keyed by unSessionId
+    , userCache :: Map Text AuthUser
+    -- ^ User cache keyed by unUserId (for reconstructing users from IDs)
     }
 
 -- | Create empty OAuth state
@@ -130,6 +133,7 @@ emptyOAuthState =
         , refreshTokens = Map.empty
         , registeredClients = Map.empty
         , pendingAuthorizations = Map.empty
+        , userCache = Map.empty
         }
 
 -- | Create new OAuth environment with the given expiry configuration
@@ -193,6 +197,21 @@ instance (MonadIO m, MonadTime m) => OAuthStateStore (ReaderT OAuthTVarEnv m) wh
             state <- readTVar (oauthStateVar env)
             let key = unAuthCodeId codeId
             let newState = state{authCodes = Map.delete key (authCodes state)}
+            writeTVar (oauthStateVar env) newState
+
+    lookupUserById userId = do
+        env <- ask
+        liftIO . atomically $ do
+            state <- readTVar (oauthStateVar env)
+            let key = unUserId userId
+            pure $ Map.lookup key (userCache state)
+
+    storeUserInCache userId user = do
+        env <- ask
+        liftIO . atomically $ do
+            state <- readTVar (oauthStateVar env)
+            let key = unUserId userId
+            let newState = state{userCache = Map.insert key user (userCache state)}
             writeTVar (oauthStateVar env) newState
 
     -- Access Token Operations
