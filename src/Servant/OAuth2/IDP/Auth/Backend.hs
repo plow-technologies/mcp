@@ -337,16 +337,19 @@ instance MonadIO m => AuthBackend (ReaderT CredentialStore m) where
   type AuthBackendError (ReaderT CredentialStore m) = Text
   type AuthBackendEnv (ReaderT CredentialStore m) = CredentialStore
   type AuthBackendUser (ReaderT CredentialStore m) = AuthUser
-  type AuthBackendUserId (ReaderT CredentialStore m) = UserId
 
   validateCredentials username password = do
     store <- ask
     let storedHash = Map.lookup username (storeCredentials store)
     case storedHash of
-      Nothing -> pure False  -- User not found (same as invalid password)
+      Nothing -> pure Nothing  -- User not found (same as invalid password)
       Just hash -> do
         let candidateHash = mkHashedPassword (storeSalt store) password
-        pure $ hash == candidateHash  -- Constant-time comparison via Eq
+        if hash == candidateHash  -- Constant-time comparison via Eq
+          then do
+            let user = userFromUsername username
+            pure $ Just user
+          else pure Nothing
 @
 -}
 class (Monad m) => AuthBackend m where
@@ -383,25 +386,11 @@ class (Monad m) => AuthBackend m where
     -}
     type AuthBackendUser m :: Type
 
-    {- | User identifier type for this implementation.
-
-    Lightweight identifier embedded in authorization codes and state structures.
-    This is analogous to 'OAuthUserId' in the OAuthStateStore typeclass.
-
-    Examples:
-
-    * Simple: @type AuthBackendUserId MyMonad = UserId@
-    * Custom: @type AuthBackendUserId MyMonad = UUID@
-    * Integer: @type AuthBackendUserId MyMonad = Int@
-    -}
-    type AuthBackendUserId m :: Type
-
     {- | Validate user credentials.
 
-    Returns 'Just (userId, user)' if the username/password pair is valid,
-    'Nothing' otherwise. The returned tuple contains both the user identifier
-    (for embedding in authorization codes) and the full user object (for token
-    generation).
+    Returns 'Just user' if the username/password pair is valid,
+    'Nothing' otherwise. The returned user object contains all user data
+    (name, email, roles, etc.) used for token generation.
 
     == Semantics
 
@@ -431,10 +420,9 @@ class (Monad m) => AuthBackend m where
           if hash == candidateHash  -- Constant-time via ScrubbedBytes Eq
             then do
               -- Extract user data from store
-              let userId = userIdFromUsername username
               let user = userFromUsername username
-              pure $ Just (userId, user)
+              pure $ Just user
             else pure Nothing
     @
     -}
-    validateCredentials :: Username -> PlaintextPassword -> m (Maybe (AuthBackendUserId m, AuthBackendUser m))
+    validateCredentials :: Username -> PlaintextPassword -> m (Maybe (AuthBackendUser m))
