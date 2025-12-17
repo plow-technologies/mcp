@@ -24,3 +24,4 @@ cabal.project.local~
 *.sw?
 result
 bug-analyses
+core-reviews

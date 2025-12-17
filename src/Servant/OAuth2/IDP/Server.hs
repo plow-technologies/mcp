@@ -83,13 +83,14 @@ import Control.Monad.Error.Class (MonadError)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Reader (MonadReader)
 import Data.Generics.Product (HasType)
+import Data.Generics.Sum.Typed (AsType)
 import Servant (
     ServerT,
     (:<|>) (..),
  )
 import Servant.Auth.Server (JWTSettings, ToJWT)
 
-import MCP.Server.HTTP.AppEnv (AppError, HTTPServerConfig)
+import MCP.Server.HTTP.AppEnv (HTTPServerConfig)
 import MCP.Trace.HTTP (HTTPTrace)
 import Plow.Logging (IOTracer)
 import Servant.OAuth2.IDP.API (
@@ -114,6 +115,7 @@ import Servant.OAuth2.IDP.Handlers (
     handleToken,
  )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
+import Servant.OAuth2.IDP.Types (AuthorizationError, ValidationError)
 
 -- Note: API types (OAuthAPI, ProtectedResourceAPI, LoginAPI, HTML) are now
 -- imported from Servant.OAuth2.IDP.API and re-exported from this module.
@@ -191,6 +193,7 @@ customHandler = do
 @
 -}
 oauthServer ::
+    forall m env e.
     ( OAuthStateStore m
     , AuthBackend m
     , AuthBackendUser m ~ OAuthUser m
@@ -198,7 +201,9 @@ oauthServer ::
     , ToJWT (OAuthUser m)
     , MonadIO m
     , MonadReader env m
-    , MonadError AppError m
+    , MonadError e m
+    , AsType ValidationError e
+    , AsType AuthorizationError e
     , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
     , HasType JWTSettings env

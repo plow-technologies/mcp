@@ -70,6 +70,7 @@ import Data.Aeson qualified as Aeson
 import Data.ByteString.Lazy qualified as LBS
 import Data.Functor.Contravariant (contramap)
 import Data.Generics.Product (HasType, getTyped)
+import Data.Generics.Sum.Typed (AsType, injectTyped)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -88,7 +89,7 @@ import Servant.Server.Internal.Handler (runHandler)
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
 import MCP.Server.Auth (OAuthConfig (..), OAuthProvider (..), ProtectedResourceMetadata (..))
-import MCP.Server.HTTP.AppEnv (AppEnv (..), AppError (..), HTTPServerConfig (..), runAppM)
+import MCP.Server.HTTP.AppEnv (AppEnv (..), HTTPServerConfig (..), runAppM)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Operation (OperationTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
@@ -99,7 +100,7 @@ import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..), DemoCredentialEnv (..), defa
 import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI, oauthServer)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
-import Servant.OAuth2.IDP.Types (AuthorizationError (..), ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthErrorResponse (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
+import Servant.OAuth2.IDP.Types (AuthorizationError (..), ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthErrorResponse (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), ValidationError (..), unUserId)
 
 -- | HTML content type for Servant
 data HTML
@@ -237,7 +238,7 @@ This enables:
 * Custom: Use your own monad stack with custom backends
 -}
 mcpAppWithOAuth ::
-    forall m env.
+    forall m env e.
     ( MCPServer MCPServerM
     , OAuthStateStore m
     , AuthBackend m
@@ -246,7 +247,9 @@ mcpAppWithOAuth ::
     , ToJWT (OAuthUser m)
     , MonadIO m
     , MonadReader env m
-    , MonadError AppError m
+    , MonadError e m
+    , AsType ValidationError e
+    , AsType AuthorizationError e
     , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
     , HasType JWTSettings env
@@ -281,7 +284,7 @@ mcpAppWithOAuth runM jwtSettings =
         -- Call mcpServerAuth by lifting from Handler back to m
         result <- liftIO $ runHandler $ mcpServerAuth config tracer stateVar authResult requestValue
         case result of
-            Left err -> throwError (AuthorizationErr (InvalidGrant $ T.pack $ show err))
+            Left err -> throwError (injectTyped @AuthorizationError (InvalidGrant $ T.pack $ show err))
             Right val -> pure val
 
 -- | Create a WAI Application for the MCP HTTP server (internal monomorphic version)

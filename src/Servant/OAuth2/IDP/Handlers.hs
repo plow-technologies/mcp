@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 
 {- |
@@ -70,6 +71,7 @@ import Data.ByteString.Lazy qualified as LBS
 import Data.Functor.Contravariant (contramap)
 import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
+import Data.Generics.Sum.Typed (AsType, injectTyped)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -100,7 +102,7 @@ import MCP.Server.Auth (
     refreshTokenPrefix,
     validateCodeVerifier,
  )
-import MCP.Server.HTTP.AppEnv (AppError (..), HTTPServerConfig (..))
+import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
 import MCP.Server.Time (MonadTime (..))
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
@@ -112,7 +114,7 @@ import Servant.OAuth2.IDP.API (
     TokenResponse (..),
  )
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..), Username (..))
-import Servant.OAuth2.IDP.Auth.Demo (DemoAuthError (..))
+import Servant.OAuth2.IDP.Auth.Demo () -- Instance only
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     AccessTokenId (..),
@@ -292,7 +294,8 @@ handleRegister ::
     ( OAuthStateStore m
     , MonadIO m
     , MonadReader env m
-    , MonadError AppError m
+    , MonadError e m
+    , AsType AuthorizationError e
     , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
     ) =>
@@ -305,7 +308,7 @@ handleRegister (ClientRegistrationRequest reqName reqRedirects reqGrants reqResp
     -- Validate redirect_uris is not empty
     when (null reqRedirects) $
         throwError $
-            AuthorizationErr $
+            injectTyped @AuthorizationError $
                 InvalidRequest "redirect_uris must not be empty"
 
     -- Generate client ID
@@ -318,7 +321,7 @@ handleRegister (ClientRegistrationRequest reqName reqRedirects reqGrants reqResp
     -- Note: ClientInfo from OAuth.Types requires NonEmpty and Set
     redirectsNE <- case NE.nonEmpty reqRedirects of
         Just ne -> pure ne
-        Nothing -> throwError $ AuthorizationErr $ InvalidRequest "redirect_uris must not be empty"
+        Nothing -> throwError $ injectTyped @AuthorizationError $ InvalidRequest "redirect_uris must not be empty"
 
     let grantsSet = Set.fromList reqGrants
         responsesSet = Set.fromList reqResponses
@@ -393,7 +396,9 @@ handleAuthorize ::
     ( OAuthStateStore m
     , MonadIO m
     , MonadReader env m
-    , MonadError AppError m
+    , MonadError e m
+    , AsType ValidationError e
+    , AsType AuthorizationError e
     , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
     ) =>
@@ -422,12 +427,12 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
     -- Validate response_type (only "code" supported)
     when (responseType /= ResponseCode) $ do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "response_type" ("Unsupported response type: " <> responseTypeText)
-        throwError $ ValidationErr $ UnsupportedResponseType responseTypeText
+        throwError $ injectTyped @ValidationError $ UnsupportedResponseType responseTypeText
 
     -- Validate code_challenge_method (only "S256" supported)
     when (codeChallengeMethod /= S256) $ do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "code_challenge_method" ("Unsupported method: " <> codeChallengeMethodText)
-        throwError $ AuthorizationErr $ InvalidRequest ("Unsupported code_challenge_method: " <> codeChallengeMethodText)
+        throwError $ injectTyped @AuthorizationError $ InvalidRequest ("Unsupported code_challenge_method: " <> codeChallengeMethodText)
 
     -- Look up client to verify it's registered
     mClientInfo <- lookupClient clientId
@@ -435,12 +440,12 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
         Just ci -> return ci
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "client_id" ("Unregistered client: " <> clientIdText)
-            throwError $ ValidationErr $ ClientNotRegistered clientId
+            throwError $ injectTyped @ValidationError $ ClientNotRegistered clientId
 
     -- Validate redirect_uri is registered for this client
     unless (redirectUri `elem` NE.toList (clientRedirectUris clientInfo)) $ do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "redirect_uri" ("Redirect URI not registered: " <> redirectUriText)
-        throwError $ ValidationErr $ RedirectUriMismatch clientId redirectUri
+        throwError $ injectTyped @ValidationError $ RedirectUriMismatch clientId redirectUri
 
     let displayName = clientName clientInfo
         scopeList = maybe [] (T.splitOn " ") mScope
@@ -536,13 +541,15 @@ migration. The shim pattern is used: HTTP.hs maintains the old signature
 by calling this handler via runAppM.
 -}
 handleLogin ::
+    forall m env e.
     ( OAuthStateStore m
     , AuthBackend m
     , AuthBackendUser m ~ OAuthUser m
     , AuthBackendUserId m ~ OAuthUserId m
     , MonadIO m
     , MonadReader env m
-    , MonadError AppError m
+    , MonadError e m
+    , AsType AuthorizationError e
     , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
     ) =>
@@ -560,13 +567,13 @@ handleLogin mCookie loginForm = do
     case mCookie of
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "No cookie header present"
-            throwError $ AuthorizationErr $ InvalidRequest $ renderErrorPage "Cookies Required" "Your browser must have cookies enabled to sign in. Please enable cookies and try again."
+            throwError $ injectTyped @AuthorizationError $ InvalidRequest $ renderErrorPage "Cookies Required" "Your browser must have cookies enabled to sign in. Please enable cookies and try again."
         Just cookie ->
             -- Parse session cookie and verify it matches form session_id
             let cookieSessionId = extractSessionFromCookie cookie
              in unless (cookieSessionId == Just sessionId) $ do
                     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "Session cookie mismatch"
-                    throwError $ AuthorizationErr $ InvalidRequest $ renderErrorPage "Cookies Required" "Session cookie mismatch. Please enable cookies and try again."
+                    throwError $ injectTyped @AuthorizationError $ InvalidRequest $ renderErrorPage "Cookies Required" "Session cookie mismatch. Please enable cookies and try again."
 
     -- Look up pending authorization
     mPending <- lookupPendingAuth sessionId
@@ -574,7 +581,7 @@ handleLogin mCookie loginForm = do
         Just p -> return p
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "session" ("Session not found: " <> unSessionId sessionId)
-            throwError $ AuthorizationErr $ InvalidRequest $ renderErrorPage "Invalid Session" "Session not found or has expired. Please restart the authorization flow."
+            throwError $ injectTyped @AuthorizationError $ InvalidRequest $ renderErrorPage "Invalid Session" "Session not found or has expired. Please restart the authorization flow."
 
     -- T038: Handle expired sessions
     now <- currentTime
@@ -582,7 +589,7 @@ handleLogin mCookie loginForm = do
         expiryTime = addUTCTime sessionExpirySeconds (pendingCreatedAt pending)
     when (now > expiryTime) $ do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthSessionExpired (unSessionId sessionId)
-        throwError $ AuthorizationErr $ InvalidRequest $ renderErrorPage "Session Expired" "Your login session has expired. Please restart the authorization flow."
+        throwError $ injectTyped @AuthorizationError $ InvalidRequest $ renderErrorPage "Session Expired" "Your login session has expired. Please restart the authorization flow."
 
     -- Check if user denied access
     if formAction loginForm == "deny"
@@ -648,8 +655,8 @@ handleLogin mCookie loginForm = do
 
                     return $ addHeader redirectUrl $ addHeader clearCookie NoContent
                 Nothing ->
-                    -- Invalid credentials - return 401 error (validateCredentials already emitted trace)
-                    throwError $ AuthBackendErr InvalidCredentials
+                    -- Invalid credentials - return 401 OAuth error (validateCredentials already emitted trace)
+                    throwError $ injectTyped @AuthorizationError $ InvalidClient "Invalid credentials"
 
 -- -----------------------------------------------------------------------------
 -- Token Endpoint Handlers
@@ -697,7 +704,8 @@ handleToken ::
     , ToJWT (OAuthUser m)
     , MonadIO m
     , MonadReader env m
-    , MonadError AppError m
+    , MonadError e m
+    , AsType AuthorizationError e
     , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
     , HasType JWTSettings env
@@ -708,13 +716,13 @@ handleToken params = do
     let paramMap = Map.fromList params
     -- Parse grant_type from Text to GrantType newtype
     case Map.lookup "grant_type" paramMap of
-        Nothing -> throwError $ AuthorizationErr $ InvalidRequest "Missing grant_type"
+        Nothing -> throwError $ injectTyped @AuthorizationError $ InvalidRequest "Missing grant_type"
         Just grantTypeText -> case parseUrlPiece grantTypeText of
-            Left _err -> throwError $ AuthorizationErr $ UnsupportedGrantType "Unsupported grant_type"
+            Left _err -> throwError $ injectTyped @AuthorizationError $ UnsupportedGrantType "Unsupported grant_type"
             Right grantType -> case grantType of
                 GrantAuthorizationCode -> handleAuthCodeGrant paramMap
                 GrantRefreshToken -> handleRefreshTokenGrant paramMap
-                GrantClientCredentials -> throwError $ AuthorizationErr $ UnsupportedGrantType "client_credentials not supported"
+                GrantClientCredentials -> throwError $ injectTyped @AuthorizationError $ UnsupportedGrantType "client_credentials not supported"
 
 {- | Authorization code grant handler (polymorphic).
 
@@ -749,7 +757,8 @@ handleAuthCodeGrant ::
     , ToJWT (OAuthUser m)
     , MonadIO m
     , MonadReader env m
-    , MonadError AppError m
+    , MonadError e m
+    , AsType AuthorizationError e
     , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
     , HasType JWTSettings env
@@ -771,22 +780,22 @@ handleAuthCodeGrant params = do
     code <- case Map.lookup "code" params of
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing authorization code"
-            throwError $ AuthorizationErr $ InvalidRequest "Missing authorization code"
+            throwError $ injectTyped @AuthorizationError $ InvalidRequest "Missing authorization code"
         Just codeText -> case parseUrlPiece codeText of
             Left err -> do
                 liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" ("Invalid authorization code: " <> err)
-                throwError $ AuthorizationErr $ InvalidGrant "Invalid authorization code"
+                throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid authorization code"
             Right authCodeId -> return authCodeId
 
     -- Parse code_verifier from Text to CodeVerifier
     codeVerifier <- case Map.lookup "code_verifier" params of
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing code_verifier"
-            throwError $ AuthorizationErr $ InvalidRequest "Missing code_verifier"
+            throwError $ injectTyped @AuthorizationError $ InvalidRequest "Missing code_verifier"
         Just verifierText -> case parseUrlPiece verifierText of
             Left err -> do
                 liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" ("Invalid code_verifier: " <> err)
-                throwError $ AuthorizationErr $ InvalidRequest "Invalid code_verifier"
+                throwError $ injectTyped @AuthorizationError $ InvalidRequest "Invalid code_verifier"
             Right verifier -> return verifier
 
     -- Look up authorization code
@@ -795,14 +804,14 @@ handleAuthCodeGrant params = do
         Just ac -> return ac
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
-            throwError $ AuthorizationErr $ InvalidGrant "Invalid authorization code"
+            throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid authorization code"
 
     -- Verify code hasn't expired
     now <- currentTime
     when (now > authExpiry authCode) $ do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "auth_code" "Authorization code expired"
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
-        throwError $ AuthorizationErr ExpiredCode
+        throwError $ injectTyped @AuthorizationError ExpiredCode
 
     -- Verify PKCE
     let authChallenge = authCodeChallenge authCode
@@ -810,7 +819,7 @@ handleAuthCodeGrant params = do
     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthPKCEValidation (unCodeVerifier codeVerifier) (unCodeChallenge authChallenge) pkceValid
     unless pkceValid $ do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenExchange "authorization_code" False
-        throwError $ AuthorizationErr PKCEVerificationFailed
+        throwError $ injectTyped @AuthorizationError PKCEVerificationFailed
 
     -- Extract user from auth code (now stores full user, not just ID)
     let user = authUserId authCode
@@ -870,7 +879,8 @@ handleRefreshTokenGrant ::
     , ToJWT (OAuthUser m)
     , MonadIO m
     , MonadReader env m
-    , MonadError AppError m
+    , MonadError e m
+    , AsType AuthorizationError e
     , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
     , HasType JWTSettings env
@@ -892,11 +902,11 @@ handleRefreshTokenGrant params = do
     refreshTokenId <- case Map.lookup "refresh_token" params of
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" "Missing refresh_token"
-            throwError $ AuthorizationErr $ InvalidRequest "Missing refresh_token"
+            throwError $ injectTyped @AuthorizationError $ InvalidRequest "Missing refresh_token"
         Just tokenText -> case parseUrlPiece tokenText of
             Left err -> do
                 liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "token_request" ("Invalid refresh_token: " <> err)
-                throwError $ AuthorizationErr $ InvalidGrant "Invalid refresh_token"
+                throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid refresh_token"
             Right rtId -> return rtId
 
     -- Look up refresh token
@@ -905,7 +915,7 @@ handleRefreshTokenGrant params = do
         Just info -> return info
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthTokenRefresh False
-            throwError $ AuthorizationErr $ InvalidGrant "Invalid refresh_token"
+            throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid refresh_token"
 
     -- Generate new JWT access token
     newAccessTokenText <- generateJWTAccessToken user jwtSettings
@@ -1037,13 +1047,13 @@ renderLoginPage clientName scopes mResource sessionId =
         ]
 
 -- | Generate JWT access token for user
-generateJWTAccessToken :: (OAuthStateStore m, ToJWT (OAuthUser m), MonadIO m, MonadError AppError m) => OAuthUser m -> JWTSettings -> m Text
+generateJWTAccessToken :: (OAuthStateStore m, ToJWT (OAuthUser m), MonadIO m, MonadError e m, AsType AuthorizationError e) => OAuthUser m -> JWTSettings -> m Text
 generateJWTAccessToken user jwtSettings = do
     accessTokenResult <- liftIO $ makeJWT user jwtSettings Nothing
     case accessTokenResult of
-        Left _err -> throwError $ AuthorizationErr $ InvalidRequest "Token generation failed"
+        Left _err -> throwError $ injectTyped @AuthorizationError $ InvalidRequest "Token generation failed"
         Right accessToken -> case TE.decodeUtf8' $ LBS.toStrict accessToken of
-            Left _decodeErr -> throwError $ AuthorizationErr $ InvalidRequest "Token encoding failed"
+            Left _decodeErr -> throwError $ injectTyped @AuthorizationError $ InvalidRequest "Token encoding failed"
             Right tokenText -> return tokenText
 
 -- | Generate refresh token with configurable prefix
