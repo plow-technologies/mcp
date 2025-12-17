@@ -7,7 +7,7 @@
 
 ## Summary
 
-Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error, environment, user, and user ID types. `OAuthStateStore` requires `MonadTime m` for expiry filtering. `AuthBackend.validateCredentials` returns `Maybe (UserId, User)` tuple. Handlers requiring both typeclasses use type equality constraints (`AuthBackendUser m ~ OAuthUser m`, `AuthBackendUserId m ~ OAuthUserId m`). Provide reference in-memory (`TVar`) and hard-coded credential implementations. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation. **(Updated 2025-12-15: Added user type polymorphism per spec refinement; reference implementation types colocated with implementations per FR-042; error architecture refined with four domain error types and domainErrorToServerError boundary function per Phase 10; mcpApp entry point accepts natural transformation per Phase 11/FR-046)** **(Updated 2025-12-16: OAuth modules relocated to `Servant.OAuth2.IDP.*` namespace per FR-049; two entry points `mcpApp`/`mcpAppWithOAuth` in `MCP.Server.HTTP` per FR-048; type-level route composition per FR-047)**
+Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error, environment, user, and user ID types. `OAuthStateStore` requires `MonadTime m` for expiry filtering. `AuthBackend.validateCredentials` returns `Maybe (UserId, User)` tuple. Handlers requiring both typeclasses use type equality constraints (`AuthBackendUser m ~ OAuthUser m`, `AuthBackendUserId m ~ OAuthUserId m`). Provide reference in-memory (`TVar`) and hard-coded credential implementations. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation. **(Updated 2025-12-15: Added user type polymorphism per spec refinement; reference implementation types colocated with implementations per FR-042; error architecture refined with four domain error types and domainErrorToServerError boundary function per Phase 10; mcpApp entry point accepts natural transformation per Phase 11/FR-046)** **(Updated 2025-12-16: OAuth modules relocated to `Servant.OAuth2.IDP.*` namespace per FR-049; two entry points `mcpApp`/`mcpAppWithOAuth` in `MCP.Server.HTTP` per FR-048; type-level route composition per FR-047)** **(Updated 2025-12-17: ALL `mcpApp*` functions MUST accept natural transformation parameter per FR-048 refinement; see Phase 13)**
 
 ## Technical Context
 
@@ -127,6 +127,8 @@ test/
 | User Type Polymorphism | `specs/004-oauth-auth-typeclasses/plan.md#phase-8` | FR-039 through FR-041 user/userId associated types (Phase 8) |
 | Type Colocation | `specs/004-oauth-auth-typeclasses/plan.md#phase-9` | FR-042 reference implementation types in implementation modules (Phase 9) |
 | Error Architecture | `specs/004-oauth-auth-typeclasses/plan.md#phase-10` | FR-043 through FR-045 domain error types and boundary translation (Phase 10) |
+| Namespace Migration | `specs/004-oauth-auth-typeclasses/plan.md#phase-12` | FR-047 through FR-049 module relocation and entry point separation (Phase 12) |
+| Natural Transformation Pattern | `specs/004-oauth-auth-typeclasses/plan.md#phase-13` | FR-048 refined: ALL mcpApp* functions accept natural transformation (Phase 13) |
 
 ---
 
@@ -2314,7 +2316,7 @@ Before marking Phase 11 complete:
 **Spec Requirements**:
 - FR-046: `mcpApp` must be in `MCP.Server.HTTP`
 - FR-047: Type-level route composition (`type FullAPI = MCPAPI :<|> OAuthAPI`)
-- FR-048: Two entry points (`mcpApp`, `mcpAppWithOAuth`)
+- FR-048: Two entry points (`mcpApp`, `mcpAppWithOAuth`) — **Refined 2025-12-17: BOTH must accept natural transformation (see Phase 13)**
 - FR-049: All OAuth2 modules relocated to `Servant.OAuth2.IDP.*` namespace
 
 ### Updated Module Structure (Phase 12)
@@ -2551,3 +2553,152 @@ Before marking Phase 12 complete:
 3. **Self-Documenting**: Entry point names clearly indicate capability (`mcpApp` vs `mcpAppWithOAuth`)
 4. **Type Safety**: Attempting to use OAuth features with `mcpApp` is a compile error
 5. **Future-Proof**: OAuth2 package extraction is "cut along the dotted line"
+
+---
+
+## Phase 13: Natural Transformation for ALL Entry Points (Spec Refinement 2025-12-17)
+
+**Trigger**: Clarification session 2025-12-17 explicitly confirmed that ALL `mcpApp*` functions in `MCP.Server.HTTP` MUST accept a `runAppM` natural transformation parameter, enabling callers to choose the monad stack implementation for any entry point.
+
+**Spec Requirement (FR-048 Refined)**:
+> **Both functions MUST accept a `(∀ a. m a -> Handler a)` natural transformation parameter**, following the same pattern as FR-046. Signature pattern for `mcpAppWithOAuth`: `mcpAppWithOAuth :: (OAuthStateStore m, AuthBackend m, ...) => (∀ a. m a -> Handler a) -> Application`.
+
+### Rationale
+
+The natural transformation pattern provides maximum flexibility:
+
+1. **Callers control the monad stack**: Production can wire PostgreSQL + LDAP, tests can wire in-memory + mock auth, CLI tools can wire pure monads
+2. **Consistent interface**: All entry points follow the same `(∀ a. m a -> Handler a) -> Application` pattern
+3. **Type safety**: Constraints on `m` differ per entry point, but the interface is uniform
+4. **Standard Servant pattern**: Follows established `hoistServer` idiom
+
+### Updated Signatures (Final)
+
+```haskell
+-- MCP.Server.HTTP
+
+-- | MCP-only application (no OAuth2 dependencies).
+-- Callers provide natural transformation for MCP handlers.
+mcpApp
+  :: (∀ a. m a -> Handler a)  -- ^ Natural transformation
+  -> Application
+
+-- | MCP + OAuth2 application (full functionality).
+-- Callers provide natural transformation that satisfies all constraints.
+mcpAppWithOAuth
+  :: ( OAuthStateStore m, AuthBackend m
+     , AuthBackendUser m ~ OAuthUser m
+     , AuthBackendUserId m ~ OAuthUserId m
+     , MonadTime m, MonadIO m, MonadError e m, MonadReader env m
+     , AsType (OAuthStateError m) e, AsType (AuthBackendError m) e
+     , AsType ValidationError e, AsType AuthorizationError e
+     , HasType (OAuthStateEnv m) env, HasType (AuthBackendEnv m) env
+     , ToJWT (OAuthUser m)
+     )
+  => (∀ a. m a -> Handler a)  -- ^ Natural transformation
+  -> Application
+
+-- | Demo/development convenience wrapper.
+-- Uses in-memory OAuthStateStore and demo AuthBackend.
+-- Returns IO Application since it initializes internal state.
+demoMcpApp :: IO Application
+demoMcpApp = do
+  oauthEnv <- initOAuthTVarEnv
+  authEnv <- initDemoCredentialEnv
+  let runM = mkDemoRunM oauthEnv authEnv
+  pure (mcpAppWithOAuth runM)
+```
+
+### Key Design Points
+
+| Aspect | Decision |
+|--------|----------|
+| Parameter position | Natural transformation is FIRST parameter (before any config) |
+| Quantification | Rank-2 type `(∀ a. m a -> Handler a)` ensures proper polymorphism |
+| Constraints | Only appear on the type variable `m`, not on the function |
+| Demo wrapper | `demoMcpApp :: IO Application` is convenience, NOT the primary API |
+
+### Implementation Checklist
+
+Phase 12 already planned `mcpAppWithOAuth` to accept natural transformation. This phase confirms:
+
+- [x] `mcpApp` accepts `(∀ a. m a -> Handler a)` (was already planned in Phase 12)
+- [x] `mcpAppWithOAuth` accepts `(∀ a. m a -> Handler a)` (was already planned in Phase 12)
+- [ ] **Verify**: No `mcpApp*` function has a hardcoded monad stack
+- [ ] **Verify**: All constraints are on `m`, not baked into the function body
+- [ ] **Verify**: `demoMcpApp` is a convenience wrapper, not a different interface pattern
+
+### Usage Examples
+
+#### Production with PostgreSQL + LDAP
+
+```haskell
+main :: IO ()
+main = do
+  pgPool <- initPostgresPool
+  ldapConfig <- loadLdapConfig
+  let appEnv = AppEnv pgPool ldapConfig
+  let runM :: ∀ a. AppM a -> Handler a
+      runM action = do
+        result <- liftIO $ runReaderT (runExceptT action) appEnv
+        case result of
+          Left err -> throwError (domainToServerError err)
+          Right a -> pure a
+  Warp.run 8080 (mcpAppWithOAuth runM)
+```
+
+#### Testing with In-Memory + Controlled Time
+
+```haskell
+spec :: Spec
+spec = with makeTestApp $ do
+  it "issues authorization code" $ do
+    -- test using WaiSession
+  where
+    makeTestApp = do
+      timeVar <- newTVarIO someFixedTime
+      oauthEnv <- initTestOAuthEnv timeVar
+      authEnv <- initTestAuthEnv
+      let runM :: ∀ a. TestM a -> Handler a
+          runM = runTestM timeVar oauthEnv authEnv
+      pure (mcpAppWithOAuth runM)
+```
+
+#### MCP-Only Mode (No OAuth)
+
+```haskell
+main :: IO ()
+main = do
+  let runM :: ∀ a. McpOnlyM a -> Handler a
+      runM action = liftIO (runMcpOnlyM action)
+  Warp.run 8080 (mcpApp runM)
+```
+
+### Files Affected
+
+This phase is a refinement/confirmation of Phase 12, not new implementation. Files already planned for modification in Phase 12:
+
+| File | Verification |
+|------|--------------|
+| `src/MCP/Server/HTTP.hs` | Confirm both entry points accept natural transformation |
+| `app/Main.hs` | Confirm callers construct and pass natural transformation |
+| Test files | Confirm test harness uses natural transformation pattern |
+
+### Constitution Compliance (Phase 13)
+
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. Type-Driven Design | ✅ | Natural transformation parameter encodes monad stack flexibility at type level |
+| II. Deep Module Architecture | ✅ | Entry point API is minimal; all complexity in caller's natural transformation |
+| III. Denotational Semantics | ✅ | Clear semantic: `(∀ a. m a -> Handler a)` = "how to run your monad as Servant Handler" |
+| IV. Total Functions | ✅ | No partiality; natural transformation is caller's responsibility |
+| V. Pure Core, Impure Shell | ✅ | Entry points are pure functions; IO in caller's transformation |
+| VI. Property-Based Testing | ✅ | Same test infrastructure; natural transformation enables test monad injection |
+
+**Gate Status**: PASS - Phase 13 confirms and documents the natural transformation requirement for all entry points.
+
+### Relationship to Other Phases
+
+- **Phase 11**: Introduced natural transformation for `mcpApp` (FR-046)
+- **Phase 12**: Extended pattern to `mcpAppWithOAuth` and planned implementation
+- **Phase 13**: Confirms ALL `mcpApp*` functions follow this pattern (FR-048 refined)
