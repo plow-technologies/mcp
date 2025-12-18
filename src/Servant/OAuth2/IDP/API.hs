@@ -190,9 +190,9 @@ type OAuthAPI =
             :> QueryParam' '[Required] "redirect_uri" RedirectUri
             :> QueryParam' '[Required] "code_challenge" CodeChallenge
             :> QueryParam' '[Required] "code_challenge_method" CodeChallengeMethod
-            :> QueryParam "scope" Text
-            :> QueryParam "state" Text
-            :> QueryParam "resource" Text
+            :> QueryParam "scope" Text --FIXME Use a newtype instead of Text
+            :> QueryParam "state" Text --FIXME Use a newtype instead of Text
+            :> QueryParam "resource" Text --FIXME Use a newtype instead of Text
             :> Get '[HTML] (Headers '[Header "Set-Cookie" SessionCookie] LoginPage)
         :<|> LoginAPI
         :<|> "token"
