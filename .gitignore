@@ -27,3 +27,4 @@ bug-analyses
 core-reviews
 cabal.project.freeze
 code-reviews
+*.log

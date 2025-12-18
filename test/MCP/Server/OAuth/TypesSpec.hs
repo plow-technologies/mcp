@@ -4,9 +4,9 @@ module MCP.Server.OAuth.TypesSpec (spec) where
 
 import Data.Text (Text)
 import Data.Text qualified as T
-import Servant.OAuth2.IDP.Types
 import Network.HTTP.Types.Status (statusCode)
 import Network.URI (parseURI)
+import Servant.OAuth2.IDP.Types
 import Test.Hspec
 
 -- Helper functions to extract fields from OAuthErrorResponse

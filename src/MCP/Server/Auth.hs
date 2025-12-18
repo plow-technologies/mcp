@@ -32,7 +32,6 @@ module MCP.Server.Auth (
 
     -- * Token Validation
     TokenInfo (..),
-    validateBearerToken,
     extractBearerToken,
 
     -- * PKCE Support
@@ -53,7 +52,6 @@ module MCP.Server.Auth (
 -- Re-exports
 import Servant.OAuth2.IDP.Auth.Backend
 
-import Control.Monad.IO.Class (MonadIO, liftIO)
 import Crypto.Hash (hashWith)
 import Crypto.Hash.Algorithms (SHA256 (..))
 import Crypto.Random (getRandomBytes)
@@ -62,16 +60,11 @@ import Data.Aeson qualified as Aeson
 import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
 import Data.ByteString.Base64.URL qualified as B64URL
-import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Data.Time.Clock (UTCTime, getCurrentTime)
-import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import GHC.Generics (Generic)
-import Plow.Logging (IOTracer)
 
-import MCP.Trace.OAuth (OAuthTrace (..))
 import Servant.OAuth2.IDP.Types (
     ClientAuthMethod (..),
     CodeChallenge (..),
@@ -279,72 +272,6 @@ extractBearerToken authHeader =
     case T.words authHeader of
         ["Bearer", token] -> Just token
         _ -> Nothing
-
-{- | Validate a bearer token
-
-Note: The @_config@ parameter is intentionally kept for future JWT validation improvements.
-Currently unused, but will be needed for proper validation (see lines 293-297):
-- Verify JWT signature using JWK from jwks_uri
-- Check expiration using accessTokenExpirySeconds
-- Validate issuer and audience
--}
-validateBearerToken :: (MonadIO m) => IOTracer OAuthTrace -> OAuthConfig -> Text -> m (Either Text TokenInfo)
-validateBearerToken _tracer _config token = do
-    -- Basic validation
-    if T.null token
-        then return $ Left "Empty token"
-        else do
-            -- Perform basic JWT validation
-            -- In production, this should:
-            -- 1. Verify JWT signature using JWK from jwks_uri
-            -- 2. Check expiration time
-            -- 3. Validate issuer and audience
-            -- 4. Check token type is "Bearer"
-
-            -- For now, decode JWT payload (middle part) for basic validation
-            case T.splitOn "." token of
-                [_header, payload, _signature] -> do
-                    currentTime <- liftIO getCurrentTime
-                    case decodeJWTPayload payload of
-                        Right tokenInfo ->
-                            case validateTokenClaims tokenInfo currentTime of
-                                Right _ -> return $ Right tokenInfo
-                                Left err -> return $ Left err
-                        Left err -> return $ Left $ "Invalid JWT format: " <> err
-                _ -> return $ Left "Invalid JWT structure"
-
--- | Decode JWT payload (base64url encoded JSON)
-decodeJWTPayload :: Text -> Either Text TokenInfo
-decodeJWTPayload payload =
-    case B64URL.decodeUnpadded (TE.encodeUtf8 payload) of
-        Right decodedBytes ->
-            case Aeson.decode' (LBS.fromStrict decodedBytes) of
-                Just info -> Right info{active = True} -- JWT is implicitly active
-                Nothing -> Left "Failed to parse JWT payload"
-        Left _ -> Left "Invalid base64url encoding"
-
--- | Validate token claims (expiration, not-before, etc.)
-validateTokenClaims :: TokenInfo -> UTCTime -> Either Text ()
-validateTokenClaims tokenInfo currentTime = do
-    let currentTimestamp = floor (realToFrac (utcTimeToPOSIXSeconds currentTime) :: Double) :: Integer
-
-    -- Check expiration
-    case MCP.Server.Auth.exp tokenInfo of
-        Just expTime ->
-            if currentTimestamp > expTime
-                then Left "Token has expired"
-                else Right ()
-        Nothing -> Right ()
-
-    -- Check not-before
-    case MCP.Server.Auth.nbf tokenInfo of
-        Just nbfTime ->
-            if currentTimestamp < nbfTime
-                then Left "Token not yet valid"
-                else Right ()
-        Nothing -> Right ()
-
-    return ()
 
 -- | Generate a cryptographically secure code verifier for PKCE
 generateCodeVerifier :: IO Text
