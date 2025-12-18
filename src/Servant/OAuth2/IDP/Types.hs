@@ -51,6 +51,9 @@ module Servant.OAuth2.IDP.Types (
     mkClientSecret,
     ClientName (..),
     mkClientName,
+    AccessToken (..),
+    TokenType (..),
+    RefreshToken (..),
 
     -- * HTTP Response Newtypes
     RedirectTarget (..),
@@ -565,6 +568,21 @@ mkClientName :: Text -> Maybe ClientName
 mkClientName t
     | T.null t = Nothing
     | otherwise = Just (ClientName t)
+
+-- | OAuth access token (FR-063)
+newtype AccessToken = AccessToken {unAccessToken :: Text}
+    deriving stock (Eq, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- | OAuth token type (FR-063, typically "Bearer")
+newtype TokenType = TokenType {unTokenType :: Text}
+    deriving stock (Eq, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- | OAuth refresh token (FR-063)
+newtype RefreshToken = RefreshToken {unRefreshToken :: Text}
+    deriving stock (Eq, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
 
 -- -----------------------------------------------------------------------------
 -- HTTP Response Newtypes
