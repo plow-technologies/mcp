@@ -84,3 +84,13 @@ spec = do
 
             it "accepts public IP 172.15.255.255 (just below Class B private)" $
                 mkRedirectUri "https://172.15.255.255/callback" `shouldSatisfy` isJust
+
+        context "FR-051: IPv6 private range blocking" $ do
+            it "rejects fe80::1 (IPv6 link-local)" $
+                mkRedirectUri "https://[fe80::1]/callback" `shouldBe` Nothing
+
+            it "rejects fd00::1 (IPv6 unique local)" $
+                mkRedirectUri "https://[fd00::1]/callback" `shouldBe` Nothing
+
+            it "rejects fc00::1 (IPv6 unique local alternative)" $
+                mkRedirectUri "https://[fc00::1]/callback" `shouldBe` Nothing

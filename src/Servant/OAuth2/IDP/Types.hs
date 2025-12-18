@@ -252,12 +252,68 @@ parseIPv4 s = do
     -- Safe to convert after validation
     return (fromInteger a, fromInteger b, fromInteger c, fromInteger d)
 
+{- | Parse IPv6 address from bracketed notation "[addr]" (FR-051)
+Extracts the address between brackets and validates basic IPv6 format.
+Returns the hexadecimal segments if valid.
+-}
+parseIPv6 :: String -> Maybe [String]
+parseIPv6 hostname = case hostname of
+    ('[' : rest) -> case reverse rest of
+        (']' : reversedAddr) -> do
+            let addr = reverse reversedAddr
+            -- Split by ':' and validate it looks like IPv6
+            let segments = splitBy ':' addr
+            -- IPv6 has at most 8 segments (can have :: for compression)
+            guard $ not (null segments) && length segments <= 8
+            -- Each segment should be hex digits (or empty for ::)
+            guard $ all (\s -> null s || all isHexDigit s) segments
+            Just segments
+        _ -> Nothing
+    _ -> Nothing
+  where
+    splitBy :: Char -> String -> [String]
+    splitBy _ "" = [""]
+    splitBy c (x : xs)
+        | x == c = "" : splitBy c xs
+        | otherwise = case splitBy c xs of
+            (y : ys) -> (x : y) : ys
+            [] -> [[x]]
+
+{- | Check if IPv6 address is in private ranges (FR-051)
+Blocks SSRF attacks to internal IPv6 infrastructure:
+- fe80::/10 (link-local addresses, fe80:: to febf::)
+- fc00::/7 (unique local addresses, fc00:: to fdff::)
+-}
+isPrivateIPv6 :: [String] -> Bool
+isPrivateIPv6 [] = False
+isPrivateIPv6 (firstSeg : _) =
+    case firstSeg of
+        -- fe80::/10 - link-local (first 10 bits are 1111111010)
+        -- fe80 to febf in hex
+        ('f' : 'e' : h1 : h2 : rest)
+            | null rest || all isHexDigit rest ->
+                let val = readHex [h1, h2]
+                 in case val of
+                        [(n, "")] -> n >= 0x80 && n <= 0xBF
+                        _ -> False
+        -- fc00::/7 - unique local (first 7 bits are 1111110)
+        -- fc00 to fdff in hex
+        ('f' : c : _) -> c == 'c' || c == 'd'
+        _ -> False
+  where
+    readHex :: String -> [(Int, String)]
+    readHex s = case reads ("0x" ++ s) of
+        [(n, "")] -> [(n, "")]
+        _ -> []
+
 {- | Check if hostname is a private IP address (FR-051)
 Blocks SSRF attacks to internal infrastructure:
 - 10.0.0.0/8 (Class A private)
 - 172.16.0.0/12 (Class B private)
 - 192.168.0.0/16 (Class C private)
 - 169.254.0.0/16 (link-local, cloud metadata)
+- fe80::/10 (IPv6 link-local)
+- fc00::/7 (IPv6 unique local)
 -}
 isPrivateIP :: String -> Bool
 isPrivateIP hostname = case parseIPv4 hostname of
@@ -266,7 +322,7 @@ isPrivateIP hostname = case parseIPv4 hostname of
             || (a == 172 && b >= 16 && b <= 31) -- 172.16.0.0/12
             || (a == 192 && b == 168) -- 192.168.0.0/16
             || (a == 169 && b == 254) -- 169.254.0.0/16
-    Nothing -> False
+    Nothing -> maybe False isPrivateIPv6 (parseIPv6 hostname)
 
 {- | Smart constructor for RedirectUri (validates https:// or http://localhost)
 FR-050: Uses exact hostname matching to prevent SSRF bypass via substring tricks
