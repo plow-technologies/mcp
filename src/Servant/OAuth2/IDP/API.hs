@@ -42,6 +42,7 @@ module Servant.OAuth2.IDP.API (
     LoginForm (..),
     ClientRegistrationRequest (..),
     ClientRegistrationResponse (..),
+    TokenRequest (..),
     TokenResponse (..),
 ) where
 
@@ -76,18 +77,22 @@ import Web.FormUrlEncoded (FromForm (..), parseUnique)
 import MCP.Server.Auth (OAuthMetadata, ProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Auth.Backend (PlaintextPassword, Username, mkPlaintextPassword, mkUsername)
 import Servant.OAuth2.IDP.Types (
+    AuthCodeId,
     ClientAuthMethod,
     ClientId,
     CodeChallenge,
     CodeChallengeMethod,
-    GrantType,
+    CodeVerifier,
+    GrantType (..),
     RedirectTarget,
     RedirectUri,
+    RefreshTokenId,
     ResponseType,
     SessionCookie,
     SessionId,
     mkSessionId,
  )
+import Web.HttpApiData (parseUrlPiece)
 
 -- FIXME: Use HTML from servant-lucid and provide a lucid template for the login page
 -- -----------------------------------------------------------------------------
@@ -221,8 +226,7 @@ type OAuthAPI =
             :> Get '[HTML] (Headers '[Header "Set-Cookie" SessionCookie] Text)
         :<|> LoginAPI
         :<|> "token"
-            -- FIXME: MUST use a sum-type that captures the expected form payload PRECISELY
-            :> ReqBody '[FormUrlEncoded] [(Text, Text)]
+            :> ReqBody '[FormUrlEncoded] TokenRequest
             :> Post '[JSON] TokenResponse
 
 -- -----------------------------------------------------------------------------
@@ -340,3 +344,87 @@ instance Aeson.ToJSON TokenResponse where
                 ++ maybe [] (\e -> ["expires_in" .= e]) expires_in
                 ++ maybe [] (\r -> ["refresh_token" .= r]) refresh_token
                 ++ maybe [] (\s -> ["scope" .= s]) scope
+
+{- | Token endpoint request.
+
+Sum type capturing the two supported grant types with their specific parameters.
+Replaces the untyped @[(Text, Text)]@ form payload.
+
+= Grant Types
+
+* 'AuthorizationCodeGrant': Exchange authorization code for tokens (RFC 6749 Section 4.1.3)
+* 'RefreshTokenGrant': Exchange refresh token for new access token (RFC 6749 Section 6)
+
+= Usage
+
+@
+-- In handlers:
+case tokenRequest of
+    AuthorizationCodeGrant code verifier mResource -> ...
+    RefreshTokenGrant refreshToken mResource -> ...
+@
+-}
+data TokenRequest
+    = -- | Authorization code grant with PKCE verification
+      AuthorizationCodeGrant
+        { reqAuthCode :: AuthCodeId
+        , reqCodeVerifier :: CodeVerifier
+        , reqResource :: Maybe Text
+        }
+    | -- | Refresh token grant
+      RefreshTokenGrant
+        { reqRefreshToken :: RefreshTokenId
+        , reqResource :: Maybe Text
+        }
+    deriving (Show, Generic)
+
+{- | Parse token request from form-encoded data.
+
+Parses the @grant_type@ field first, then dispatches to appropriate parser:
+
+* @authorization_code@: Requires @code@ and @code_verifier@
+* @refresh_token@: Requires @refresh_token@
+* Other grant types: Returns error
+
+The @resource@ parameter (RFC 8707) is optional for both grant types.
+-}
+instance FromForm TokenRequest where
+    fromForm form = do
+        -- Parse grant_type first to determine which variant to construct
+        grantTypeText <- parseUnique "grant_type" form
+        case parseUrlPiece grantTypeText of
+            Left err -> Left $ "Invalid grant_type: " <> err
+            Right grantType -> case grantType of
+                GrantAuthorizationCode -> do
+                    -- Parse authorization code grant parameters
+                    codeText <- parseUnique "code" form
+                    code <- case parseUrlPiece codeText of
+                        Left err -> Left $ "Invalid code: " <> err
+                        Right c -> Right c
+
+                    verifierText <- parseUnique "code_verifier" form
+                    verifier <- case parseUrlPiece verifierText of
+                        Left err -> Left $ "Invalid code_verifier: " <> err
+                        Right v -> Right v
+
+                    -- Optional resource parameter
+                    let mResource = case parseUnique "resource" form of
+                            Left _ -> Nothing
+                            Right r -> Just r
+
+                    pure $ AuthorizationCodeGrant code verifier mResource
+                GrantRefreshToken -> do
+                    -- Parse refresh token grant parameters
+                    tokenText <- parseUnique "refresh_token" form
+                    refreshToken <- case parseUrlPiece tokenText of
+                        Left err -> Left $ "Invalid refresh_token: " <> err
+                        Right t -> Right t
+
+                    -- Optional resource parameter
+                    let mResource = case parseUnique "resource" form of
+                            Left _ -> Nothing
+                            Right r -> Just r
+
+                    pure $ RefreshTokenGrant refreshToken mResource
+                GrantClientCredentials ->
+                    Left "Unsupported grant_type: client_credentials"

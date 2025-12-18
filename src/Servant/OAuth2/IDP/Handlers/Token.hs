@@ -43,20 +43,21 @@ import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import Plow.Logging (IOTracer, traceWith)
-import Servant.OAuth2.IDP.API (TokenResponse (..))
+import Servant.OAuth2.IDP.API (TokenRequest (..), TokenResponse (..))
 import Servant.OAuth2.IDP.Handlers.Helpers (generateJWTAccessToken, generateRefreshTokenWithConfig)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     AccessTokenId (..),
+    AuthCodeId (..),
     AuthorizationCode (..),
     AuthorizationError (..),
     CodeVerifier (..),
-    GrantType (..),
     RefreshTokenId (..),
     authClientId,
     authCodeChallenge,
     authScopes,
     authUserId,
+    unAuthCodeId,
     unCodeChallenge,
     unCodeVerifier,
     unRefreshTokenId,
@@ -111,19 +112,25 @@ handleToken ::
     , HasType (IOTracer HTTPTrace) env
     , HasType JWTSettings env
     ) =>
-    [(Text, Text)] ->
+    TokenRequest ->
     m TokenResponse
-handleToken params = do
-    let paramMap = Map.fromList params
-    -- Parse grant_type from Text to GrantType newtype
-    case Map.lookup "grant_type" paramMap of
-        Nothing -> throwError $ injectTyped @AuthorizationError $ InvalidRequest "Missing grant_type"
-        Just grantTypeText -> case parseUrlPiece grantTypeText of
-            Left _err -> throwError $ injectTyped @AuthorizationError $ UnsupportedGrantType "Unsupported grant_type"
-            Right grantType -> case grantType of
-                GrantAuthorizationCode -> handleAuthCodeGrant paramMap
-                GrantRefreshToken -> handleRefreshTokenGrant paramMap
-                GrantClientCredentials -> throwError $ injectTyped @AuthorizationError $ UnsupportedGrantType "client_credentials not supported"
+handleToken tokenRequest = case tokenRequest of
+    AuthorizationCodeGrant code verifier mResource -> do
+        -- Build param map for existing handler
+        let paramMap =
+                Map.fromList $
+                    [ ("code", unAuthCodeId code)
+                    , ("code_verifier", unCodeVerifier verifier)
+                    ]
+                        ++ maybe [] (\r -> [("resource", r)]) mResource
+        handleAuthCodeGrant paramMap
+    RefreshTokenGrant refreshToken mResource -> do
+        -- Build param map for existing handler
+        let paramMap =
+                Map.fromList $
+                    ("refresh_token", unRefreshTokenId refreshToken)
+                        : maybe [] (\r -> [("resource", r)]) mResource
+        handleRefreshTokenGrant paramMap
 
 {- | Authorization code grant handler (polymorphic).
 
