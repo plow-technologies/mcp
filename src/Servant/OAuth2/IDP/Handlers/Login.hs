@@ -136,13 +136,13 @@ handleLogin mCookie loginForm = do
     case mCookie of
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "No cookie header present"
-            throwError (injectTyped CookiesRequired :: e)
+            throwError $ injectTyped @LoginFlowError CookiesRequired
         Just cookie ->
             -- Parse session cookie and verify it matches form session_id
             let cookieSessionId = extractSessionFromCookie cookie
              in unless (cookieSessionId == Just sessionId) $ do
                     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "Session cookie mismatch"
-                    throwError (injectTyped SessionCookieMismatch :: e)
+                    throwError $ injectTyped @LoginFlowError SessionCookieMismatch
 
     -- Look up pending authorization
     mPending <- lookupPendingAuth sessionId
