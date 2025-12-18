@@ -51,6 +51,7 @@ import Security.SessionCookieSpec qualified as SessionCookieSpec
 
 -- Servant OAuth2 IDP tests
 
+import Servant.OAuth2.IDP.APISpec qualified as APISpec
 import Servant.OAuth2.IDP.CryptoEntropySpec qualified as CryptoEntropySpec
 import Servant.OAuth2.IDP.LucidRenderingSpec qualified as LucidRenderingSpec
 import Servant.OAuth2.IDP.TokenRequestSpec qualified as TokenRequestSpec
@@ -119,6 +120,7 @@ spec = do
 
     -- Servant OAuth2 IDP tests
     describe "Servant.OAuth2.IDP" $ do
+        APISpec.spec
         TokenRequestSpec.spec
         LucidRenderingSpec.spec
         IDPTypesSpec.spec
