@@ -58,6 +58,7 @@ import Servant.OAuth2.IDP.Types (
     OAuthState,
     PendingAuthorization (..),
     RedirectUri,
+    ResourceIndicator (..),
     ResponseType (..),
     SessionCookie (..),
     ValidationError (..),
@@ -114,7 +115,7 @@ handleAuthorize ::
     CodeChallengeMethod ->
     Maybe Text ->
     Maybe OAuthState ->
-    Maybe Text ->
+    Maybe ResourceIndicator ->
     m (Headers '[Header "Set-Cookie" SessionCookie] LoginPage)
 handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
     config <- asks (getTyped @HTTPServerConfig)
@@ -127,7 +128,7 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
         codeChallengeMethodText = toUrlPiece codeChallengeMethod
 
     -- Log resource parameter for RFC8707 support
-    liftIO $ traceWith tracer $ HTTPResourceParameterDebug mResource "authorize endpoint"
+    liftIO $ traceWith tracer $ HTTPResourceParameterDebug (fmap unResourceIndicator mResource) "authorize endpoint"
 
     -- Validate response_type (only "code" supported)
     when (responseType /= ResponseCode) $ do
@@ -171,8 +172,8 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
                 let scopeTexts = T.splitOn " " scopeText
                     scopesMaybe = traverse (mkScope . T.strip) scopeTexts
                  in fmap Set.fromList scopesMaybe
-        -- Convert mResource from Maybe Text to Maybe URI
-        resourceUri = mResource >>= (parseURI . T.unpack)
+        -- Convert mResource from Maybe ResourceIndicator to Maybe URI
+        resourceUri = mResource >>= (parseURI . T.unpack . unResourceIndicator)
 
     -- Create pending authorization
     let pending =
@@ -205,7 +206,7 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
             LoginPage
                 { loginClientName = displayName
                 , loginScopes = scopes
-                , loginResource = mResource
+                , loginResource = fmap unResourceIndicator mResource
                 , loginSessionId = sessionIdText
                 }
 

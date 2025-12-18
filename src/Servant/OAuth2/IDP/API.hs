@@ -86,6 +86,7 @@ import Servant.OAuth2.IDP.Types (
     RedirectTarget,
     RedirectUri,
     RefreshTokenId,
+    ResourceIndicator,
     ResponseType,
     SessionCookie,
     SessionId,
@@ -193,7 +194,7 @@ type OAuthAPI =
             :> QueryParam' '[Required] "code_challenge_method" CodeChallengeMethod
             :> QueryParam "scope" Text -- FIXME Use a newtype instead of Text
             :> QueryParam "state" OAuthState
-            :> QueryParam "resource" Text -- FIXME Use a newtype instead of Text
+            :> QueryParam "resource" ResourceIndicator
             :> Get '[HTML] (Headers '[Header "Set-Cookie" SessionCookie] LoginPage)
         :<|> LoginAPI
         :<|> "token"
@@ -339,12 +340,12 @@ data TokenRequest
       AuthorizationCodeGrant
         { reqAuthCode :: AuthCodeId
         , reqCodeVerifier :: CodeVerifier
-        , reqResource :: Maybe Text
+        , reqResource :: Maybe ResourceIndicator
         }
     | -- | Refresh token grant
       RefreshTokenGrant
         { reqRefreshToken :: RefreshTokenId
-        , reqResource :: Maybe Text
+        , reqResource :: Maybe ResourceIndicator
         }
     deriving (Show, Generic)
 
@@ -380,7 +381,9 @@ instance FromForm TokenRequest where
                     -- Optional resource parameter
                     let mResource = case parseUnique "resource" form of
                             Left _ -> Nothing
-                            Right r -> Just r
+                            Right r -> case parseUrlPiece r of
+                                Left _ -> Nothing
+                                Right ri -> Just ri
 
                     pure $ AuthorizationCodeGrant code verifier mResource
                 GrantRefreshToken -> do
@@ -393,7 +396,9 @@ instance FromForm TokenRequest where
                     -- Optional resource parameter
                     let mResource = case parseUnique "resource" form of
                             Left _ -> Nothing
-                            Right r -> Just r
+                            Right r -> case parseUrlPiece r of
+                                Left _ -> Nothing
+                                Right ri -> Just ri
 
                     pure $ RefreshTokenGrant refreshToken mResource
                 GrantClientCredentials ->

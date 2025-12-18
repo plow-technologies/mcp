@@ -53,6 +53,7 @@ import Servant.OAuth2.IDP.Types (
     AuthorizationError (..),
     CodeVerifier (..),
     RefreshTokenId (..),
+    ResourceIndicator (..),
     authClientId,
     authCodeChallenge,
     authScopes,
@@ -61,6 +62,7 @@ import Servant.OAuth2.IDP.Types (
     unCodeChallenge,
     unCodeVerifier,
     unRefreshTokenId,
+    unResourceIndicator,
     unScope,
  )
 
@@ -116,14 +118,14 @@ handleToken tokenRequest = case tokenRequest of
                     [ ("code", unAuthCodeId code)
                     , ("code_verifier", unCodeVerifier verifier)
                     ]
-                        ++ maybe [] (\r -> [("resource", r)]) mResource
+                        ++ maybe [] (\r -> [("resource", unResourceIndicator r)]) mResource
         handleAuthCodeGrant paramMap
     RefreshTokenGrant refreshToken mResource -> do
         -- Build param map for existing handler
         let paramMap =
                 Map.fromList $
                     ("refresh_token", unRefreshTokenId refreshToken)
-                        : maybe [] (\r -> [("resource", r)]) mResource
+                        : maybe [] (\r -> [("resource", unResourceIndicator r)]) mResource
         handleRefreshTokenGrant paramMap
 
 {- | Authorization code grant handler (polymorphic).

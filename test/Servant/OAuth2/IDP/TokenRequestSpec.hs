@@ -11,6 +11,7 @@ import Servant.OAuth2.IDP.Types (
     AuthCodeId (..),
     CodeVerifier (..),
     RefreshTokenId (..),
+    ResourceIndicator (..),
  )
 
 spec :: Spec
@@ -47,7 +48,7 @@ spec = do
                     Right (AuthorizationCodeGrant code verifier mResource) -> do
                         code `shouldBe` AuthCodeId "code_xyz789"
                         verifier `shouldBe` CodeVerifier "1234567890abcdefghijklmnopqrstuvwxyz-._~ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                        mResource `shouldBe` Just "https://api.example.com"
+                        mResource `shouldBe` Just (ResourceIndicator "https://api.example.com")
                     Right other -> expectationFailure $ "Expected AuthorizationCodeGrant, got: " <> show other
 
             it "fails when code is missing" $ do
@@ -111,7 +112,7 @@ spec = do
                     Left err -> expectationFailure $ "Failed to parse: " <> show err
                     Right (RefreshTokenGrant refreshToken mResource) -> do
                         refreshToken `shouldBe` RefreshTokenId "rt_refresh456"
-                        mResource `shouldBe` Just "https://api.example.com"
+                        mResource `shouldBe` Just (ResourceIndicator "https://api.example.com")
                     Right other -> expectationFailure $ "Expected RefreshTokenGrant, got: " <> show other
 
             it "fails when refresh_token is missing" $ do
