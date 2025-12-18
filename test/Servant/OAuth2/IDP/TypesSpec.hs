@@ -36,3 +36,51 @@ spec = do
         context "HTTP rejected for non-localhost" $ do
             it "rejects http://example.com/callback (non-localhost, non-HTTPS)" $
                 mkRedirectUri "http://example.com/callback" `shouldBe` Nothing
+
+        context "FR-051: Private IP range blocking" $ do
+            it "rejects https://10.0.0.1/callback (Class A private)" $
+                mkRedirectUri "https://10.0.0.1/callback" `shouldBe` Nothing
+
+            it "rejects https://10.255.255.255/callback (Class A private boundary)" $
+                mkRedirectUri "https://10.255.255.255/callback" `shouldBe` Nothing
+
+            it "rejects https://172.16.0.1/callback (Class B private start)" $
+                mkRedirectUri "https://172.16.0.1/callback" `shouldBe` Nothing
+
+            it "rejects https://172.31.255.255/callback (Class B private end)" $
+                mkRedirectUri "https://172.31.255.255/callback" `shouldBe` Nothing
+
+            it "rejects https://192.168.1.1/callback (Class C private)" $
+                mkRedirectUri "https://192.168.1.1/callback" `shouldBe` Nothing
+
+            it "rejects https://169.254.169.254/latest/meta-data (cloud metadata SSRF)" $
+                mkRedirectUri "https://169.254.169.254/latest/meta-data" `shouldBe` Nothing
+
+            it "accepts https://example.com/callback (public domain)" $
+                mkRedirectUri "https://example.com/callback" `shouldSatisfy` isJust
+
+            it "accepts https://8.8.8.8/callback (public IP)" $
+                mkRedirectUri "https://8.8.8.8/callback" `shouldSatisfy` isJust
+
+            it "accepts http://localhost:3000/callback (localhost still allowed)" $
+                mkRedirectUri "http://localhost:3000/callback" `shouldSatisfy` isJust
+
+        context "FR-051: Security bypass vectors" $ do
+            it "rejects overflow bypass 172.288.0.1" $
+                mkRedirectUri "https://172.288.0.1/callback" `shouldBe` Nothing
+
+            it "rejects decimal IP notation 167772161 (10.0.0.1)" $
+                mkRedirectUri "https://167772161/callback" `shouldBe` Nothing
+
+            it "rejects hex IP notation 0xa000001" $
+                mkRedirectUri "https://0xa000001/callback" `shouldBe` Nothing
+
+            it "rejects octal IP notation 012.0.0.1" $
+                mkRedirectUri "https://012.0.0.1/callback" `shouldBe` Nothing
+
+            -- Boundary tests for public IPs (should ACCEPT)
+            it "accepts public IP 172.32.0.0 (just outside Class B private)" $
+                mkRedirectUri "https://172.32.0.0/callback" `shouldSatisfy` isJust
+
+            it "accepts public IP 172.15.255.255 (just below Class B private)" $
+                mkRedirectUri "https://172.15.255.255/callback" `shouldSatisfy` isJust

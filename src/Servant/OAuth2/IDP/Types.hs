@@ -66,16 +66,18 @@ module Servant.OAuth2.IDP.Types (
     OAuthErrorResponse (..),
 ) where
 
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, guard, when)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson.Types (Parser)
 import Data.Char (isAsciiLower, isAsciiUpper, isDigit, isHexDigit, isSpace)
 import Data.List.NonEmpty (NonEmpty, nonEmpty)
+import Data.Maybe (isNothing)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Time.Clock (UTCTime)
+import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Network.HTTP.Types.Status (Status, status400, status401, status403)
 import Network.URI (URI, parseURI, uriAuthority, uriRegName, uriScheme, uriToString)
@@ -232,8 +234,44 @@ instance FromHttpApiData RedirectUri where
 instance ToHttpApiData RedirectUri where
     toUrlPiece (RedirectUri uri) = T.pack (uriToString id uri "")
 
+{- | Parse IPv4 address "a.b.c.d" into octets (FR-051)
+Parse as Integer first to prevent Word8 overflow bypass.
+Example: "172.288.0.1" would wrap to (172, 32, 0, 1) without this check.
+-}
+parseIPv4 :: String -> Maybe (Word8, Word8, Word8, Word8)
+parseIPv4 s = do
+    -- Parse as Integer to detect overflow before conversion
+    (a, b, c, d) <- case reads ("(" ++ map (\c -> if c == '.' then ',' else c) s ++ ")") of
+        [((a', b', c', d'), "")] -> Just (a', b', c', d' :: Integer)
+        _ -> Nothing
+    -- Validate range [0-255] for each octet
+    guard $ a >= 0 && a <= 255
+    guard $ b >= 0 && b <= 255
+    guard $ c >= 0 && c <= 255
+    guard $ d >= 0 && d <= 255
+    -- Safe to convert after validation
+    return (fromInteger a, fromInteger b, fromInteger c, fromInteger d)
+
+{- | Check if hostname is a private IP address (FR-051)
+Blocks SSRF attacks to internal infrastructure:
+- 10.0.0.0/8 (Class A private)
+- 172.16.0.0/12 (Class B private)
+- 192.168.0.0/16 (Class C private)
+- 169.254.0.0/16 (link-local, cloud metadata)
+-}
+isPrivateIP :: String -> Bool
+isPrivateIP hostname = case parseIPv4 hostname of
+    Just (a, b, _c, _d) ->
+        (a == 10) -- 10.0.0.0/8
+            || (a == 172 && b >= 16 && b <= 31) -- 172.16.0.0/12
+            || (a == 192 && b == 168) -- 192.168.0.0/16
+            || (a == 169 && b == 254) -- 169.254.0.0/16
+    Nothing -> False
+
 {- | Smart constructor for RedirectUri (validates https:// or http://localhost)
 FR-050: Uses exact hostname matching to prevent SSRF bypass via substring tricks
+FR-051: Blocks private IP ranges to prevent SSRF attacks
+FR-051: Rejects decimal/hex/octal IP notation bypass vectors
 -}
 mkRedirectUri :: Text -> Maybe RedirectUri
 mkRedirectUri t = do
@@ -242,14 +280,66 @@ mkRedirectUri t = do
     let hostname = uriRegName auth
         scheme = uriScheme uri
 
+    -- FR-051: Reject decimal/hex/octal IP notation bypass vectors
+    -- Only accept valid dotted-quad IPs (a.b.c.d) or domain names
+    guard $ not (isNumericIPBypass hostname)
+
     case scheme of
-        "https:" -> Just (RedirectUri uri)
+        "https:" -> do
+            -- FR-051: Reject malformed IPs (e.g., octets > 255)
+            guard $ not (isMalformedIP hostname)
+            -- FR-051: Block private IPs even on HTTPS
+            guard $ not (isPrivateIP hostname)
+            Just (RedirectUri uri)
         "http:" ->
             -- FR-050: Exact hostname match for localhost exemption
             if hostname `elem` ["localhost", "127.0.0.1", "[::1]"]
                 then Just (RedirectUri uri)
                 else Nothing
         _ -> Nothing
+  where
+    -- Check if hostname looks like an IP address but fails to parse
+    -- (e.g., octets > 255 like 172.288.0.1)
+    isMalformedIP :: String -> Bool
+    isMalformedIP host =
+        looksLikeIP host && isNothing (parseIPv4 host)
+      where
+        looksLikeIP h = case filter (== '.') h of
+            "..." -> all (\c -> isDigit c || c == '.') h
+            _ -> False
+
+    -- Detect numeric IP bypass vectors (decimal, hex, octal)
+    -- Returns True if hostname looks like a numeric bypass attempt
+    isNumericIPBypass :: String -> Bool
+    isNumericIPBypass host =
+        -- All digits with no dots (decimal notation like 167772161)
+        (all isDigit host && notElem '.' host)
+            -- Starts with 0x or 0X (hex notation like 0xa000001)
+            || case host of
+                ('0' : 'x' : rest) -> not (null rest) && all isHexDigit rest
+                ('0' : 'X' : rest) -> not (null rest) && all isHexDigit rest
+                _ -> False
+            -- Octal in dotted-quad (e.g., 012.0.0.1 where first octet starts with 0)
+            || hasOctalOctet host
+
+    -- Check if any octet in dotted-quad starts with 0 (octal notation)
+    hasOctalOctet :: String -> Bool
+    hasOctalOctet host
+        | '.' `elem` host =
+            let octets = splitOn '.' host
+             in any startsWithZero octets
+        | otherwise = False
+      where
+        startsWithZero ('0' : rest) = not (null rest) && all isDigit rest
+        startsWithZero _ = False
+
+        splitOn :: Char -> String -> [String]
+        splitOn _ "" = [""]
+        splitOn c (x : xs)
+            | x == c = "" : splitOn c xs
+            | otherwise = case splitOn c xs of
+                (y : ys) -> (x : y) : ys
+                [] -> [[x]]
 
 -- | OAuth scope value
 newtype Scope = Scope {unScope :: Text}
