@@ -44,6 +44,8 @@ import Servant.OAuth2.IDP.Types (
     AuthorizationError (..),
     ClientId (..),
     ClientInfo (..),
+    mkClientName,
+    mkClientSecret,
  )
 
 {- | Dynamic client registration endpoint (polymorphic).
@@ -123,11 +125,23 @@ handleRegister (ClientRegistrationRequest reqName reqRedirects reqGrants reqResp
     let oauthTracer = contramap HTTPOAuth tracer
     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthClientRegistration clientIdText reqName
 
+    -- Wrap raw Text values in newtypes for response
+    clientNameNewtype <- case mkClientName reqName of
+        Just cn -> pure cn
+        Nothing ->
+            throwError $
+                injectTyped @AuthorizationError $
+                    InvalidRequest "client_name must not be empty"
+
+    let clientSecretNewtype = case mkClientSecret "" of
+            Just cs -> cs
+            Nothing -> error "mkClientSecret should never fail for empty string"
+
     return
         ClientRegistrationResponse
-            { client_id = clientIdText
-            , client_secret = "" -- Empty string for public clients
-            , client_name = reqName
+            { client_id = clientId
+            , client_secret = clientSecretNewtype
+            , client_name = clientNameNewtype
             , redirect_uris = reqRedirects
             , grant_types = reqGrants
             , response_types = reqResponses

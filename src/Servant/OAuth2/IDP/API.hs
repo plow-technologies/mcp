@@ -79,6 +79,8 @@ import Servant.OAuth2.IDP.Types (
     AuthCodeId,
     ClientAuthMethod,
     ClientId,
+    ClientName,
+    ClientSecret,
     CodeChallenge,
     CodeChallengeMethod,
     CodeVerifier,
@@ -95,6 +97,9 @@ import Servant.OAuth2.IDP.Types (
     SessionId,
     mkSessionId,
     serializeScopeSet,
+    unClientId,
+    unClientName,
+    unClientSecret,
  )
 import Web.HttpApiData (parseUrlPiece)
 
@@ -278,12 +283,9 @@ Returned after successful client registration. Contains client credentials
 and registered metadata.
 -}
 data ClientRegistrationResponse = ClientRegistrationResponse
-    -- FIXME: Use ClientId
-    { client_id :: Text
-    , -- FIXME: Create a new newtype
-      client_secret :: Text -- Empty string for public clients
-      -- FIXME: Create a new newtype
-    , client_name :: Text
+    { client_id :: ClientId
+    , client_secret :: ClientSecret -- Empty string for public clients
+    , client_name :: ClientName
     , redirect_uris :: NonEmpty RedirectUri
     , grant_types :: NonEmpty GrantType
     , response_types :: NonEmpty ResponseType
@@ -292,7 +294,16 @@ data ClientRegistrationResponse = ClientRegistrationResponse
     deriving (Show, Generic)
 
 instance Aeson.ToJSON ClientRegistrationResponse where
-    toJSON = Aeson.genericToJSON Aeson.defaultOptions
+    toJSON (ClientRegistrationResponse cid csec cname uris gtypes rtypes authMethod) =
+        Aeson.object
+            [ "client_id" .= unClientId cid
+            , "client_secret" .= unClientSecret csec
+            , "client_name" .= unClientName cname
+            , "redirect_uris" .= uris
+            , "grant_types" .= gtypes
+            , "response_types" .= rtypes
+            , "token_endpoint_auth_method" .= authMethod
+            ]
 
 {- | Token endpoint response.
 
