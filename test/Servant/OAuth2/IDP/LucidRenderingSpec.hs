@@ -11,6 +11,8 @@ import Servant.OAuth2.IDP.Handlers.HTML (
     ErrorPage (..),
     LoginPage (..),
  )
+import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError (..))
+import Servant.OAuth2.IDP.Types (SessionId (..))
 
 -- | Test suite for Lucid-based HTML rendering
 spec :: Spec
@@ -168,3 +170,52 @@ spec = do
             html1 `shouldSatisfy` T.isInfixOf "Cookies Required"
             html2 `shouldSatisfy` T.isInfixOf "Session Expired"
             html3 `shouldSatisfy` T.isInfixOf "Invalid Session"
+
+    describe "LoginFlowError ToHtml instance" $ do
+        it "renders CookiesRequired error with user-friendly message" $ do
+            let err = CookiesRequired
+            let html = TL.toStrict $ renderText (toHtml err)
+
+            -- Should have proper HTML structure
+            html `shouldSatisfy` T.isInfixOf "<!DOCTYPE HTML>"
+            html `shouldSatisfy` T.isInfixOf "<html>"
+            html `shouldSatisfy` T.isInfixOf "</html>"
+
+            -- Should contain user-friendly title and message
+            html `shouldSatisfy` T.isInfixOf "Cookies Required"
+            html `shouldSatisfy` T.isInfixOf "cookies enabled"
+
+        it "renders SessionCookieMismatch error" $ do
+            let err = SessionCookieMismatch
+            let html = TL.toStrict $ renderText (toHtml err)
+
+            html `shouldSatisfy` T.isInfixOf "Cookies Required"
+            html `shouldSatisfy` T.isInfixOf "cookie mismatch"
+
+        it "renders SessionNotFound error with session ID" $ do
+            let err = SessionNotFound (SessionId "test-session-123")
+            let html = TL.toStrict $ renderText (toHtml err)
+
+            html `shouldSatisfy` T.isInfixOf "Invalid Session"
+            html `shouldSatisfy` T.isInfixOf "not found"
+            html `shouldSatisfy` T.isInfixOf "expired"
+
+        it "renders SessionExpired error with session ID" $ do
+            let err = SessionExpired (SessionId "expired-session-456")
+            let html = TL.toStrict $ renderText (toHtml err)
+
+            html `shouldSatisfy` T.isInfixOf "Session Expired"
+            html `shouldSatisfy` T.isInfixOf "login session has expired"
+
+        it "uses Lucid's automatic HTML escaping" $ do
+            -- The ToHtml instance uses Lucid which automatically escapes HTML
+            -- This test verifies the instance compiles and renders valid HTML
+            let err = SessionNotFound (SessionId "test-session")
+            let html = TL.toStrict $ renderText (toHtml err)
+
+            -- Should produce valid HTML structure
+            html `shouldSatisfy` T.isInfixOf "<!DOCTYPE HTML>"
+            html `shouldSatisfy` T.isInfixOf "<html>"
+            html `shouldSatisfy` T.isInfixOf "</html>"
+            -- Error message should be present (Lucid auto-escapes all text)
+            html `shouldSatisfy` T.isInfixOf "Session not found"

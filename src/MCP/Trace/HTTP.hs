@@ -16,11 +16,11 @@ module MCP.Trace.HTTP (
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Servant.OAuth2.IDP.Boundary (OAuthBoundaryTrace (..))
 import MCP.Trace.OAuth (OAuthTrace, renderOAuthTrace)
 import MCP.Trace.Operation (OperationTrace, renderOperationTrace)
 import MCP.Trace.Protocol (ProtocolTrace, renderProtocolTrace)
 import MCP.Trace.Server (ServerTrace, renderServerTrace)
+import Servant.OAuth2.IDP.Boundary (OAuthBoundaryTrace (..))
 
 {- | HTTP transport-specific events.
 
@@ -131,3 +131,4 @@ renderHTTPTrace (HTTPOAuthBoundary bt) = "[HTTP:OAuth:Boundary] " <> renderBound
     renderBoundaryTrace (BoundaryAuthError msg) = "Auth error (details logged): " <> msg
     renderBoundaryTrace (BoundaryValidationError _) = "Validation error (safe to expose)"
     renderBoundaryTrace (BoundaryAuthorizationError _) = "Authorization error (safe to expose)"
+    renderBoundaryTrace (BoundaryLoginFlowError _) = "Login flow error (safe to expose, rendered as HTML)"

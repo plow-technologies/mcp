@@ -85,6 +85,7 @@ import Network.HTTP.Types.Status (Status, statusCode)
 import Network.URI (parseURI)
 import Plow.Logging (IOTracer (..), traceWith)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
+import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types
 import Servant.Server (ServerError (..), err401, err500)
@@ -219,6 +220,8 @@ data OAuthBoundaryTrace
       BoundaryValidationError ValidationError
     | -- | Authorization error (safe to expose)
       BoundaryAuthorizationError AuthorizationError
+    | -- | Login flow error (safe to expose, renders as HTML)
+      BoundaryLoginFlowError LoginFlowError
     deriving (Eq, Show)
 
 {- | Translate domain errors to Servant ServerError with security-conscious handling.
@@ -243,6 +246,7 @@ domainErrorToServerError ::
     , AsType (AuthBackendError m') e
     , AsType ValidationError e
     , AsType AuthorizationError e
+    , AsType LoginFlowError e
     , Show (OAuthStateError m')
     , Show (AuthBackendError m')
     ) =>
@@ -267,19 +271,19 @@ domainErrorToServerError tracer inject err =
                     -- Validation errors are safe to expose
                     let (status, message) = validationErrorToResponse validationErr
                     pure $ Just $ toServerError status message
-                Nothing -> case tryAuthorizationError err of
-                    Just authzErr -> case authzErr of
-                        -- Handle HTML error pages specially - render via Lucid instead of JSON
-                        HTMLErrorPage title message -> do
-                            liftIO $ traceWith tracer $ inject $ BoundaryAuthorizationError authzErr
-                            pure $ Just $ toServerErrorHTML title message
-                        -- All other authorization errors use OAuth JSON format
-                        _ -> do
+                Nothing -> case tryLoginFlowError err of
+                    Just loginErr -> do
+                        -- Login flow errors are safe to expose, render as HTML via ToHtml instance
+                        liftIO $ traceWith tracer $ inject $ BoundaryLoginFlowError loginErr
+                        pure $ Just $ toServerErrorLoginFlow loginErr
+                    Nothing -> case tryAuthorizationError err of
+                        Just authzErr -> do
+                            -- Authorization errors use OAuth JSON format
                             let (status, oauthResp) = authorizationErrorToResponse authzErr
                             pure $ Just $ toServerErrorOAuth status oauthResp
-                    Nothing ->
-                        -- No prism matched
-                        pure Nothing
+                        Nothing ->
+                            -- No prism matched
+                            pure Nothing
   where
     -- Try to extract OAuthStateError using AsType prism
     -- Using Const (First a) to properly extract 'a' from sum type 'e'
@@ -293,6 +297,10 @@ domainErrorToServerError tracer inject err =
     -- Try to extract ValidationError using AsType prism
     tryValidationError :: e -> Maybe ValidationError
     tryValidationError = getFirst . getConst . (_Typed @ValidationError @e) (Const . First . Just)
+
+    -- Try to extract LoginFlowError using AsType prism
+    tryLoginFlowError :: e -> Maybe LoginFlowError
+    tryLoginFlowError = getFirst . getConst . (_Typed @LoginFlowError @e) (Const . First . Just)
 
     -- Try to extract AuthorizationError using AsType prism
     tryAuthorizationError :: e -> Maybe AuthorizationError
@@ -318,24 +326,11 @@ domainErrorToServerError tracer inject err =
             , errHeaders = [("Content-Type", "application/json; charset=utf-8")]
             }
 
-    -- Convert title + message to HTML error page ServerError using Lucid
-    toServerErrorHTML :: Text -> Text -> ServerError
-    toServerErrorHTML title message =
-        let
-            -- Create an inline ErrorPage type to avoid circular dependency
-            errorPageHtml = renderText $ do
-                toHtml ("<!DOCTYPE html>" :: Text)
-                toHtml ("<html><head><meta charset=\"utf-8\"><title>Error - MCP Server</title>" :: Text)
-                toHtml ("<style>body { font-family: system-ui, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; } " :: Text)
-                toHtml ("h1 { color: #d32f2f; } .error { background: #ffebee; padding: 15px; border-radius: 5px; border-left: 4px solid #d32f2f; }</style>" :: Text)
-                toHtml ("</head><body><h1>" :: Text)
-                toHtml title
-                toHtml ("</h1><div class=\"error\"><p>" :: Text)
-                toHtml message
-                toHtml ("</p></div><p>Please contact the application developer.</p></body></html>" :: Text)
-            htmlBytes = BL.fromStrict $ TE.encodeUtf8 $ TL.toStrict errorPageHtml
-         in
-            ServerError
+    -- Convert LoginFlowError to HTML ServerError using ToHtml instance
+    toServerErrorLoginFlow :: LoginFlowError -> ServerError
+    toServerErrorLoginFlow loginErr =
+        let htmlBytes = BL.fromStrict $ TE.encodeUtf8 $ TL.toStrict $ renderText $ toHtml loginErr
+         in ServerError
                 { errHTTPCode = 400
                 , errReasonPhrase = ""
                 , errBody = htmlBytes

@@ -77,8 +77,10 @@ import Data.ByteString.Lazy qualified as LBS
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text.Encoding qualified as TE
+import Data.Text.Lazy qualified as TL
 import Data.Time.Clock (UTCTime, addUTCTime)
 import GHC.Generics (Generic)
+import Lucid (renderText, toHtml)
 import Network.Wai.Handler.Warp (Port)
 import Servant (Handler, ServerError, err400, err401, err500, errBody)
 import Servant.Auth.Server (JWTSettings)
@@ -91,6 +93,7 @@ import Plow.Logging (IOTracer)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser, DemoAuthError (..), DemoCredentialEnv)
 import Servant.OAuth2.IDP.Boundary (domainErrorToServerError)
+import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (
     ExpiryConfig (..),
@@ -248,6 +251,7 @@ Unifies all possible error types from different components:
 * 'AuthBackendErr': Authentication failures (invalid credentials, user not found)
 * 'ValidationErr': Semantic validation errors (redirect URI mismatch, unsupported response type)
 * 'AuthorizationErr': OAuth authorization errors per RFC 6749 (invalid grant, access denied, etc.)
+* 'LoginFlowErr': Login flow errors (cookies disabled, session expired, etc.)
 
 Derives 'Generic' to enable @generic-lens@ projection via 'AsType'.
 -}
@@ -260,6 +264,8 @@ data AppError
       ValidationErr ValidationError
     | -- | OAuth authorization error
       AuthorizationErr AuthorizationError
+    | -- | Login flow error
+      LoginFlowErr LoginFlowError
     deriving (Generic)
 
 -- -----------------------------------------------------------------------------
@@ -314,6 +320,9 @@ toServerError (ValidationErr validationErr) =
 toServerError (AuthorizationErr authzErr) =
     let (_status, oauthResp) = authorizationErrorToResponse authzErr
      in err400{errBody = encode oauthResp}
+toServerError (LoginFlowErr loginErr) =
+    -- Render LoginFlowError as HTML using ToHtml instance
+    err400{errBody = LBS.fromStrict . TE.encodeUtf8 . TL.toStrict . renderText . toHtml $ loginErr}
 
 -- -----------------------------------------------------------------------------
 -- Utilities

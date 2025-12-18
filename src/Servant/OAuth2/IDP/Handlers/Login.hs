@@ -48,6 +48,7 @@ import Plow.Logging (IOTracer, traceWith)
 import Servant.OAuth2.IDP.API (LoginForm (..))
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..), Username (..), unUsername)
 import Servant.OAuth2.IDP.Handlers.Helpers (extractSessionFromCookie, generateAuthCode)
+import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     AuthCodeId (..),
@@ -117,6 +118,7 @@ handleLogin ::
     , MonadReader env m
     , MonadError e m
     , AsType AuthorizationError e
+    , AsType LoginFlowError e
     , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
     ) =>
@@ -134,13 +136,13 @@ handleLogin mCookie loginForm = do
     case mCookie of
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "No cookie header present"
-            throwError $ injectTyped @AuthorizationError $ HTMLErrorPage "Cookies Required" "Your browser must have cookies enabled to sign in. Please enable cookies and try again."
+            throwError (injectTyped CookiesRequired :: e)
         Just cookie ->
             -- Parse session cookie and verify it matches form session_id
             let cookieSessionId = extractSessionFromCookie cookie
              in unless (cookieSessionId == Just sessionId) $ do
                     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "Session cookie mismatch"
-                    throwError $ injectTyped @AuthorizationError $ HTMLErrorPage "Cookies Required" "Session cookie mismatch. Please enable cookies and try again."
+                    throwError (injectTyped SessionCookieMismatch :: e)
 
     -- Look up pending authorization
     mPending <- lookupPendingAuth sessionId
@@ -148,7 +150,7 @@ handleLogin mCookie loginForm = do
         Just p -> return p
         Nothing -> do
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "session" ("Session not found: " <> unSessionId sessionId)
-            throwError $ injectTyped @AuthorizationError $ HTMLErrorPage "Invalid Session" "Session not found or has expired. Please restart the authorization flow."
+            throwError $ injectTyped @LoginFlowError $ SessionNotFound sessionId
 
     -- T038: Handle expired sessions
     now <- currentTime
@@ -156,7 +158,7 @@ handleLogin mCookie loginForm = do
         expiryTime = addUTCTime sessionExpirySeconds (pendingCreatedAt pending)
     when (now > expiryTime) $ do
         liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthSessionExpired (unSessionId sessionId)
-        throwError $ injectTyped @AuthorizationError $ HTMLErrorPage "Session Expired" "Your login session has expired. Please restart the authorization flow."
+        throwError $ injectTyped @LoginFlowError $ SessionExpired sessionId
 
     -- Check if user denied access
     if formAction loginForm == "deny"

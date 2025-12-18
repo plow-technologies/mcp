@@ -675,21 +675,10 @@ data AuthorizationError
       InvalidRedirectUri
     | -- | 400: Code verifier doesn't match challenge
       PKCEVerificationFailed
-    | {- | 400: HTML error page (for user-facing login errors)
-      Rendered as HTML via Lucid instead of JSON OAuth error response
-      -}
-      HTMLErrorPage
-        Text
-        -- | title and message
-        Text
     deriving stock (Eq, Show, Generic)
 
 {- | Map AuthorizationError to HTTP status and OAuth error response.
 Per RFC 6749 Section 4.1.2.1 (authorization endpoint errors) and Section 5.2 (token endpoint errors).
-
-Note: HTMLErrorPage is handled separately in the boundary layer to render HTML instead of JSON.
-This function should not be called for HTMLErrorPage - it returns a placeholder that should never
-reach the client.
 -}
 authorizationErrorToResponse :: AuthorizationError -> (Status, OAuthErrorResponse)
 authorizationErrorToResponse = \case
@@ -703,9 +692,6 @@ authorizationErrorToResponse = \case
     ExpiredCode -> (status400, OAuthErrorResponse "invalid_grant" (Just "Authorization code has expired"))
     InvalidRedirectUri -> (status400, OAuthErrorResponse "invalid_request" (Just "Invalid redirect_uri"))
     PKCEVerificationFailed -> (status400, OAuthErrorResponse "invalid_grant" (Just "PKCE verification failed"))
-    HTMLErrorPage _title _message ->
-        -- This should be handled specially in boundary layer, not converted to JSON
-        (status400, OAuthErrorResponse "invalid_request" (Just "See HTML response"))
 
 {- | Semantic validation errors for OAuth handler logic.
 Fixed type (not an associated type) - safe to expose to clients.
