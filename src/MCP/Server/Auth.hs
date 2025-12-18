@@ -70,7 +70,7 @@ import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import GHC.Generics (Generic)
-import Network.HTTP.Simple (addRequestHeader, getResponseBody, httpJSON, parseRequest, setRequestBodyJSON, setRequestMethod)
+import Network.HTTP.Simple (getResponseBody, httpJSON, parseRequest)
 import Plow.Logging (IOTracer)
 
 import MCP.Trace.OAuth (OAuthTrace (..))
@@ -109,7 +109,6 @@ data OAuthProvider = OAuthProvider
 data OAuthConfig = OAuthConfig
     { oauthEnabled :: Bool
     , oauthProviders :: [OAuthProvider]
-    , tokenValidationEndpoint :: Maybe Text -- For validating tokens
     , requireHTTPS :: Bool -- MCP requires HTTPS for OAuth
     -- Configurable timing parameters
     , authCodeExpirySeconds :: Int
@@ -283,50 +282,38 @@ extractBearerToken authHeader =
         ["Bearer", token] -> Just token
         _ -> Nothing
 
--- | Validate a bearer token
+{- | Validate a bearer token
+
+Note: The @_config@ parameter is intentionally kept for future JWT validation improvements.
+Currently unused, but will be needed for proper validation (see lines 293-297):
+- Verify JWT signature using JWK from jwks_uri
+- Check expiration using accessTokenExpirySeconds
+- Validate issuer and audience
+-}
 validateBearerToken :: (MonadIO m) => IOTracer OAuthTrace -> OAuthConfig -> Text -> m (Either Text TokenInfo)
-validateBearerToken _tracer config token = do
+validateBearerToken _tracer _config token = do
     -- Basic validation
     if T.null token
         then return $ Left "Empty token"
-        else case tokenValidationEndpoint config of
-            Just endpoint -> introspectToken _tracer endpoint token
-            Nothing -> do
-                -- Without an introspection endpoint, perform basic JWT validation
-                -- In production, this should:
-                -- 1. Verify JWT signature using JWK from jwks_uri
-                -- 2. Check expiration time
-                -- 3. Validate issuer and audience
-                -- 4. Check token type is "Bearer"
+        else do
+            -- Perform basic JWT validation
+            -- In production, this should:
+            -- 1. Verify JWT signature using JWK from jwks_uri
+            -- 2. Check expiration time
+            -- 3. Validate issuer and audience
+            -- 4. Check token type is "Bearer"
 
-                -- For now, decode JWT payload (middle part) for basic validation
-                case T.splitOn "." token of
-                    [_header, payload, _signature] -> do
-                        currentTime <- liftIO getCurrentTime
-                        case decodeJWTPayload payload of
-                            Right tokenInfo ->
-                                case validateTokenClaims tokenInfo currentTime of
-                                    Right _ -> return $ Right tokenInfo
-                                    Left err -> return $ Left err
-                            Left err -> return $ Left $ "Invalid JWT format: " <> err
-                    _ -> return $ Left "Invalid JWT structure"
-
--- | Introspect token using OAuth introspection endpoint
-introspectToken :: (MonadIO m) => IOTracer OAuthTrace -> Text -> Text -> m (Either Text TokenInfo)
-introspectToken _tracer endpoint token = liftIO $ do
-    let url = T.unpack endpoint
-    request <- parseRequest url
-    let requestWithBody =
-            setRequestMethod "POST" $
-                setRequestBodyJSON (Aeson.object [("token", Aeson.String token)]) $
-                    addRequestHeader "Content-Type" "application/json" request
-
-    response <- httpJSON requestWithBody
-    let tokenInfo = getResponseBody response
-
-    if active tokenInfo
-        then return $ Right tokenInfo
-        else return $ Left "Token is not active"
+            -- For now, decode JWT payload (middle part) for basic validation
+            case T.splitOn "." token of
+                [_header, payload, _signature] -> do
+                    currentTime <- liftIO getCurrentTime
+                    case decodeJWTPayload payload of
+                        Right tokenInfo ->
+                            case validateTokenClaims tokenInfo currentTime of
+                                Right _ -> return $ Right tokenInfo
+                                Left err -> return $ Left err
+                        Left err -> return $ Left $ "Invalid JWT format: " <> err
+                _ -> return $ Left "Invalid JWT structure"
 
 -- | Decode JWT payload (base64url encoded JSON)
 decodeJWTPayload :: Text -> Either Text TokenInfo

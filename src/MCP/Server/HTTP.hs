@@ -657,7 +657,6 @@ defaultDemoOAuthConfig =
     OAuthConfig
         { oauthEnabled = True
         , oauthProviders = []
-        , tokenValidationEndpoint = Nothing
         , requireHTTPS = False -- For demo only
         -- Default timing parameters
         , authCodeExpirySeconds = 600 -- 10 minutes
