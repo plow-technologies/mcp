@@ -256,8 +256,11 @@ Submitted by OAuth clients to register dynamically per RFC 7591.
 -}
 data ClientRegistrationRequest = ClientRegistrationRequest
     { client_name :: Text
+    -- FIXME: Use NonEmpty to make illegal states unrepresentable
     , redirect_uris :: [RedirectUri]
+    -- FIXME: Use NonEmpty to make illegal states unrepresentable
     , grant_types :: [GrantType]
+    -- FIXME: Use NonEmpty to make illegal states unrepresentable
     , response_types :: [ResponseType]
     , token_endpoint_auth_method :: ClientAuthMethod
     }
@@ -284,11 +287,17 @@ Returned after successful client registration. Contains client credentials
 and registered metadata.
 -}
 data ClientRegistrationResponse = ClientRegistrationResponse
+    -- FIXME: Use ClientId
     { client_id :: Text
+    -- FIXME: Create a new newtype
     , client_secret :: Text -- Empty string for public clients
+    -- FIXME: Create a new newtype
     , client_name :: Text
+    -- FIXME: Use NonEmpty to make illegal states unrepresentable
     , redirect_uris :: [RedirectUri]
+    -- FIXME: Use NonEmpty to make illegal states unrepresentable
     , grant_types :: [GrantType]
+    -- FIXME: Use NonEmpty to make illegal states unrepresentable
     , response_types :: [ResponseType]
     , token_endpoint_auth_method :: ClientAuthMethod
     }
@@ -302,6 +311,7 @@ instance Aeson.ToJSON ClientRegistrationResponse where
 Returned from the token endpoint after successful token exchange.
 Contains access token, optional refresh token, and metadata.
 -}
+-- FIXME: Fields need more precise types
 data TokenResponse = TokenResponse
     { access_token :: Text
     , token_type :: Text

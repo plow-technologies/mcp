@@ -109,6 +109,7 @@ These limitations are **features, not bugs** - they make the reference implement
 
 ### Session 2025-12-18
 
+- Q: Should the spec add explicit requirements for type-safe newtypes in `ClientRegistrationRequest`, `ClientRegistrationResponse`, and `TokenResponse`? → A: Yes. Add new FRs requiring `NonEmpty` for redirect_uris/grant_types/response_types and newtypes for ClientId/ClientSecret/ClientName in registration types. TokenResponse fields also need precise types.
 - Q: How should the spec formalize security responsibility boundaries between the library's interfaces and consumer implementations? → A: Add explicit Security Responsibility Matrix section documenting library vs consumer obligations.
 - Q: How should the library handle URL validation for outbound requests and redirect URIs? → A: Strict validation by default (HTTPS-only, exact hostname matching for localhost, private IP blocking) with opt-in development mode. Remove unused `introspectToken` function entirely (attack surface reduction).
 - Q: How should the library handle random number generation for security-sensitive values (PKCE verifiers, tokens)? → A: Library MUST use cryptographic RNG (e.g., `Crypto.Random.getRandomBytes`) for ALL security tokens. This is a library invariant, not a consumer choice.
@@ -260,6 +261,9 @@ These limitations are **features, not bugs** - they make the reference implement
 - **FR-058**: System MUST define `OAuthState` newtype in `Servant.OAuth2.IDP.Types` for the OAuth `state` parameter (CSRF protection token per RFC 6749 Section 10.12). The newtype MUST implement `FromHttpApiData`, `ToHttpApiData`, `FromJSON`, `ToJSON`. Raw `Text` MUST NOT be used for state values in API definitions, data types, or handler code.
 - **FR-059**: System MUST define `ResourceIndicator` newtype in `Servant.OAuth2.IDP.Types` for the OAuth `resource` parameter (RFC 8707 Resource Indicators). The newtype MUST implement `FromHttpApiData`, `ToHttpApiData`, `FromJSON`, `ToJSON`. This type MUST be used in: (1) authorize endpoint `resource` query param, (2) `TokenRequest.reqResource` field, (3) all token handler code dealing with resource indicators. Raw `Text` MUST NOT be used for resource indicator values.
 - **FR-060**: The existing `Scope` newtype MUST be used consistently for all OAuth scope values. This includes: (1) authorize endpoint `scope` query param, (2) `TokenResponse.scope` field (change from `Maybe Text` to `Maybe (Set Scope)` or space-delimited `Text` with `Scope` parsing), (3) `PendingAuthorization` scope fields, (4) all handler code. The `FromHttpApiData` instance for `Scope` MUST handle space-delimited scope strings per RFC 6749 Section 3.3.
+- **FR-061**: `ClientRegistrationRequest` MUST use `NonEmpty RedirectUri` for `redirect_uris`, `NonEmpty GrantType` for `grant_types`, and `NonEmpty ResponseType` for `response_types`. The `FromJSON` instance MUST reject empty lists at parse time (400 Bad Request). This makes illegal states (clients with no redirect URIs) unrepresentable.
+- **FR-062**: `ClientRegistrationResponse` MUST use type-safe newtypes: `ClientId` for `client_id`, `ClientSecret` newtype for `client_secret` (empty for public clients), `ClientName` newtype for `client_name`. List fields (`redirect_uris`, `grant_types`, `response_types`) MUST use `NonEmpty` matching the request type. System MUST define `ClientSecret` and `ClientName` newtypes in `Servant.OAuth2.IDP.Types` with appropriate `ToJSON`/`FromJSON` instances.
+- **FR-063**: `TokenResponse` MUST use type-safe newtypes: `AccessToken` newtype for `access_token`, `TokenType` newtype for `token_type` (typically "Bearer"), `RefreshToken` newtype for `refresh_token` (optional field), `Scope` for `scope` field (per FR-060). System MUST define `AccessToken`, `TokenType`, and `RefreshToken` newtypes in `Servant.OAuth2.IDP.Types` with appropriate serialization instances. The `expires_in` field remains `Int` (seconds per RFC 6749).
 
 ### Key Entities
 
@@ -279,6 +283,11 @@ These limitations are **features, not bugs** - they make the reference implement
 - **OAuthState**: Newtype in `Servant.OAuth2.IDP.Types` for the OAuth `state` parameter (CSRF protection token per RFC 6749 Section 10.12). Opaque string that clients generate and expect to receive unchanged in the redirect callback. Disambiguates from Haskell's `State` monad.
 - **ResourceIndicator**: Newtype in `Servant.OAuth2.IDP.Types` for the OAuth `resource` parameter (RFC 8707 Resource Indicators). Identifies the resource server for which the access token is requested. Used in authorize and token endpoints.
 - **Scope**: Existing newtype in `Servant.OAuth2.IDP.Types` for OAuth scope values. Per RFC 6749 Section 3.3, scopes are space-delimited in wire format. Used consistently in API params, `TokenResponse`, `PendingAuthorization`, and handlers.
+- **ClientSecret**: Newtype in `Servant.OAuth2.IDP.Types` for OAuth client secrets. Empty string for public clients per RFC 6749. Used in `ClientRegistrationResponse`.
+- **ClientName**: Newtype in `Servant.OAuth2.IDP.Types` for human-readable client names. Used in `ClientRegistrationRequest` and `ClientRegistrationResponse`.
+- **AccessToken**: Newtype in `Servant.OAuth2.IDP.Types` for OAuth access tokens (opaque bearer tokens). Used in `TokenResponse.access_token`.
+- **TokenType**: Newtype in `Servant.OAuth2.IDP.Types` for OAuth token types (typically "Bearer"). Used in `TokenResponse.token_type`.
+- **RefreshToken**: Newtype in `Servant.OAuth2.IDP.Types` for OAuth refresh tokens. Used in `TokenResponse.refresh_token` (optional).
 - **TestConfig**: Configuration record for the polymorphic conformance test suite, bundling: `runM` (natural transformation), `advanceTime` callback, `TestCredentials`, and Application factory. Implementations provide this to run the conformance suite against their backend.
 
 ## Success Criteria *(mandatory)*
