@@ -90,6 +90,7 @@ import Servant.OAuth2.IDP.Types (
     ResourceIndicator,
     ResponseType,
     Scope,
+    ScopeList,
     SessionCookie,
     SessionId,
     mkSessionId,
@@ -195,7 +196,7 @@ type OAuthAPI =
             :> QueryParam' '[Required] "redirect_uri" RedirectUri
             :> QueryParam' '[Required] "code_challenge" CodeChallenge
             :> QueryParam' '[Required] "code_challenge_method" CodeChallengeMethod
-            :> QueryParam "scope" Text -- FIXME Use a newtype instead of Text
+            :> QueryParam "scope" ScopeList
             :> QueryParam "state" OAuthState
             :> QueryParam "resource" ResourceIndicator
             :> Get '[HTML] (Headers '[Header "Set-Cookie" SessionCookie] LoginPage)

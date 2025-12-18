@@ -40,6 +40,7 @@ module Servant.OAuth2.IDP.Types (
     mkScope,
     parseScopeList,
     serializeScopeSet,
+    ScopeList (..),
     CodeChallenge (..),
     mkCodeChallenge,
     CodeVerifier (..),
@@ -441,6 +442,20 @@ serializeScopeSet :: Set Scope -> Text
 serializeScopeSet scopes
     | Set.null scopes = ""
     | otherwise = T.intercalate " " (map unScope (Set.toList scopes))
+
+{- | Space-delimited scope list for HTTP API (RFC 6749 Section 3.3).
+Wraps a Set of Scope values for use in Servant query parameters.
+-}
+newtype ScopeList = ScopeList {unScopeList :: Set Scope}
+    deriving stock (Eq, Ord, Show, Generic)
+
+instance FromHttpApiData ScopeList where
+    parseUrlPiece t = case parseScopeList t of
+        Just scopes -> Right (ScopeList scopes)
+        Nothing -> Left "Invalid scope list"
+
+instance ToHttpApiData ScopeList where
+    toUrlPiece (ScopeList scopes) = serializeScopeSet scopes
 
 -- | PKCE code challenge
 newtype CodeChallenge = CodeChallenge {unCodeChallenge :: Text}

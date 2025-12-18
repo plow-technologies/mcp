@@ -6,7 +6,7 @@ import Data.Either (isLeft)
 import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import Data.Text (Text)
-import Servant.OAuth2.IDP.Types (Scope (..), mkRedirectUri, parseScopeList, serializeScopeSet)
+import Servant.OAuth2.IDP.Types (Scope (..), ScopeList (..), mkRedirectUri, parseScopeList, serializeScopeSet)
 import Test.Hspec
 import Web.HttpApiData (parseUrlPiece, toUrlPiece)
 
@@ -141,3 +141,28 @@ spec = do
 
             it "handles single scope Set" $
                 serializeScopeSet (Set.fromList [Scope "openid"]) `shouldBe` "openid"
+
+        context "ScopeList newtype for HTTP API (FR-060)" $ do
+            it "parses space-delimited scopes via FromHttpApiData" $
+                parseUrlPiece "openid profile"
+                    `shouldBe` Right (ScopeList (Set.fromList [Scope "openid", Scope "profile"]))
+
+            it "parses single scope" $
+                parseUrlPiece "openid" `shouldBe` Right (ScopeList (Set.fromList [Scope "openid"]))
+
+            it "parses empty string to empty Set" $
+                parseUrlPiece "" `shouldBe` Right (ScopeList Set.empty)
+
+            it "handles multiple spaces between scopes" $
+                parseUrlPiece "openid  profile"
+                    `shouldBe` Right (ScopeList (Set.fromList [Scope "openid", Scope "profile"]))
+
+            it "serializes to space-delimited via ToHttpApiData" $
+                let scopeList = ScopeList (Set.fromList [Scope "openid", Scope "profile"])
+                 in toUrlPiece scopeList `shouldSatisfy` (\s -> s `elem` ["openid profile", "profile openid"])
+
+            it "round-trips through FromHttpApiData and ToHttpApiData" $
+                let original = ScopeList (Set.fromList [Scope "email", Scope "openid"])
+                    serialized = toUrlPiece original
+                    parsed = parseUrlPiece serialized
+                 in parsed `shouldBe` Right original

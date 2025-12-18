@@ -27,9 +27,8 @@ import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
 import Data.Generics.Sum.Typed (AsType, injectTyped)
 import Data.List.NonEmpty qualified as NE
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (isJust)
 import Data.Set qualified as Set
-import Data.Text (Text)
 import Data.Text qualified as T
 import Data.UUID.V4 qualified as UUID
 import Network.URI (parseURI)
@@ -60,10 +59,12 @@ import Servant.OAuth2.IDP.Types (
     RedirectUri,
     ResourceIndicator (..),
     ResponseType (..),
+    Scope (..),
+    ScopeList (..),
     SessionCookie (..),
     ValidationError (..),
-    mkScope,
     mkSessionId,
+    serializeScopeSet,
     unClientId,
  )
 
@@ -113,7 +114,7 @@ handleAuthorize ::
     RedirectUri ->
     CodeChallenge ->
     CodeChallengeMethod ->
-    Maybe Text ->
+    Maybe ScopeList ->
     Maybe OAuthState ->
     Maybe ResourceIndicator ->
     m (Headers '[Header "Set-Cookie" SessionCookie] LoginPage)
@@ -154,7 +155,10 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
         throwError $ injectTyped @ValidationError $ RedirectUriMismatch clientId redirectUri
 
     let displayName = clientName clientInfo
-        scopeList = maybe [] (T.splitOn " ") mScope
+        -- Convert ScopeList to [Text] for tracing
+        scopeList = case mScope of
+            Nothing -> []
+            Just (ScopeList scopes) -> map unScope (Set.toList scopes)
 
     -- Emit authorization request trace
     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationRequest clientIdText scopeList (isJust mState)
@@ -166,12 +170,8 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
             Nothing -> error "Generated invalid session UUID"
     now <- currentTime
 
-    -- Convert mScope from Maybe Text to Maybe (Set Scope)
-    let scopesSet =
-            mScope >>= \scopeText ->
-                let scopeTexts = T.splitOn " " scopeText
-                    scopesMaybe = traverse (mkScope . T.strip) scopeTexts
-                 in fmap Set.fromList scopesMaybe
+    -- Extract Set Scope from ScopeList (already parsed by Servant)
+    let scopesSet = fmap unScopeList mScope
         -- Convert mResource from Maybe ResourceIndicator to Maybe URI
         resourceUri = mResource >>= (parseURI . T.unpack . unResourceIndicator)
 
@@ -201,11 +201,14 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
             Just oauthConf | requireHTTPS oauthConf -> "; Secure"
             _ -> ""
         cookieValue = SessionCookie $ "mcp_session=" <> sessionIdText <> "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" <> T.pack (show sessionExpirySeconds) <> secureFlag
-        scopes = fromMaybe "default access" mScope
+        -- Convert ScopeList to Text for display
+        scopesText = case mScope of
+            Nothing -> "default access"
+            Just (ScopeList scopeSet) -> serializeScopeSet scopeSet
         loginPage =
             LoginPage
                 { loginClientName = displayName
-                , loginScopes = scopes
+                , loginScopes = scopesText
                 , loginResource = fmap unResourceIndicator mResource
                 , loginSessionId = sessionIdText
                 }
