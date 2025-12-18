@@ -90,6 +90,7 @@ import Servant.OAuth2.IDP.Types (
     CodeChallengeMethod,
     CodeVerifier,
     GrantType,
+    OAuthState,
     RedirectUri,
     RefreshTokenId,
     ResponseType,
@@ -114,6 +115,7 @@ spec = describe "Servant Boundary Round-trip Laws" $ do
         identityRoundTrip @Scope
         identityRoundTrip @CodeChallenge
         identityRoundTrip @CodeVerifier
+        identityRoundTrip @OAuthState
 
     describe "ADTs" $ do
         identityRoundTrip @CodeChallengeMethod

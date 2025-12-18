@@ -72,6 +72,7 @@ import Servant.OAuth2.IDP.Types (
     CodeChallengeMethod (..),
     CodeVerifier (..),
     GrantType (..),
+    OAuthState (..),
     PendingAuthorization (..),
     RedirectUri (..),
     RefreshTokenId (..),
@@ -195,6 +196,11 @@ instance Arbitrary CodeVerifier where
         verifierText <- T.pack <$> vectorOf len (elements unreservedChars)
         maybe arbitrary pure (mkCodeVerifier verifierText) -- Retry if validation fails
     shrink _ = [] -- Don't shrink (must maintain length constraints)
+
+-- OAuthState: opaque CSRF protection token (any non-empty text)
+instance Arbitrary OAuthState where
+    arbitrary = OAuthState . T.pack . getNonEmpty <$> arbitrary
+    shrink (OAuthState t) = [OAuthState (T.pack s) | s <- shrink (T.unpack t), not (null s)]
 
 -- ============================================================================
 -- ADTs (use arbitraryBoundedEnum)
