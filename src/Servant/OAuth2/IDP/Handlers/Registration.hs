@@ -102,14 +102,12 @@ handleRegister (ClientRegistrationRequest reqName reqRedirects reqGrants reqResp
     let clientIdText = prefix <> UUID.toText uuid
         clientId = ClientId clientIdText
 
-    -- Convert lists to NonEmpty and Set for ClientInfo
+    -- Convert NonEmpty to Set for ClientInfo
     -- Note: ClientInfo from OAuth.Types requires NonEmpty and Set
-    redirectsNE <- case NE.nonEmpty reqRedirects of
-        Just ne -> pure ne
-        Nothing -> throwError $ injectTyped @AuthorizationError $ InvalidRequest "redirect_uris must not be empty"
-
-    let grantsSet = Set.fromList reqGrants
-        responsesSet = Set.fromList reqResponses
+    -- reqRedirects is already NonEmpty from ClientRegistrationRequest
+    let redirectsNE = reqRedirects
+        grantsSet = Set.fromList (NE.toList reqGrants)
+        responsesSet = Set.fromList (NE.toList reqResponses)
         clientInfo =
             ClientInfo
                 { clientName = reqName

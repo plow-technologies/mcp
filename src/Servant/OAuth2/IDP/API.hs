@@ -46,9 +46,9 @@ module Servant.OAuth2.IDP.API (
     TokenResponse (..),
 ) where
 
-import Control.Monad (when)
 import Data.Aeson ((.=))
 import Data.Aeson qualified as Aeson
+import Data.List.NonEmpty (NonEmpty)
 import Data.Set (Set)
 import Data.Text (Text)
 import GHC.Generics (Generic)
@@ -256,30 +256,21 @@ Submitted by OAuth clients to register dynamically per RFC 7591.
 -}
 data ClientRegistrationRequest = ClientRegistrationRequest
     { client_name :: Text
-    -- FIXME: Use NonEmpty to make illegal states unrepresentable
-    , redirect_uris :: [RedirectUri]
-    -- FIXME: Use NonEmpty to make illegal states unrepresentable
-    , grant_types :: [GrantType]
-    -- FIXME: Use NonEmpty to make illegal states unrepresentable
-    , response_types :: [ResponseType]
+    , redirect_uris :: NonEmpty RedirectUri
+    , grant_types :: NonEmpty GrantType
+    , response_types :: NonEmpty ResponseType
     , token_endpoint_auth_method :: ClientAuthMethod
     }
     deriving (Show, Generic)
 
 instance Aeson.FromJSON ClientRegistrationRequest where
-    parseJSON = Aeson.withObject "ClientRegistrationRequest" $ \v -> do
-        name <- v Aeson..: "client_name"
-        uris <- v Aeson..: "redirect_uris"
-        when (null uris) $
-            fail "redirect_uris must contain at least one URI"
-        grants <- v Aeson..: "grant_types"
-        when (null grants) $
-            fail "grant_types must not be empty"
-        responses <- v Aeson..: "response_types"
-        when (null responses) $
-            fail "response_types must not be empty"
-        authMethod <- v Aeson..: "token_endpoint_auth_method"
-        pure $ ClientRegistrationRequest name uris grants responses authMethod
+    parseJSON = Aeson.withObject "ClientRegistrationRequest" $ \v ->
+        ClientRegistrationRequest
+            <$> v Aeson..: "client_name"
+            <*> v Aeson..: "redirect_uris"
+            <*> v Aeson..: "grant_types"
+            <*> v Aeson..: "response_types"
+            <*> v Aeson..: "token_endpoint_auth_method"
 
 {- | Client registration response.
 
@@ -289,16 +280,13 @@ and registered metadata.
 data ClientRegistrationResponse = ClientRegistrationResponse
     -- FIXME: Use ClientId
     { client_id :: Text
-    -- FIXME: Create a new newtype
-    , client_secret :: Text -- Empty string for public clients
-    -- FIXME: Create a new newtype
+    , -- FIXME: Create a new newtype
+      client_secret :: Text -- Empty string for public clients
+      -- FIXME: Create a new newtype
     , client_name :: Text
-    -- FIXME: Use NonEmpty to make illegal states unrepresentable
-    , redirect_uris :: [RedirectUri]
-    -- FIXME: Use NonEmpty to make illegal states unrepresentable
-    , grant_types :: [GrantType]
-    -- FIXME: Use NonEmpty to make illegal states unrepresentable
-    , response_types :: [ResponseType]
+    , redirect_uris :: NonEmpty RedirectUri
+    , grant_types :: NonEmpty GrantType
+    , response_types :: NonEmpty ResponseType
     , token_endpoint_auth_method :: ClientAuthMethod
     }
     deriving (Show, Generic)
@@ -311,6 +299,7 @@ instance Aeson.ToJSON ClientRegistrationResponse where
 Returned from the token endpoint after successful token exchange.
 Contains access token, optional refresh token, and metadata.
 -}
+
 -- FIXME: Fields need more precise types
 data TokenResponse = TokenResponse
     { access_token :: Text
