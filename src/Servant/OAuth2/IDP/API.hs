@@ -89,6 +89,7 @@ import Servant.OAuth2.IDP.Types (
     mkSessionId,
  )
 
+-- FIXME: Use HTML from servant-lucid and provide a lucid template for the login page
 -- -----------------------------------------------------------------------------
 -- HTML Content Type
 -- -----------------------------------------------------------------------------
@@ -216,9 +217,11 @@ type OAuthAPI =
             :> QueryParam "scope" Text
             :> QueryParam "state" Text
             :> QueryParam "resource" Text
+            -- FIXME: Must return a richer type that implements ToHtml from lucid
             :> Get '[HTML] (Headers '[Header "Set-Cookie" SessionCookie] Text)
         :<|> LoginAPI
         :<|> "token"
+            -- FIXME: MUST use a sum-type that captures the expected form payload PRECISELY
             :> ReqBody '[FormUrlEncoded] [(Text, Text)]
             :> Post '[JSON] TokenResponse
 
