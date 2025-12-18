@@ -2,11 +2,12 @@
 
 module Servant.OAuth2.IDP.TypesSpec (spec) where
 
+import Data.Aeson (decode, encode)
 import Data.Either (isLeft)
 import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import Data.Text (Text)
-import Servant.OAuth2.IDP.Types (Scope (..), ScopeList (..), mkRedirectUri, parseScopeList, serializeScopeSet)
+import Servant.OAuth2.IDP.Types (ClientName (..), ClientSecret (..), Scope (..), ScopeList (..), mkClientName, mkClientSecret, mkRedirectUri, parseScopeList, serializeScopeSet)
 import Test.Hspec
 import Web.HttpApiData (parseUrlPiece, toUrlPiece)
 
@@ -166,3 +167,55 @@ spec = do
                     serialized = toUrlPiece original
                     parsed = parseUrlPiece serialized
                  in parsed `shouldBe` Right original
+
+    describe "FR-062: ClientSecret newtype" $ do
+        context "Smart constructor mkClientSecret" $ do
+            it "accepts empty string for public clients" $
+                mkClientSecret "" `shouldSatisfy` isJust
+
+            it "accepts non-empty secret" $
+                mkClientSecret "my-secret-123" `shouldSatisfy` isJust
+
+            it "unwraps correctly" $
+                case mkClientSecret "test-secret" of
+                    Just (ClientSecret s) -> s `shouldBe` "test-secret"
+                    Nothing -> expectationFailure "mkClientSecret should accept non-empty string"
+
+        context "JSON serialization" $ do
+            it "round-trips through JSON" $
+                let secret = ClientSecret "secret-value"
+                    encoded = encode secret
+                    decoded = decode encoded
+                 in decoded `shouldBe` Just secret
+
+            it "serializes empty secret" $
+                let secret = ClientSecret ""
+                    encoded = encode secret
+                    decoded = decode encoded
+                 in decoded `shouldBe` Just secret
+
+    describe "FR-062: ClientName newtype" $ do
+        context "Smart constructor mkClientName" $ do
+            it "rejects empty string" $
+                mkClientName "" `shouldBe` Nothing
+
+            it "accepts non-empty name" $
+                mkClientName "My Application" `shouldSatisfy` isJust
+
+            it "unwraps correctly" $
+                case mkClientName "Test App" of
+                    Just (ClientName n) -> n `shouldBe` "Test App"
+                    Nothing -> expectationFailure "mkClientName should accept non-empty string"
+
+            it "accepts name with special characters" $
+                mkClientName "My App (v1.0)" `shouldSatisfy` isJust
+
+            it "accepts name with unicode" $
+                mkClientName "My App ™" `shouldSatisfy` isJust
+
+        context "JSON serialization" $ do
+            it "round-trips through JSON" $
+                let name = ClientName "My Application"
+                    encoded = encode name
+                    decoded = decode encoded
+                 in decoded `shouldBe` Just name

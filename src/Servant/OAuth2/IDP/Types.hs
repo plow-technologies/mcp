@@ -47,6 +47,10 @@ module Servant.OAuth2.IDP.Types (
     mkCodeVerifier,
     OAuthState (..),
     ResourceIndicator (..),
+    ClientSecret (..),
+    mkClientSecret,
+    ClientName (..),
+    mkClientName,
 
     -- * HTTP Response Newtypes
     RedirectTarget (..),
@@ -541,6 +545,26 @@ instance FromHttpApiData ResourceIndicator where
 
 instance ToHttpApiData ResourceIndicator where
     toUrlPiece = unResourceIndicator
+
+-- | OAuth client secret (FR-062)
+newtype ClientSecret = ClientSecret {unClientSecret :: Text}
+    deriving stock (Eq, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- | Smart constructor for ClientSecret (allows empty for public clients)
+mkClientSecret :: Text -> Maybe ClientSecret
+mkClientSecret t = Just (ClientSecret t)
+
+-- | OAuth client name (FR-062)
+newtype ClientName = ClientName {unClientName :: Text}
+    deriving stock (Eq, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+-- | Smart constructor for ClientName (non-empty required)
+mkClientName :: Text -> Maybe ClientName
+mkClientName t
+    | T.null t = Nothing
+    | otherwise = Just (ClientName t)
 
 -- -----------------------------------------------------------------------------
 -- HTTP Response Newtypes
