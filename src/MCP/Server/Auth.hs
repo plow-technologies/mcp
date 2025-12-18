@@ -57,6 +57,7 @@ import Servant.OAuth2.IDP.Auth.Backend
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Crypto.Hash (hashWith)
 import Crypto.Hash.Algorithms (SHA256 (..))
+import Crypto.Random (getRandomBytes)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Aeson qualified as Aeson
 import Data.ByteArray (convert)
@@ -71,7 +72,6 @@ import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import GHC.Generics (Generic)
 import Network.HTTP.Simple (addRequestHeader, getResponseBody, httpJSON, parseRequest, setRequestBodyJSON, setRequestMethod)
 import Plow.Logging (IOTracer)
-import System.Random (newStdGen, randomRs)
 
 import MCP.Trace.OAuth (OAuthTrace (..))
 import Servant.OAuth2.IDP.Types (
@@ -364,10 +364,8 @@ validateTokenClaims tokenInfo currentTime = do
 -- | Generate a cryptographically secure code verifier for PKCE
 generateCodeVerifier :: IO Text
 generateCodeVerifier = do
-    gen <- newStdGen
-    let chars = ['A' .. 'Z'] ++ ['a' .. 'z'] ++ ['0' .. '9'] ++ "-._~"
-    let verifier = take 128 $ randomRs (0, length chars - 1) gen
-    return $ T.pack $ map (chars !!) verifier
+    bytes <- getRandomBytes 32 -- 32 bytes = 256 bits entropy
+    pure $ TE.decodeUtf8 $ B64URL.encodeUnpadded bytes -- 43 chars
 
 -- | Generate code challenge from verifier using SHA256 (S256 method)
 generateCodeChallenge :: Text -> Text

@@ -65,6 +65,7 @@ module Servant.OAuth2.IDP.Test.Internal (
 import Control.Monad (when)
 import Crypto.Hash (hashWith)
 import Crypto.Hash.Algorithms (SHA256 (..))
+import Crypto.Random (getRandomBytes)
 import Data.Aeson (Value (Object, String), decode, eitherDecode, encode, object, (.=))
 import Data.Aeson.KeyMap qualified as KM
 import Data.ByteArray (convert)
@@ -84,7 +85,6 @@ import Network.HTTP.Types.URI (renderSimpleQuery)
 import Network.URI (URI (..), parseURI, uriQuery)
 import Network.Wai (Application)
 import Network.Wai.Test (SResponse, simpleBody, simpleHeaders, simpleStatus)
-import System.Random (newStdGen, randomRs)
 import Test.Hspec (Spec, describe, expectationFailure, it, runIO, shouldSatisfy)
 import Test.Hspec.Wai (WaiSession, get, liftIO, postHtmlForm, request, shouldRespondWith, with)
 
@@ -179,14 +179,12 @@ generatePKCE = do
     return (verifier, challenge)
 
 {- | Generate a cryptographically secure code verifier for PKCE
-Produces a 128-character string using unreserved characters per RFC 7636
+Produces a 43-character base64url-encoded string using CSPRNG per RFC 7636
 -}
 generateCodeVerifier :: IO Text
 generateCodeVerifier = do
-    gen <- newStdGen
-    let chars = ['A' .. 'Z'] ++ ['a' .. 'z'] ++ ['0' .. '9'] ++ "-._~"
-    let verifier = take 128 $ randomRs (0, length chars - 1) gen
-    return $ T.pack $ map (chars !!) verifier
+    bytes <- getRandomBytes 32 -- 32 bytes = 256 bits entropy
+    pure $ TE.decodeUtf8 $ B64URL.encodeUnpadded bytes -- 43 chars
 
 {- | Generate code challenge from verifier using SHA256 (S256 method)
 Uses base64url encoding without padding per RFC 7636
