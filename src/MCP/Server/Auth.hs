@@ -43,7 +43,6 @@ module MCP.Server.Auth (
 
     -- * Metadata Discovery
     OAuthMetadata (..),
-    discoverOAuthMetadata,
 
     -- * Protected Resource Metadata (RFC 9728)
     ProtectedResourceMetadata (..),
@@ -70,7 +69,6 @@ import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (UTCTime, getCurrentTime)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import GHC.Generics (Generic)
-import Network.HTTP.Simple (getResponseBody, httpJSON, parseRequest)
 import Plow.Logging (IOTracer)
 
 import MCP.Trace.OAuth (OAuthTrace (..))
@@ -365,14 +363,6 @@ generateCodeChallenge verifier =
 -- | Validate PKCE code verifier against challenge
 validateCodeVerifier :: CodeVerifier -> CodeChallenge -> Bool
 validateCodeVerifier (CodeVerifier verifier) (CodeChallenge challenge) = generateCodeChallenge verifier == challenge
-
--- | Discover OAuth metadata from a well-known endpoint
-discoverOAuthMetadata :: (MonadIO m) => IOTracer OAuthTrace -> Text -> m (Either String OAuthMetadata)
-discoverOAuthMetadata _tracer issuerUrl = liftIO $ do
-    let wellKnownUrl = T.unpack issuerUrl <> "/.well-known/openid-configuration"
-    request <- parseRequest wellKnownUrl
-    response <- httpJSON request
-    return $ Right (getResponseBody response)
 
 -- | Type-level tag for MCP protected resource authentication
 data ProtectedResourceAuth
