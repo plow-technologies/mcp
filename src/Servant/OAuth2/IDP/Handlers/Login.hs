@@ -168,7 +168,7 @@ handleLogin mCookie loginForm = do
                 clearCookie = SessionCookie $ "mcp_session=; Max-Age=0; Path=/" <> secureFlag
                 errorParams = "error=access_denied&error_description=User%20denied%20access"
                 stateParam = case pendingState pending of
-                    Just s -> "&state=" <> s
+                    Just s -> "&state=" <> toUrlPiece s
                     Nothing -> ""
                 redirectUrl = RedirectTarget $ toUrlPiece (pendingRedirectUri pending) <> "?" <> errorParams <> stateParam
 
@@ -219,7 +219,7 @@ handleLogin mCookie loginForm = do
                             Just oauthConf | requireHTTPS oauthConf -> "; Secure"
                             _ -> ""
                         stateParam = case pendingState pending of
-                            Just s -> "&state=" <> s
+                            Just s -> "&state=" <> toUrlPiece s
                             Nothing -> ""
                         redirectUrl = RedirectTarget $ toUrlPiece (pendingRedirectUri pending) <> "?code=" <> code <> stateParam
                         clearCookie = SessionCookie $ "mcp_session=; Max-Age=0; Path=/" <> secureFlag

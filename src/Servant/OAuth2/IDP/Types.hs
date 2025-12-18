@@ -42,6 +42,7 @@ module Servant.OAuth2.IDP.Types (
     mkCodeChallenge,
     CodeVerifier (..),
     mkCodeVerifier,
+    OAuthState (..),
 
     -- * HTTP Response Newtypes
     RedirectTarget (..),
@@ -477,6 +478,19 @@ instance FromHttpApiData CodeVerifier where
 instance ToHttpApiData CodeVerifier where
     toUrlPiece = unCodeVerifier
 
+-- | OAuth state parameter (CSRF protection token per RFC 6749 Section 10.12)
+newtype OAuthState = OAuthState {unOAuthState :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+instance FromHttpApiData OAuthState where
+    parseUrlPiece t
+        | T.null t = Left "OAuthState cannot be empty"
+        | otherwise = Right (OAuthState t)
+
+instance ToHttpApiData OAuthState where
+    toUrlPiece = unOAuthState
+
 -- -----------------------------------------------------------------------------
 -- HTTP Response Newtypes
 -- -----------------------------------------------------------------------------
@@ -720,7 +734,7 @@ data PendingAuthorization = PendingAuthorization
     , pendingCodeChallenge :: CodeChallenge
     , pendingCodeChallengeMethod :: CodeChallengeMethod
     , pendingScope :: Maybe (Set Scope)
-    , pendingState :: Maybe Text
+    , pendingState :: Maybe OAuthState
     , pendingResource :: Maybe URI
     , pendingCreatedAt :: UTCTime
     }

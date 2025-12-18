@@ -55,6 +55,7 @@ import Servant.OAuth2.IDP.Types (
     ClientInfo (..),
     CodeChallenge,
     CodeChallengeMethod (..),
+    OAuthState,
     PendingAuthorization (..),
     RedirectUri,
     ResponseType (..),
@@ -112,7 +113,7 @@ handleAuthorize ::
     CodeChallenge ->
     CodeChallengeMethod ->
     Maybe Text ->
-    Maybe Text ->
+    Maybe OAuthState ->
     Maybe Text ->
     m (Headers '[Header "Set-Cookie" SessionCookie] LoginPage)
 handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do

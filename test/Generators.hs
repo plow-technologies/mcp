@@ -271,8 +271,8 @@ instance Arbitrary PendingAuthorization where
         pendingCodeChallengeMethod <- arbitrary
         -- Optional scope
         pendingScope <- frequency [(1, pure Nothing), (3, Just . Set.fromList <$> listOf arbitrary `suchThat` (\xs -> length xs <= 5))]
-        -- Optional state
-        pendingState <- frequency [(1, pure Nothing), (3, Just . T.pack . getNonEmpty <$> arbitrary)]
+        -- Optional state (OAuthState newtype)
+        pendingState <- frequency [(1, pure Nothing), (3, Just . OAuthState . T.pack . getNonEmpty <$> arbitrary)]
         -- Optional resource URI
         pendingResource <- frequency [(1, pure Nothing), (2, Just <$> genResourceURI)]
         pendingCreatedAt <- arbitrary
