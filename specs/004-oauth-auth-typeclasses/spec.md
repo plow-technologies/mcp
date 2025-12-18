@@ -79,7 +79,41 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 - **Multi-instance scaling**: Typeclass defines single-instance semantics; distributed coordination (if needed) is handled by the storage backend (e.g., PostgreSQL concurrency control), not the typeclass contract.
 - **Observability**: Tracing is the responsibility of implementations; they are encouraged to include a specific tracer in their environment type (`OAuthStateEnv`, `AuthBackendEnv`), which users wire up at application composition time.
 
+### Security Responsibility Matrix
+
+This library provides **interfaces** (typeclasses) and **reference implementations** (demo-quality examples). Security measures are deliberately omitted from reference implementations to keep them simple and instructive. Production deployments MUST implement appropriate security controls in their typeclass instances.
+
+| Concern | Library Provides | Consumer Responsibility |
+|---------|------------------|------------------------|
+| **Password Hashing** | `AuthBackend` typeclass with `validateCredentials` signature | Implement memory-hard KDF (Argon2id, bcrypt) in `AuthBackend` instance |
+| **Password Salt** | None (not in interface) | Generate unique per-user salts in `AuthBackend` implementation |
+| **Rate Limiting** | None (infrastructure concern) | Apply rate limiting middleware or implement in `AuthBackend` |
+| **HTTPS Enforcement** | `requireHTTPS` config flag | Deploy behind TLS termination; set `requireHTTPS = True` |
+| **Token Storage Security** | `OAuthStateStore` typeclass interface | Implement secure storage (encrypted at rest, access controls) |
+| **Session Entropy** | None (implementation detail) | Use cryptographically secure random generation in store implementation |
+| **CSRF Protection** | `SameSite=Strict` cookie flag in reference | Add CSRF tokens if supporting older browsers |
+| **Input Validation** | Type-safe newtypes with smart constructors | Additional domain validation in implementations as needed |
+| **Audit Logging** | Tracer parameter in environment types | Wire up tracer; implement audit trail in store operations |
+| **Login Page UI** | None (library provides OAuth endpoints only) | Host application implements login route with appropriate UI, headers, CSP |
+| **Security Headers** | None (infrastructure concern) | Configure CSP, HSTS, X-Frame-Options in reverse proxy or host app middleware |
+
+**Reference Implementation Caveats** (in-memory store + demo auth):
+- SHA256 password hashing (GPU-crackable) - FOR DEMO ONLY
+- Hardcoded global salt - FOR DEMO ONLY
+- No rate limiting - FOR DEMO ONLY
+- Ephemeral storage (lost on restart) - FOR DEMO ONLY
+
+These limitations are **features, not bugs** - they make the reference implementations simple to understand and use for development/testing. Production deployments implement the typeclasses with appropriate security measures.
+
 ## Clarifications
+
+### Session 2025-12-18
+
+- Q: How should the spec formalize security responsibility boundaries between the library's interfaces and consumer implementations? → A: Add explicit Security Responsibility Matrix section documenting library vs consumer obligations.
+- Q: How should the library handle URL validation for outbound requests and redirect URIs? → A: Strict validation by default (HTTPS-only, exact hostname matching for localhost, private IP blocking) with opt-in development mode. Remove unused `introspectToken` function entirely (attack surface reduction).
+- Q: How should the library handle random number generation for security-sensitive values (PKCE verifiers, tokens)? → A: Library MUST use cryptographic RNG (e.g., `Crypto.Random.getRandomBytes`) for ALL security tokens. This is a library invariant, not a consumer choice.
+- Q: Should the library provide security headers (CSP, HSTS, X-Frame-Options) or leave this to consumers/infrastructure? → A: Consumer responsibility. The login page is expected to be implemented as a route on the host application that embeds the library, not provided by the library itself. Security headers are infrastructure/deployment concerns configured by consumers.
+- Q: Should the spec explicitly require `crypton` and prohibit deprecated `cryptonite`? → A: Yes. MUST use `crypton`, MUST NOT depend on deprecated `cryptonite`. Ensures security patches and follows Haskell ecosystem migration.
 
 ### Session 2025-12-17
 
@@ -214,6 +248,14 @@ An operator needs custom token lifecycle management (e.g., revocation lists, tok
 - **FR-047**: Route composition MUST use type-level API combination (`type FullAPI = MCPAPI :<|> OAuthAPI`) with a single polymorphic server. This preserves unified type signatures across all handlers, allows typeclass constraints to flow naturally, and supports future package extraction (OAuth API type can be imported from a separate package and combined at this level).
 - **FR-048**: System MUST provide two separate entry points in `MCP.Server.HTTP`: (1) `mcpApp` for MCP-only mode (no OAuth2 constraints, serves only MCP core routes), (2) `mcpAppWithOAuth` for full mode (MCP + OAuth2 routes, requires `OAuthStateStore`/`AuthBackend` constraints). **Both functions MUST accept a `(∀ a. m a -> Handler a)` natural transformation parameter**, following the same pattern as FR-046. Signature pattern for `mcpAppWithOAuth`: `mcpAppWithOAuth :: (OAuthStateStore m, AuthBackend m, ...) => (∀ a. m a -> Handler a) -> Application`. CLI flag (`--oauth`) selects which entry point to use at startup. This separation avoids runtime type gymnastics, keeps type signatures explicit and self-documenting, and ensures MCP functionality works independently of OAuth2.
 - **FR-049**: All OAuth2/authentication modules MUST be relocated to the `Servant.OAuth2.IDP.*` namespace (outside `MCP.*` namespace) within this package to establish explicit package boundaries. Module mapping: `MCP.Server.OAuth.Types` → `Servant.OAuth2.IDP.Types`, `MCP.Server.OAuth.Store` → `Servant.OAuth2.IDP.Store`, `MCP.Server.OAuth.InMemory` → `Servant.OAuth2.IDP.Store.InMemory`, `MCP.Server.OAuth.Boundary` → `Servant.OAuth2.IDP.Boundary`, `MCP.Server.Auth.Backend` → `Servant.OAuth2.IDP.Auth.Backend`, `MCP.Server.Auth.Demo` → `Servant.OAuth2.IDP.Auth.Demo`. The `Servant.OAuth2.IDP` namespace signals this is a reusable OAuth2 Identity Provider implementation for Servant applications, not MCP-specific. MCP modules import from `Servant.OAuth2.IDP` when OAuth2 functionality is needed. Future package extraction becomes "cut along the dotted line."
+- **FR-050**: The `mkRedirectUri` smart constructor MUST use **exact hostname matching** for localhost exemption, NOT substring matching. Valid localhost patterns: `localhost`, `127.0.0.1`, `[::1]`. URLs like `http://evil.com?localhost=bypass` MUST be rejected. Implementation: extract hostname via `uriRegName` from parsed URI, compare against allowlist.
+- **FR-051**: The `mkRedirectUri` smart constructor MUST block private/internal IP ranges by default: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` (link-local/cloud metadata), `127.0.0.0/8` (except explicit localhost allowlist). This prevents SSRF attacks against internal infrastructure.
+- **FR-052**: Redirect URI validation MUST require HTTPS by default. HTTP is permitted ONLY for explicit localhost hostnames (`localhost`, `127.0.0.1`, `[::1]`) to support local development. A development mode flag MAY relax this for testing scenarios but MUST NOT be enabled in production configurations.
+- **FR-053**: The unused `introspectToken` function and `discoverOAuthMetadata` function MUST be removed from the library. These functions make outbound HTTP requests to arbitrary URLs, creating SSRF attack surface. Token validation uses local JWT verification; external introspection endpoints are out of scope. Attack surface reduction: remove code that isn't used.
+- **FR-054**: The library MUST NOT export unsafe constructors (e.g., `unsafeRedirectUri`) that bypass validation. All type construction MUST go through smart constructors that enforce security invariants. Internal modules may use pattern synonyms or internal constructors, but public API exports only validated construction paths.
+- **FR-055**: ALL security-sensitive random values MUST use cryptographically secure random number generation. This includes: authorization codes, access tokens, refresh tokens, session IDs, PKCE code verifiers, client secrets, and any other security tokens. Implementation MUST use `Crypto.Random.getRandomBytes` from `crypton`, NOT `System.Random`. This is a library invariant enforced in library code, not delegated to consumers.
+- **FR-056**: The library provides OAuth protocol endpoints (authorize, token, register, metadata) but the **login page UI is the host application's responsibility**. The library MAY provide a reference/demo login page for development, but production deployments implement their own login route with appropriate branding, security headers, CSP, and UX. The library provides: (1) types for login form data, (2) credential validation via `AuthBackend`, (3) session/pending authorization management. The host app provides: login page HTML, form handling route, security headers.
+- **FR-057**: The library MUST depend on `crypton` for all cryptographic operations. The library MUST NOT depend on deprecated `cryptonite`. This ensures the library receives security patches and follows the Haskell ecosystem's migration from the unmaintained `cryptonite` to its actively maintained fork `crypton`. All imports from `Crypto.*` namespaces MUST come from `crypton` packages.
 
 ### Key Entities
 

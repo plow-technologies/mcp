@@ -7,12 +7,12 @@
 
 ## Summary
 
-Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error, environment, user, and user ID types. `OAuthStateStore` requires `MonadTime m` for expiry filtering. `AuthBackend.validateCredentials` returns `Maybe (UserId, User)` tuple. Handlers requiring both typeclasses use type equality constraints (`AuthBackendUser m ~ OAuthUser m`, `AuthBackendUserId m ~ OAuthUserId m`). Provide reference in-memory (`TVar`) and hard-coded credential implementations. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation. **(Updated 2025-12-15: Added user type polymorphism per spec refinement; reference implementation types colocated with implementations per FR-042; error architecture refined with four domain error types and domainErrorToServerError boundary function per Phase 10; mcpApp entry point accepts natural transformation per Phase 11/FR-046)** **(Updated 2025-12-16: OAuth modules relocated to `Servant.OAuth2.IDP.*` namespace per FR-049; two entry points `mcpApp`/`mcpAppWithOAuth` in `MCP.Server.HTTP` per FR-048; type-level route composition per FR-047)** **(Updated 2025-12-17: ALL `mcpApp*` functions MUST accept natural transformation parameter per FR-048 refinement; see Phase 13)** **(Updated 2025-12-17: Removed `AuthBackendUserId m` associated type per spec refinement; `validateCredentials` now returns `Maybe (AuthBackendUser m)` only; see Phase 14)**
+Design two typeclasses (`OAuthStateStore` for OAuth 2.1 state persistence, `AuthBackend` for user credential validation) using three-layer cake architecture with polymorphic `m` monad parameter. Each typeclass defines associated error, environment, user, and user ID types. `OAuthStateStore` requires `MonadTime m` for expiry filtering. `AuthBackend.validateCredentials` returns `Maybe (UserId, User)` tuple. Handlers requiring both typeclasses use type equality constraints (`AuthBackendUser m ~ OAuthUser m`, `AuthBackendUserId m ~ OAuthUserId m`). Provide reference in-memory (`TVar`) and hard-coded credential implementations. Use `generic-lens` (`AsType`/`HasType`) for composable error/environment handling, and `hoistServer` for Servant boundary translation. **(Updated 2025-12-15: Added user type polymorphism per spec refinement; reference implementation types colocated with implementations per FR-042; error architecture refined with four domain error types and domainErrorToServerError boundary function per Phase 10; mcpApp entry point accepts natural transformation per Phase 11/FR-046)** **(Updated 2025-12-16: OAuth modules relocated to `Servant.OAuth2.IDP.*` namespace per FR-049; two entry points `mcpApp`/`mcpAppWithOAuth` in `MCP.Server.HTTP` per FR-048; type-level route composition per FR-047)** **(Updated 2025-12-17: ALL `mcpApp*` functions MUST accept natural transformation parameter per FR-048 refinement; see Phase 13)** **(Updated 2025-12-17: Removed `AuthBackendUserId m` associated type per spec refinement; `validateCredentials` now returns `Maybe (AuthBackendUser m)` only; see Phase 14)** **(Updated 2025-12-18: Security hardening per FR-050–FR-057; crypton required, SSRF prevention, CSPRNG for tokens; see Phase 15)**
 
 ## Technical Context
 
 **Language/Version**: Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1)
-**Primary Dependencies**: servant-server 0.19-0.20, servant-auth-server 0.4, jose 0.10-0.11, cryptonite 0.30, stm 2.5, mtl 2.3, aeson 2.1-2.2, generic-lens (to add), network-uri (to add)
+**Primary Dependencies**: servant-server 0.19-0.20, servant-auth-server 0.4, jose 0.10-0.11, crypton (replacing deprecated cryptonite per FR-057), stm 2.5, mtl 2.3, aeson 2.1-2.2, generic-lens (to add), network-uri (to add)
 **Storage**: In-memory (TVar-based) for reference implementation (not "default"); typeclass enables PostgreSQL/Redis backends
 **Testing**: hspec + QuickCheck + hspec-quickcheck (property tests via `prop` combinator, polymorphic specs testing interface not implementation)
 **Target Platform**: Linux server (GHC 9.4+)
@@ -2900,3 +2900,261 @@ oauthConformanceSpec
 
 - **Phase 8**: Introduced `AuthBackendUserId m` and `OAuthUserId m` (now partially superseded)
 - **Phase 14**: Removes these associated types per spec refinement; user IDs become fields in user types
+
+---
+
+## Phase 15: Security Hardening (FR-050–FR-057)
+
+*Added: 2025-12-18 per security audit findings and spec clarification session*
+
+### Overview
+
+This phase addresses security issues identified in the 2025-12-18 security audit. The changes fall into two categories:
+
+1. **Library-level fixes** (FR-050–FR-055, FR-057): Security invariants the library enforces regardless of consumer implementation
+2. **Responsibility documentation** (FR-056): Clarifying what consumers must implement
+
+### Requirements Addressed
+
+| FR | Description | Category |
+|----|-------------|----------|
+| FR-050 | Exact hostname matching for localhost in `mkRedirectUri` | SSRF Prevention |
+| FR-051 | Block private IP ranges in redirect URIs | SSRF Prevention |
+| FR-052 | HTTPS required by default for redirect URIs | Transport Security |
+| FR-053 | Remove unused `introspectToken` and `discoverOAuthMetadata` | Attack Surface Reduction |
+| FR-054 | No unsafe constructor exports | API Safety |
+| FR-055 | Cryptographic RNG for all security tokens | Cryptographic Security |
+| FR-056 | Login page is host app responsibility | Responsibility Boundary |
+| FR-057 | Require `crypton`, prohibit deprecated `cryptonite` | Dependency Security |
+
+### Implementation Plan
+
+#### Step 1: Dependency Migration (FR-057)
+
+**File**: `mcp.cabal`
+
+```cabal
+-- BEFORE
+build-depends:
+    cryptonite >= 0.30 && < 0.31
+
+-- AFTER
+build-depends:
+    crypton >= 0.34 && < 1.0
+```
+
+**Migration**:
+- `crypton` is a drop-in replacement; same module names (`Crypto.*`)
+- Update imports: none needed (API-compatible)
+- Run full test suite to verify
+
+#### Step 2: Fix `mkRedirectUri` Validation (FR-050, FR-051, FR-052)
+
+**File**: `src/Servant/OAuth2/IDP/Types.hs`
+
+```haskell
+-- BEFORE (vulnerable to substring bypass)
+mkRedirectUri :: Text -> Maybe RedirectUri
+mkRedirectUri t = do
+    uri <- parseURI (T.unpack t)
+    let scheme = uriScheme uri
+    if scheme == "https:"
+        || (scheme == "http:" && ("localhost" `T.isInfixOf` t || "127.0.0.1" `T.isInfixOf` t))
+        then Just (RedirectUri uri)
+        else Nothing
+
+-- AFTER (exact hostname matching + private IP blocking)
+mkRedirectUri :: Text -> Maybe RedirectUri
+mkRedirectUri t = do
+    uri <- parseURI (T.unpack t)
+    auth <- uriAuthority uri
+    let hostname = uriRegName auth
+        scheme = uriScheme uri
+
+    -- Block private IP ranges (FR-051)
+    guard $ not (isPrivateIP hostname)
+
+    case scheme of
+        "https:" -> Just (RedirectUri uri)
+        "http:" ->
+            -- FR-050: Exact hostname match for localhost exemption
+            if hostname `elem` ["localhost", "127.0.0.1", "[::1]"]
+            then Just (RedirectUri uri)
+            else Nothing
+        _ -> Nothing
+
+-- FR-051: Private IP range blocking
+isPrivateIP :: String -> Bool
+isPrivateIP host =
+    any (`isPrefixOf` host)
+        [ "10."           -- 10.0.0.0/8
+        , "172.16.", "172.17.", "172.18.", "172.19."  -- 172.16.0.0/12 (partial)
+        , "172.20.", "172.21.", "172.22.", "172.23."
+        , "172.24.", "172.25.", "172.26.", "172.27."
+        , "172.28.", "172.29.", "172.30.", "172.31."
+        , "192.168."      -- 192.168.0.0/16
+        , "169.254."      -- Link-local / cloud metadata
+        ]
+    || host == "127.0.0.1"  -- Handled by localhost allowlist, but block if not localhost context
+```
+
+#### Step 3: Remove Unsafe Constructor Exports (FR-054)
+
+**File**: `src/Servant/OAuth2/IDP/Boundary.hs` (or wherever `unsafeRedirectUri` is exported)
+
+```haskell
+-- BEFORE
+module Servant.OAuth2.IDP.Boundary
+    ( ...
+    , unsafeRedirectUri  -- REMOVE THIS
+    ) where
+
+-- AFTER
+module Servant.OAuth2.IDP.Boundary
+    ( ...
+    -- unsafeRedirectUri removed from exports
+    ) where
+
+-- If needed internally, move to Internal module:
+-- src/Servant/OAuth2/IDP/Internal/Types.hs (not re-exported)
+```
+
+#### Step 4: Remove Unused Outbound HTTP Functions (FR-053)
+
+**Files to modify**:
+- `src/MCP/Server/Auth.hs` — remove `introspectToken`
+- `src/Servant/OAuth2/IDP/Discovery.hs` (if exists) — remove `discoverOAuthMetadata`
+
+```haskell
+-- REMOVE entirely:
+introspectToken :: IOTracer trace -> Text -> Text -> m IntrospectionResponse
+discoverOAuthMetadata :: IOTracer trace -> Text -> m OAuthMetadata
+
+-- These functions make outbound HTTP requests to arbitrary URLs
+-- Token validation uses local JWT verification instead
+```
+
+#### Step 5: Cryptographic RNG for All Tokens (FR-055)
+
+**Files**: All token generation code
+
+```haskell
+-- BEFORE (using System.Random or UUID)
+import System.Random (randomIO)
+import Data.UUID.V4 (nextRandom)
+
+generateCodeVerifier :: IO Text
+generateCodeVerifier = do
+    bytes <- replicateM 32 randomIO  -- NON-CRYPTOGRAPHIC
+    pure $ encodeBase64 (BS.pack bytes)
+
+-- AFTER (using crypton CSPRNG)
+import Crypto.Random (getRandomBytes)
+import Data.ByteArray (convert)
+
+generateCodeVerifier :: MonadIO m => m Text
+generateCodeVerifier = liftIO $ do
+    bytes <- getRandomBytes 32  -- CRYPTOGRAPHIC
+    pure $ encodeBase64Url (convert bytes :: ByteString)
+
+-- Apply to ALL security tokens:
+-- - Authorization codes (if not using UUID)
+-- - Session IDs
+-- - PKCE code verifiers
+-- - Client secrets (if generated)
+-- - Any nonces or state parameters generated by library
+```
+
+**Note**: `UUID.nextRandom` uses `/dev/urandom` and is cryptographically secure. No change needed for UUID-based tokens. Focus on any `System.Random` usage.
+
+#### Step 6: Update Security Responsibility Documentation
+
+**File**: `spec.md` (already updated)
+
+The spec now contains a **Security Responsibility Matrix** documenting:
+- What the library guarantees (type-safe validation, CSPRNG tokens, SSRF prevention)
+- What consumers must implement (password hashing, rate limiting, HTTPS termination)
+
+No additional code changes needed; documentation already in spec.
+
+### Files to Modify Summary
+
+| File | Changes |
+|------|---------|
+| `mcp.cabal` | Replace `cryptonite` with `crypton` |
+| `src/Servant/OAuth2/IDP/Types.hs` | Fix `mkRedirectUri` validation |
+| `src/Servant/OAuth2/IDP/Boundary.hs` | Remove `unsafeRedirectUri` export |
+| `src/MCP/Server/Auth.hs` | Remove `introspectToken` (if exists) |
+| `src/Servant/OAuth2/IDP/Handlers/*.hs` | Use `Crypto.Random.getRandomBytes` for any non-UUID tokens |
+| `test/` | Add tests for SSRF prevention, private IP blocking |
+
+### Test Plan
+
+#### SSRF Prevention Tests
+
+```haskell
+describe "mkRedirectUri" $ do
+    it "rejects substring localhost bypass" $
+        mkRedirectUri "http://evil.com/callback?localhost=bypass" `shouldBe` Nothing
+
+    it "rejects private IP 10.x.x.x" $
+        mkRedirectUri "https://10.0.0.1/callback" `shouldBe` Nothing
+
+    it "rejects cloud metadata IP" $
+        mkRedirectUri "https://169.254.169.254/latest/meta-data" `shouldBe` Nothing
+
+    it "accepts exact localhost" $
+        mkRedirectUri "http://localhost:3000/callback" `shouldSatisfy` isJust
+
+    it "accepts HTTPS external" $
+        mkRedirectUri "https://example.com/callback" `shouldSatisfy` isJust
+
+    it "rejects HTTP external" $
+        mkRedirectUri "http://example.com/callback" `shouldBe` Nothing
+```
+
+#### Cryptographic RNG Tests
+
+```haskell
+describe "Token Generation" $ do
+    prop "generates sufficient entropy" $ \() -> ioProperty $ do
+        tokens <- replicateM 1000 generateCodeVerifier
+        let unique = Set.fromList tokens
+        pure $ Set.size unique === 1000  -- No collisions
+
+    it "tokens are 32+ bytes of entropy" $ do
+        verifier <- generateCodeVerifier
+        -- Base64url of 32 bytes = 43 characters
+        T.length verifier `shouldSatisfy` (>= 43)
+```
+
+### Migration Order
+
+| Order | Task | Risk | Dependencies |
+|-------|------|------|--------------|
+| 1 | Update `cryptonite` → `crypton` in cabal | Low | None |
+| 2 | Fix `mkRedirectUri` validation | Medium | Build must succeed |
+| 3 | Remove `unsafeRedirectUri` export | Low | Step 2 |
+| 4 | Remove `introspectToken`/`discoverOAuthMetadata` | Low | Verify unused |
+| 5 | Audit and fix RNG usage | Medium | Step 1 (crypton available) |
+| 6 | Add SSRF prevention tests | Low | Step 2 |
+| 7 | Full regression test | - | All steps |
+
+### Constitution Compliance (Phase 15)
+
+| Principle | Status | Evidence |
+|-----------|--------|----------|
+| I. Type-Driven Design | ✅ | Smart constructors enforce security invariants; unsafe paths removed |
+| II. Deep Module Architecture | ✅ | Attack surface reduced by removing unused functions |
+| III. Denotational Semantics | ✅ | `mkRedirectUri` has clear semantic: validated HTTPS URI or localhost |
+| IV. Total Functions | ✅ | No change to totality; validation returns `Maybe` |
+| V. Pure Core, Impure Shell | ✅ | RNG encapsulated in `MonadIO`; validation is pure |
+| VI. Property-Based Testing | ✅ | SSRF prevention testable via property tests |
+
+**Gate Status**: PASS - Phase 15 planning complete.
+
+### Relationship to Other Phases
+
+- **Phase 1-14**: Core typeclass design (unchanged)
+- **Phase 15**: Security hardening layer; does not change typeclass interfaces
+- **Consumers**: Must still implement their security measures per Security Responsibility Matrix
