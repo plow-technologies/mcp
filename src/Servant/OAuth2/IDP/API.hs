@@ -76,6 +76,7 @@ import MCP.Server.Auth (OAuthMetadata, ProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Auth.Backend (PlaintextPassword, Username, mkPlaintextPassword, mkUsername)
 import Servant.OAuth2.IDP.Handlers.HTML (LoginPage)
 import Servant.OAuth2.IDP.Types (
+    AccessToken,
     AuthCodeId,
     ClientAuthMethod,
     ClientId,
@@ -88,6 +89,7 @@ import Servant.OAuth2.IDP.Types (
     OAuthState,
     RedirectTarget,
     RedirectUri,
+    RefreshToken,
     RefreshTokenId,
     ResourceIndicator,
     ResponseType,
@@ -95,11 +97,15 @@ import Servant.OAuth2.IDP.Types (
     ScopeList,
     SessionCookie,
     SessionId,
+    TokenType,
     mkSessionId,
     serializeScopeSet,
+    unAccessToken,
     unClientId,
     unClientName,
     unClientSecret,
+    unRefreshToken,
+    unTokenType,
  )
 import Web.HttpApiData (parseUrlPiece)
 
@@ -310,13 +316,11 @@ instance Aeson.ToJSON ClientRegistrationResponse where
 Returned from the token endpoint after successful token exchange.
 Contains access token, optional refresh token, and metadata.
 -}
-
--- FIXME: Fields need more precise types
 data TokenResponse = TokenResponse
-    { access_token :: Text
-    , token_type :: Text
+    { access_token :: AccessToken
+    , token_type :: TokenType
     , expires_in :: Maybe Int
-    , refresh_token :: Maybe Text
+    , refresh_token :: Maybe RefreshToken
     , scope :: Maybe (Set Scope)
     }
     deriving (Show, Generic)
@@ -324,11 +328,11 @@ data TokenResponse = TokenResponse
 instance Aeson.ToJSON TokenResponse where
     toJSON TokenResponse{..} =
         Aeson.object $
-            [ "access_token" .= access_token
-            , "token_type" .= token_type
+            [ "access_token" .= unAccessToken access_token
+            , "token_type" .= unTokenType token_type
             ]
                 ++ maybe [] (\e -> ["expires_in" .= e]) expires_in
-                ++ maybe [] (\r -> ["refresh_token" .= r]) refresh_token
+                ++ maybe [] (\r -> ["refresh_token" .= unRefreshToken r]) refresh_token
                 ++ maybe [] (\s -> ["scope" .= serializeScopeSet s]) scope
 
 {- | Token endpoint request.

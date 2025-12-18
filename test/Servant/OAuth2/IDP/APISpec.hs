@@ -207,7 +207,9 @@ spec = do
                     Just (Object obj) -> do
                         -- Scope order is determined by Set's Ord instance
                         let scopeValue = KM.lookup "scope" obj
-                        scopeValue `shouldSatisfy` (\case
-                            Just (String s) -> s == "mcp:read mcp:write" || s == "mcp:write mcp:read"
-                            _ -> False)
+                        scopeValue
+                            `shouldSatisfy` ( \case
+                                                Just (String s) -> s == "mcp:read mcp:write" || s == "mcp:write mcp:read"
+                                                _ -> False
+                                            )
                     _ -> expectationFailure "Expected JSON object"

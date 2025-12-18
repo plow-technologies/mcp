@@ -46,13 +46,16 @@ import Servant.OAuth2.IDP.API (TokenRequest (..), TokenResponse (..))
 import Servant.OAuth2.IDP.Handlers.Helpers (generateJWTAccessToken, generateRefreshTokenWithConfig)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
+    AccessToken (..),
     AccessTokenId (..),
     AuthCodeId (..),
     AuthorizationCode (..),
     AuthorizationError (..),
     CodeVerifier (..),
+    RefreshToken (..),
     RefreshTokenId (..),
     ResourceIndicator (..),
+    TokenType (..),
     authClientId,
     authCodeChallenge,
     authScopes,
@@ -230,10 +233,10 @@ handleAuthCodeGrant params = do
 
     return
         TokenResponse
-            { access_token = accessTokenText
-            , token_type = "Bearer"
+            { access_token = AccessToken accessTokenText
+            , token_type = TokenType "Bearer"
             , expires_in = Just $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
-            , refresh_token = Just refreshTokenText
+            , refresh_token = Just (RefreshToken refreshTokenText)
             , scope = if Set.null (authScopes authCode) then Nothing else Just (authScopes authCode)
             }
 
@@ -314,9 +317,9 @@ handleRefreshTokenGrant params = do
 
     return
         TokenResponse
-            { access_token = newAccessTokenText
-            , token_type = "Bearer"
+            { access_token = AccessToken newAccessTokenText
+            , token_type = TokenType "Bearer"
             , expires_in = Just $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
-            , refresh_token = Just (unRefreshTokenId refreshTokenId)
+            , refresh_token = Just (RefreshToken (unRefreshTokenId refreshTokenId))
             , scope = Nothing
             }
