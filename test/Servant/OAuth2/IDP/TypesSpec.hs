@@ -2,9 +2,13 @@
 
 module Servant.OAuth2.IDP.TypesSpec (spec) where
 
+import Data.Either (isLeft)
 import Data.Maybe (isJust)
-import Servant.OAuth2.IDP.Types (mkRedirectUri)
+import Data.Set qualified as Set
+import Data.Text (Text)
+import Servant.OAuth2.IDP.Types (Scope (..), mkRedirectUri, parseScopeList, serializeScopeSet)
 import Test.Hspec
+import Web.HttpApiData (parseUrlPiece, toUrlPiece)
 
 spec :: Spec
 spec = do
@@ -94,3 +98,46 @@ spec = do
 
             it "rejects fc00::1 (IPv6 unique local alternative)" $
                 mkRedirectUri "https://[fc00::1]/callback" `shouldBe` Nothing
+
+    describe "FR-060: Scope parsing and serialization" $ do
+        context "Scope newtype single value" $ do
+            it "accepts valid single scope via FromHttpApiData" $
+                parseUrlPiece "openid" `shouldBe` Right (Scope "openid")
+
+            it "rejects empty scope" $
+                (parseUrlPiece "" :: Either Text Scope) `shouldSatisfy` isLeft
+
+            it "rejects scope with whitespace" $
+                (parseUrlPiece "open id" :: Either Text Scope) `shouldSatisfy` isLeft
+
+            it "round-trips through ToHttpApiData" $
+                let scope = Scope "profile"
+                 in parseUrlPiece (toUrlPiece scope) `shouldBe` Right scope
+
+        context "Space-delimited scope list parsing (RFC 6749 Section 3.3)" $ do
+            it "parses space-delimited scopes into Set" $
+                parseScopeList "openid profile email"
+                    `shouldBe` Just (Set.fromList [Scope "openid", Scope "profile", Scope "email"])
+
+            it "handles single scope" $
+                parseScopeList "openid" `shouldBe` Just (Set.fromList [Scope "openid"])
+
+            it "handles empty string" $
+                parseScopeList "" `shouldBe` Just Set.empty
+
+            it "filters out empty scopes from consecutive spaces" $
+                parseScopeList "openid  profile" `shouldBe` Just (Set.fromList [Scope "openid", Scope "profile"])
+
+            it "trims whitespace around scopes" $
+                parseScopeList "  openid   profile  " `shouldBe` Just (Set.fromList [Scope "openid", Scope "profile"])
+
+        context "Set Scope serialization to space-delimited string" $ do
+            it "serializes Set to space-delimited string" $
+                let scopes = Set.fromList [Scope "email", Scope "openid", Scope "profile"]
+                 in serializeScopeSet scopes `shouldSatisfy` (\s -> s `elem` ["email openid profile", "email profile openid", "openid email profile", "openid profile email", "profile email openid", "profile openid email"])
+
+            it "handles empty Set" $
+                serializeScopeSet Set.empty `shouldBe` ""
+
+            it "handles single scope Set" $
+                serializeScopeSet (Set.fromList [Scope "openid"]) `shouldBe` "openid"

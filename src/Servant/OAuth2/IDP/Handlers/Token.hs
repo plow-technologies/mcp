@@ -31,7 +31,6 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
 import Data.Text (Text)
-import Data.Text qualified as T
 import Servant.Auth.Server (JWTSettings, ToJWT)
 import Web.HttpApiData (parseUrlPiece)
 
@@ -63,7 +62,6 @@ import Servant.OAuth2.IDP.Types (
     unCodeVerifier,
     unRefreshTokenId,
     unResourceIndicator,
-    unScope,
  )
 
 {- | Token endpoint handler (polymorphic).
@@ -236,7 +234,7 @@ handleAuthCodeGrant params = do
             , token_type = "Bearer"
             , expires_in = Just $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
             , refresh_token = Just refreshTokenText
-            , scope = if Set.null (authScopes authCode) then Nothing else Just (T.intercalate " " (map unScope $ Set.toList $ authScopes authCode))
+            , scope = if Set.null (authScopes authCode) then Nothing else Just (authScopes authCode)
             }
 
 {- | Refresh token grant handler (polymorphic).

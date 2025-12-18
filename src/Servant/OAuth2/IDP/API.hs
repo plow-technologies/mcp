@@ -49,6 +49,7 @@ module Servant.OAuth2.IDP.API (
 import Control.Monad (when)
 import Data.Aeson ((.=))
 import Data.Aeson qualified as Aeson
+import Data.Set (Set)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Servant (
@@ -88,9 +89,11 @@ import Servant.OAuth2.IDP.Types (
     RefreshTokenId,
     ResourceIndicator,
     ResponseType,
+    Scope,
     SessionCookie,
     SessionId,
     mkSessionId,
+    serializeScopeSet,
  )
 import Web.HttpApiData (parseUrlPiece)
 
@@ -303,7 +306,7 @@ data TokenResponse = TokenResponse
     , token_type :: Text
     , expires_in :: Maybe Int
     , refresh_token :: Maybe Text
-    , scope :: Maybe Text
+    , scope :: Maybe (Set Scope)
     }
     deriving (Show, Generic)
 
@@ -315,7 +318,7 @@ instance Aeson.ToJSON TokenResponse where
             ]
                 ++ maybe [] (\e -> ["expires_in" .= e]) expires_in
                 ++ maybe [] (\r -> ["refresh_token" .= r]) refresh_token
-                ++ maybe [] (\s -> ["scope" .= s]) scope
+                ++ maybe [] (\s -> ["scope" .= serializeScopeSet s]) scope
 
 {- | Token endpoint request.
 

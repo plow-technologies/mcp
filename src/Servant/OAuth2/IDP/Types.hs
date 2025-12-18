@@ -38,6 +38,8 @@ module Servant.OAuth2.IDP.Types (
     mkRedirectUri,
     Scope (..),
     mkScope,
+    parseScopeList,
+    serializeScopeSet,
     CodeChallenge (..),
     mkCodeChallenge,
     CodeVerifier (..),
@@ -419,6 +421,26 @@ instance FromHttpApiData Scope where
 
 instance ToHttpApiData Scope where
     toUrlPiece = unScope
+
+{- | Parse space-delimited scope list into Set of Scope values (RFC 6749 Section 3.3).
+Empty string returns empty Set. Invalid scopes cause entire parse to fail.
+Filters out empty strings from multiple consecutive spaces.
+-}
+parseScopeList :: Text -> Maybe (Set Scope)
+parseScopeList t
+    | T.null (T.strip t) = Just Set.empty
+    | otherwise =
+        let scopeTexts = filter (not . T.null) $ map T.strip $ T.splitOn " " t
+            scopesMaybe = traverse mkScope scopeTexts
+         in fmap Set.fromList scopesMaybe
+
+{- | Serialize Set of Scope values to space-delimited string (RFC 6749 Section 3.3).
+Empty Set returns empty string. Order is determined by Set's Ord instance.
+-}
+serializeScopeSet :: Set Scope -> Text
+serializeScopeSet scopes
+    | Set.null scopes = ""
+    | otherwise = T.intercalate " " (map unScope (Set.toList scopes))
 
 -- | PKCE code challenge
 newtype CodeChallenge = CodeChallenge {unCodeChallenge :: Text}
