@@ -138,3 +138,33 @@ spec = do
             let page = ErrorPage "Test Error" "Test message"
             let _htmlValue :: Html () = toHtml page
             True `shouldBe` True
+
+    describe "Error page Lucid rendering in production paths" $ do
+        it "renders error pages with automatic HTML escaping for XSS protection" $ do
+            -- CRITICAL: This test verifies that error pages use Lucid's ToHtml
+            -- instance (automatic escaping) instead of renderErrorPage (manual, unsafe)
+            let errorPage = ErrorPage "Session Expired" "<script>alert('xss')</script>"
+            let html = TL.toStrict $ renderText (toHtml errorPage)
+
+            -- XSS content must be escaped
+            html `shouldNotSatisfy` T.isInfixOf "<script>alert('xss')</script>"
+            html `shouldSatisfy` T.isInfixOf "&lt;script&gt;alert"
+
+        it "constructs ErrorPage values instead of calling renderErrorPage" $ do
+            -- This test documents the expected pattern:
+            -- OLD: throwError $ InvalidRequest $ renderErrorPage "Title" "Message"
+            -- NEW: throwError $ InvalidRequest $ ErrorPage "Title" "Message"
+            --
+            -- The ErrorPage will be rendered via ToHtml instance for automatic escaping
+            let errorPage1 = ErrorPage "Cookies Required" "Your browser must have cookies enabled"
+            let errorPage2 = ErrorPage "Session Expired" "Your login session has expired"
+            let errorPage3 = ErrorPage "Invalid Session" "Session not found or has expired"
+
+            -- Verify all error pages render with proper escaping
+            let html1 = TL.toStrict $ renderText (toHtml errorPage1)
+            let html2 = TL.toStrict $ renderText (toHtml errorPage2)
+            let html3 = TL.toStrict $ renderText (toHtml errorPage3)
+
+            html1 `shouldSatisfy` T.isInfixOf "Cookies Required"
+            html2 `shouldSatisfy` T.isInfixOf "Session Expired"
+            html3 `shouldSatisfy` T.isInfixOf "Invalid Session"

@@ -79,6 +79,8 @@ import Data.Monoid (First (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
+import Data.Text.Lazy qualified as TL
+import Lucid (renderText, toHtml)
 import Network.HTTP.Types.Status (Status, statusCode)
 import Network.URI (parseURI)
 import Plow.Logging (IOTracer (..), traceWith)
@@ -266,10 +268,15 @@ domainErrorToServerError tracer inject err =
                     let (status, message) = validationErrorToResponse validationErr
                     pure $ Just $ toServerError status message
                 Nothing -> case tryAuthorizationError err of
-                    Just authzErr -> do
-                        -- Authorization errors are safe to expose (OAuth format)
-                        let (status, oauthResp) = authorizationErrorToResponse authzErr
-                        pure $ Just $ toServerErrorOAuth status oauthResp
+                    Just authzErr -> case authzErr of
+                        -- Handle HTML error pages specially - render via Lucid instead of JSON
+                        HTMLErrorPage title message -> do
+                            liftIO $ traceWith tracer $ inject $ BoundaryAuthorizationError authzErr
+                            pure $ Just $ toServerErrorHTML title message
+                        -- All other authorization errors use OAuth JSON format
+                        _ -> do
+                            let (status, oauthResp) = authorizationErrorToResponse authzErr
+                            pure $ Just $ toServerErrorOAuth status oauthResp
                     Nothing ->
                         -- No prism matched
                         pure Nothing
@@ -310,3 +317,27 @@ domainErrorToServerError tracer inject err =
             , errBody = encode oauthResp
             , errHeaders = [("Content-Type", "application/json; charset=utf-8")]
             }
+
+    -- Convert title + message to HTML error page ServerError using Lucid
+    toServerErrorHTML :: Text -> Text -> ServerError
+    toServerErrorHTML title message =
+        let
+            -- Create an inline ErrorPage type to avoid circular dependency
+            errorPageHtml = renderText $ do
+                toHtml ("<!DOCTYPE html>" :: Text)
+                toHtml ("<html><head><meta charset=\"utf-8\"><title>Error - MCP Server</title>" :: Text)
+                toHtml ("<style>body { font-family: system-ui, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; } " :: Text)
+                toHtml ("h1 { color: #d32f2f; } .error { background: #ffebee; padding: 15px; border-radius: 5px; border-left: 4px solid #d32f2f; }</style>" :: Text)
+                toHtml ("</head><body><h1>" :: Text)
+                toHtml title
+                toHtml ("</h1><div class=\"error\"><p>" :: Text)
+                toHtml message
+                toHtml ("</p></div><p>Please contact the application developer.</p></body></html>" :: Text)
+            htmlBytes = BL.fromStrict $ TE.encodeUtf8 $ TL.toStrict errorPageHtml
+         in
+            ServerError
+                { errHTTPCode = 400
+                , errReasonPhrase = ""
+                , errBody = htmlBytes
+                , errHeaders = [("Content-Type", "text/html; charset=utf-8")]
+                }

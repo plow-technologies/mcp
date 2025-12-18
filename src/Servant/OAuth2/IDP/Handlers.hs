@@ -65,11 +65,8 @@ module Servant.OAuth2.IDP.Handlers (
     handleRefreshTokenGrant,
 
     -- * HTML Rendering Functions
-    renderErrorPage,
-    renderLoginPage,
     scopeToDescription,
     formatScopeDescriptions,
-    escapeHtml,
 
     -- * Helper Functions
     extractSessionFromCookie,
@@ -80,10 +77,7 @@ module Servant.OAuth2.IDP.Handlers (
 
 import Servant.OAuth2.IDP.Handlers.Authorization (handleAuthorize)
 import Servant.OAuth2.IDP.Handlers.HTML (
-    escapeHtml,
     formatScopeDescriptions,
-    renderErrorPage,
-    renderLoginPage,
     scopeToDescription,
  )
 import Servant.OAuth2.IDP.Handlers.Helpers (
