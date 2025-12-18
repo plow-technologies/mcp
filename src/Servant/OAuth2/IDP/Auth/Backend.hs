@@ -231,13 +231,13 @@ Should be cryptographically random and unique per deployment.
 == Example
 
 @
-import System.Random (randomIO)
+import Crypto.Random (getRandomBytes)
 import qualified Data.ByteArray as BA
 
 generateSalt :: IO Salt
 generateSalt = do
-  bytes <- replicateM 32 randomIO  -- 32 random bytes
-  pure $ Salt (BA.pack bytes :: ScrubbedBytes)
+  bytes <- getRandomBytes 32  -- 32 cryptographically random bytes (256 bits)
+  pure $ Salt (BA.convert bytes :: ScrubbedBytes)
 @
 -}
 newtype Salt = Salt {unSalt :: ScrubbedBytes}
