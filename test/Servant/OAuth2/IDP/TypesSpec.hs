@@ -7,7 +7,7 @@ import Data.Either (isLeft)
 import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import Data.Text (Text)
-import Servant.OAuth2.IDP.Types (ClientName (..), ClientSecret (..), Scope (..), ScopeList (..), mkClientName, mkClientSecret, mkRedirectUri, parseScopeList, serializeScopeSet)
+import Servant.OAuth2.IDP.Types (AccessToken (..), ClientName (..), ClientSecret (..), RefreshToken (..), Scope (..), ScopeList (..), TokenType (..), mkClientName, mkClientSecret, mkRedirectUri, parseScopeList, serializeScopeSet)
 import Test.Hspec
 import Web.HttpApiData (parseUrlPiece, toUrlPiece)
 
@@ -219,3 +219,45 @@ spec = do
                     encoded = encode name
                     decoded = decode encoded
                  in decoded `shouldBe` Just name
+
+    describe "FR-063: AccessToken newtype" $ do
+        context "JSON serialization" $ do
+            it "serializes to JSON as string" $
+                let token = AccessToken "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example"
+                    encoded = encode token
+                    decoded = decode encoded
+                 in decoded `shouldBe` Just token
+
+            it "unwraps to Text correctly" $
+                let token = AccessToken "test-token-123"
+                 in unAccessToken token `shouldBe` "test-token-123"
+
+    describe "FR-063: TokenType newtype" $ do
+        context "JSON serialization" $ do
+            it "serializes Bearer token type to JSON" $
+                let tokenType = TokenType "Bearer"
+                    encoded = encode tokenType
+                    decoded = decode encoded
+                 in decoded `shouldBe` Just tokenType
+
+            it "serializes arbitrary token type to JSON" $
+                let tokenType = TokenType "Custom"
+                    encoded = encode tokenType
+                    decoded = decode encoded
+                 in decoded `shouldBe` Just tokenType
+
+            it "unwraps to Text correctly" $
+                let tokenType = TokenType "Bearer"
+                 in unTokenType tokenType `shouldBe` "Bearer"
+
+    describe "FR-063: RefreshToken newtype" $ do
+        context "JSON serialization" $ do
+            it "serializes to JSON as string" $
+                let token = RefreshToken "rt_a1b2c3d4e5f6"
+                    encoded = encode token
+                    decoded = decode encoded
+                 in decoded `shouldBe` Just token
+
+            it "unwraps to Text correctly" $
+                let token = RefreshToken "rt_refresh_123"
+                 in unRefreshToken token `shouldBe` "rt_refresh_123"
