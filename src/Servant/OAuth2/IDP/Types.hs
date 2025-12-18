@@ -78,7 +78,7 @@ import Data.Text qualified as T
 import Data.Time.Clock (UTCTime)
 import GHC.Generics (Generic)
 import Network.HTTP.Types.Status (Status, status400, status401, status403)
-import Network.URI (URI, parseURI, uriScheme, uriToString)
+import Network.URI (URI, parseURI, uriAuthority, uriRegName, uriScheme, uriToString)
 import Web.HttpApiData (FromHttpApiData (..), ToHttpApiData (..))
 
 -- -----------------------------------------------------------------------------
@@ -225,27 +225,31 @@ instance ToJSON RedirectUri where
     toJSON (RedirectUri uri) = toJSON (show uri)
 
 instance FromHttpApiData RedirectUri where
-    parseUrlPiece t = case parseURI (T.unpack t) of
-        Nothing -> Left "Invalid URI format"
-        Just uri
-            | uriScheme uri == "https:" -> Right (RedirectUri uri)
-            | uriScheme uri == "http:" && ("localhost" `T.isInfixOf` t || "127.0.0.1" `T.isInfixOf` t) ->
-                Right (RedirectUri uri)
-            | otherwise -> Left "Redirect URI must use https or http://localhost"
+    parseUrlPiece t = case mkRedirectUri t of
+        Just uri -> Right uri
+        Nothing -> Left "Redirect URI must use https or http://localhost with exact hostname match"
 
 instance ToHttpApiData RedirectUri where
     toUrlPiece (RedirectUri uri) = T.pack (uriToString id uri "")
 
--- | Smart constructor for RedirectUri (validates https:// or http://localhost)
+{- | Smart constructor for RedirectUri (validates https:// or http://localhost)
+FR-050: Uses exact hostname matching to prevent SSRF bypass via substring tricks
+-}
 mkRedirectUri :: Text -> Maybe RedirectUri
 mkRedirectUri t = do
     uri <- parseURI (T.unpack t)
-    let scheme = uriScheme uri
-    -- Allow https:// or http://localhost for development
-    if scheme == "https:"
-        || (scheme == "http:" && ("localhost" `T.isInfixOf` t || "127.0.0.1" `T.isInfixOf` t))
-        then Just (RedirectUri uri)
-        else Nothing
+    auth <- uriAuthority uri
+    let hostname = uriRegName auth
+        scheme = uriScheme uri
+
+    case scheme of
+        "https:" -> Just (RedirectUri uri)
+        "http:" ->
+            -- FR-050: Exact hostname match for localhost exemption
+            if hostname `elem` ["localhost", "127.0.0.1", "[::1]"]
+                then Just (RedirectUri uri)
+                else Nothing
+        _ -> Nothing
 
 -- | OAuth scope value
 newtype Scope = Scope {unScope :: Text}

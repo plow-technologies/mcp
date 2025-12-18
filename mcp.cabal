@@ -292,6 +292,7 @@ test-suite mcp-test
         Security.SessionCookieSpec
         Servant.OAuth2.IDP.TokenRequestSpec
         Servant.OAuth2.IDP.LucidRenderingSpec
+        Servant.OAuth2.IDP.TypesSpec
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
