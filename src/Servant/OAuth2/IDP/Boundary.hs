@@ -47,7 +47,6 @@ module Servant.OAuth2.IDP.Boundary (
     unsafeAccessTokenId,
     unsafeRefreshTokenId,
     unsafeUserId,
-    unsafeRedirectUri,
     unsafeScope,
     unsafeCodeChallenge,
 
@@ -82,7 +81,6 @@ import Data.Text.Encoding qualified as TE
 import Data.Text.Lazy qualified as TL
 import Lucid (renderText, toHtml)
 import Network.HTTP.Types.Status (Status, statusCode)
-import Network.URI (parseURI)
 import Plow.Logging (IOTracer (..), traceWith)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError)
@@ -136,16 +134,6 @@ WARNING: Bypasses validation. Use only for data from validated HTTP requests.
 -}
 unsafeUserId :: Text -> UserId
 unsafeUserId = UserId
-
-{- | Unsafe constructor for RedirectUri.
-
-WARNING: Bypasses validation (does NOT check https:// scheme or localhost).
-Use only for URIs from validated HTTP requests.
-
-Returns Nothing if the URI cannot be parsed at all.
--}
-unsafeRedirectUri :: Text -> Maybe RedirectUri
-unsafeRedirectUri t = RedirectUri <$> parseURI (T.unpack t)
 
 {- | Unsafe constructor for Scope.
 
