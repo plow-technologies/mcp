@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Servant.OAuth2.IDP.APISpec (spec) where
@@ -7,15 +8,20 @@ import Data.Aeson.KeyMap qualified as KM
 import Data.Aeson.Types (Value (..))
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe (isJust, isNothing)
-import Servant.OAuth2.IDP.API (ClientRegistrationRequest (..), ClientRegistrationResponse (..))
+import Data.Set qualified as Set
+import Servant.OAuth2.IDP.API (ClientRegistrationRequest (..), ClientRegistrationResponse (..), TokenResponse (..))
 import Servant.OAuth2.IDP.Types (
+    AccessToken (..),
     ClientAuthMethod (..),
     GrantType (..),
+    RefreshToken (..),
     ResponseType (..),
+    TokenType (..),
     mkClientId,
     mkClientName,
     mkClientSecret,
     mkRedirectUri,
+    mkScope,
  )
 import Test.Hspec
 
@@ -134,3 +140,74 @@ spec = do
                         \}"
                     decoded = decode json :: Maybe ClientRegistrationRequest
                 decoded `shouldSatisfy` isNothing
+
+    describe "FR-063: TokenResponse with type-safe newtypes" $ do
+        context "ToJSON instance unwraps newtypes correctly" $ do
+            it "serializes access_token as unwrapped Text" $ do
+                let accessToken = AccessToken "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test"
+                    tokenType = TokenType "Bearer"
+                    response = TokenResponse accessToken tokenType (Just 3600) Nothing Nothing
+                    encoded = encode response
+                    decoded = decode encoded :: Maybe Value
+
+                case decoded of
+                    Just (Object obj) -> do
+                        KM.lookup "access_token" obj `shouldBe` Just (String "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test")
+                        KM.lookup "token_type" obj `shouldBe` Just (String "Bearer")
+                    _ -> expectationFailure "Expected JSON object"
+
+            it "serializes token_type as unwrapped Text" $ do
+                let accessToken = AccessToken "test_token_abc123"
+                    tokenType = TokenType "Bearer"
+                    response = TokenResponse accessToken tokenType Nothing Nothing Nothing
+                    encoded = encode response
+                    decoded = decode encoded :: Maybe Value
+
+                case decoded of
+                    Just (Object obj) ->
+                        KM.lookup "token_type" obj `shouldBe` Just (String "Bearer")
+                    _ -> expectationFailure "Expected JSON object"
+
+            it "serializes refresh_token as unwrapped Text when present" $ do
+                let accessToken = AccessToken "access_xyz"
+                    tokenType = TokenType "Bearer"
+                    refreshToken = RefreshToken "rt_refresh_token_123"
+                    response = TokenResponse accessToken tokenType (Just 3600) (Just refreshToken) Nothing
+                    encoded = encode response
+                    decoded = decode encoded :: Maybe Value
+
+                case decoded of
+                    Just (Object obj) ->
+                        KM.lookup "refresh_token" obj `shouldBe` Just (String "rt_refresh_token_123")
+                    _ -> expectationFailure "Expected JSON object"
+
+            it "omits refresh_token field when Nothing" $ do
+                let accessToken = AccessToken "access_only"
+                    tokenType = TokenType "Bearer"
+                    response = TokenResponse accessToken tokenType (Just 3600) Nothing Nothing
+                    encoded = encode response
+                    decoded = decode encoded :: Maybe Value
+
+                case decoded of
+                    Just (Object obj) ->
+                        KM.lookup "refresh_token" obj `shouldBe` Nothing
+                    _ -> expectationFailure "Expected JSON object"
+
+            it "serializes scope as space-delimited string when present" $ do
+                let accessToken = AccessToken "access_with_scope"
+                    tokenType = TokenType "Bearer"
+                    scope1 = unsafeMk $ mkScope "mcp:read"
+                    scope2 = unsafeMk $ mkScope "mcp:write"
+                    scopes = Set.fromList [scope1, scope2]
+                    response = TokenResponse accessToken tokenType (Just 3600) Nothing (Just scopes)
+                    encoded = encode response
+                    decoded = decode encoded :: Maybe Value
+
+                case decoded of
+                    Just (Object obj) -> do
+                        -- Scope order is determined by Set's Ord instance
+                        let scopeValue = KM.lookup "scope" obj
+                        scopeValue `shouldSatisfy` (\case
+                            Just (String s) -> s == "mcp:read mcp:write" || s == "mcp:write mcp:read"
+                            _ -> False)
+                    _ -> expectationFailure "Expected JSON object"
