@@ -47,7 +47,7 @@ import MCP.Server.Time (MonadTime (..))
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import Plow.Logging (IOTracer, traceWith)
-import Servant.OAuth2.IDP.Handlers.HTML (renderLoginPage)
+import Servant.OAuth2.IDP.Handlers.HTML (LoginPage (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     AuthorizationError (..),
@@ -120,7 +120,7 @@ handleAuthorize ::
     Maybe Text ->
     Maybe Text ->
     Maybe Text ->
-    m (Headers '[Header "Set-Cookie" SessionCookie] Text)
+    m (Headers '[Header "Set-Cookie" SessionCookie] LoginPage)
 handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMethod mScope mState mResource = do
     config <- asks (getTyped @HTTPServerConfig)
     tracer <- asks (getTyped @(IOTracer HTTPTrace))
@@ -206,6 +206,12 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
             _ -> ""
         cookieValue = SessionCookie $ "mcp_session=" <> sessionIdText <> "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" <> T.pack (show sessionExpirySeconds) <> secureFlag
         scopes = fromMaybe "default access" mScope
-        loginHtml = renderLoginPage displayName scopes mResource sessionIdText
+        loginPage =
+            LoginPage
+                { loginClientName = displayName
+                , loginScopes = scopes
+                , loginResource = mResource
+                , loginSessionId = sessionIdText
+                }
 
-    return $ addHeader cookieValue loginHtml
+    return $ addHeader cookieValue loginPage

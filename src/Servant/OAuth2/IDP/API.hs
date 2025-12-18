@@ -49,11 +49,8 @@ module Servant.OAuth2.IDP.API (
 import Control.Monad (when)
 import Data.Aeson ((.=))
 import Data.Aeson qualified as Aeson
-import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
-import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
-import Network.HTTP.Media ((//), (/:))
 import Servant (
     FormUrlEncoded,
     Get,
@@ -71,11 +68,12 @@ import Servant (
     (:<|>),
     (:>),
  )
-import Servant.API (Accept (..), MimeRender (..))
+import Servant.HTML.Lucid (HTML)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
 
 import MCP.Server.Auth (OAuthMetadata, ProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Auth.Backend (PlaintextPassword, Username, mkPlaintextPassword, mkUsername)
+import Servant.OAuth2.IDP.Handlers.HTML (LoginPage)
 import Servant.OAuth2.IDP.Types (
     AuthCodeId,
     ClientAuthMethod,
@@ -93,33 +91,6 @@ import Servant.OAuth2.IDP.Types (
     mkSessionId,
  )
 import Web.HttpApiData (parseUrlPiece)
-
--- FIXME: Use HTML from servant-lucid and provide a lucid template for the login page
--- -----------------------------------------------------------------------------
--- HTML Content Type
--- -----------------------------------------------------------------------------
-
-{- | HTML content type for Servant.
-
-This content type is used to serve HTML pages in OAuth flows, such as
-login pages and error pages. The content type is @text/html; charset=utf-8@.
-
-= Usage
-
-@
-type MyAPI = "login" :> Get '[HTML] Text
-
-handleLogin :: Handler Text
-handleLogin = return "<html><body>Login Page</body></html>"
-@
--}
-data HTML
-
-instance Accept HTML where
-    contentType _ = "text" // "html" /: ("charset", "utf-8")
-
-instance MimeRender HTML Text where
-    mimeRender _ = LBS.fromStrict . TE.encodeUtf8
 
 -- -----------------------------------------------------------------------------
 -- API Types
@@ -222,8 +193,7 @@ type OAuthAPI =
             :> QueryParam "scope" Text
             :> QueryParam "state" Text
             :> QueryParam "resource" Text
-            -- FIXME: Must return a richer type that implements ToHtml from lucid
-            :> Get '[HTML] (Headers '[Header "Set-Cookie" SessionCookie] Text)
+            :> Get '[HTML] (Headers '[Header "Set-Cookie" SessionCookie] LoginPage)
         :<|> LoginAPI
         :<|> "token"
             :> ReqBody '[FormUrlEncoded] TokenRequest

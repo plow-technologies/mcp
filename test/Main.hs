@@ -54,6 +54,7 @@ import Functional.OAuthFlowSpec qualified as OAuthFlowSpec
 import Security.SessionCookieSpec qualified as SessionCookieSpec
 
 -- Servant OAuth2 IDP tests
+import Servant.OAuth2.IDP.LucidRenderingSpec qualified as LucidRenderingSpec
 import Servant.OAuth2.IDP.TokenRequestSpec qualified as TokenRequestSpec
 
 main :: IO ()
@@ -118,7 +119,9 @@ spec = do
     describe "Security" SessionCookieSpec.spec
 
     -- Servant OAuth2 IDP tests
-    describe "Servant.OAuth2.IDP" TokenRequestSpec.spec
+    describe "Servant.OAuth2.IDP" $ do
+        TokenRequestSpec.spec
+        LucidRenderingSpec.spec
 
     -- Typeclass law tests (using TestM with controlled time)
     describe "TestM OAuthStateStore" $ do

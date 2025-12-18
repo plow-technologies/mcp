@@ -2,7 +2,6 @@
 
 module Servant.OAuth2.IDP.LucidRenderingSpec (spec) where
 
-import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Lucid (Html, renderText, toHtml)
@@ -28,7 +27,7 @@ spec = do
             let html = TL.toStrict $ renderText (toHtml page)
 
             -- Verify essential HTML structure
-            html `shouldSatisfy` T.isInfixOf "<!DOCTYPE html>"
+            html `shouldSatisfy` T.isInfixOf "<!DOCTYPE HTML>"
             html `shouldSatisfy` T.isInfixOf "<html>"
             html `shouldSatisfy` T.isInfixOf "</html>"
 
@@ -110,7 +109,7 @@ spec = do
             let page = ErrorPage "Error" "Something went wrong"
             let html = TL.toStrict $ renderText (toHtml page)
 
-            html `shouldSatisfy` T.isInfixOf "<!DOCTYPE html>"
+            html `shouldSatisfy` T.isInfixOf "<!DOCTYPE HTML>"
             html `shouldSatisfy` T.isInfixOf "<html>"
             html `shouldSatisfy` T.isInfixOf "</html>"
 
