@@ -41,6 +41,8 @@ module Servant.OAuth2.IDP.Test.Internal (
 
     -- * PKCE Utilities
     generatePKCE,
+    generateCodeVerifier,
+    generateCodeChallenge,
 
     -- * HTTP Response Utilities
     extractSessionCookie,
@@ -88,11 +90,11 @@ import Network.Wai.Test (SResponse, simpleBody, simpleHeaders, simpleStatus)
 import Test.Hspec (Spec, describe, expectationFailure, it, runIO, shouldSatisfy)
 import Test.Hspec.Wai (WaiSession, get, liftIO, postHtmlForm, request, shouldRespondWith, with)
 
+import MCP.Server.Time (MonadTime)
+import Servant.Auth.Server (ToJWT)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (AuthCodeId (..), ClientId (..), mkAuthCodeId)
-import MCP.Server.Time (MonadTime)
-import Servant.Auth.Server (ToJWT)
 
 -- -----------------------------------------------------------------------------
 -- Test Configuration Types

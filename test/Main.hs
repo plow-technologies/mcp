@@ -50,6 +50,8 @@ import Functional.OAuthFlowSpec qualified as OAuthFlowSpec
 import Security.SessionCookieSpec qualified as SessionCookieSpec
 
 -- Servant OAuth2 IDP tests
+
+import Servant.OAuth2.IDP.CryptoEntropySpec qualified as CryptoEntropySpec
 import Servant.OAuth2.IDP.LucidRenderingSpec qualified as LucidRenderingSpec
 import Servant.OAuth2.IDP.TokenRequestSpec qualified as TokenRequestSpec
 import Servant.OAuth2.IDP.TypesSpec qualified as IDPTypesSpec
@@ -120,6 +122,7 @@ spec = do
         TokenRequestSpec.spec
         LucidRenderingSpec.spec
         IDPTypesSpec.spec
+        CryptoEntropySpec.spec
 
     -- Typeclass law tests (using TestM with controlled time)
     describe "TestM OAuthStateStore" $ do
