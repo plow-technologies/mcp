@@ -43,6 +43,7 @@ module Servant.OAuth2.IDP.Types (
     CodeVerifier (..),
     mkCodeVerifier,
     OAuthState (..),
+    ResourceIndicator (..),
 
     -- * HTTP Response Newtypes
     RedirectTarget (..),
@@ -490,6 +491,19 @@ instance FromHttpApiData OAuthState where
 
 instance ToHttpApiData OAuthState where
     toUrlPiece = unOAuthState
+
+-- | OAuth resource parameter (RFC 8707 Resource Indicators)
+newtype ResourceIndicator = ResourceIndicator {unResourceIndicator :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+instance FromHttpApiData ResourceIndicator where
+    parseUrlPiece t
+        | T.null t = Left "ResourceIndicator cannot be empty"
+        | otherwise = Right (ResourceIndicator t)
+
+instance ToHttpApiData ResourceIndicator where
+    toUrlPiece = unResourceIndicator
 
 -- -----------------------------------------------------------------------------
 -- HTTP Response Newtypes

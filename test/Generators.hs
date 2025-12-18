@@ -76,6 +76,7 @@ import Servant.OAuth2.IDP.Types (
     PendingAuthorization (..),
     RedirectUri (..),
     RefreshTokenId (..),
+    ResourceIndicator (..),
     ResponseType (..),
     Scope (..),
     SessionId (..),
@@ -201,6 +202,11 @@ instance Arbitrary CodeVerifier where
 instance Arbitrary OAuthState where
     arbitrary = OAuthState . T.pack . getNonEmpty <$> arbitrary
     shrink (OAuthState t) = [OAuthState (T.pack s) | s <- shrink (T.unpack t), not (null s)]
+
+-- ResourceIndicator: RFC 8707 resource indicator (any non-empty text, typically a URI)
+instance Arbitrary ResourceIndicator where
+    arbitrary = ResourceIndicator . T.pack . getNonEmpty <$> arbitrary
+    shrink (ResourceIndicator t) = [ResourceIndicator (T.pack s) | s <- shrink (T.unpack t), not (null s)]
 
 -- ============================================================================
 -- ADTs (use arbitraryBoundedEnum)
