@@ -102,12 +102,6 @@ response <- handleLogin mCookie form
 -- In custom monad
 response <- handleLogin mCookie form
 @
-
-== Migration Note
-
-This is ported from HTTP.hs as part of the typeclass-based architecture
-migration. The shim pattern is used: HTTP.hs maintains the old signature
-by calling this handler via runAppM.
 -}
 handleLogin ::
     forall m env e.

@@ -46,7 +46,6 @@ module MCP.Types (
     EmbeddedResource (..),
     ResourceLink (..),
     ContentBlock (..),
-    Content,
 
     -- * Resource Types
     ResourceContents (..),
@@ -400,9 +399,6 @@ instance FromJSON ContentBlock where
             <|> (AudioContentType <$> parseJSON v)
             <|> (EmbeddedResourceType <$> parseJSON v)
             <|> (ResourceLinkType <$> parseJSON v)
-
--- | Legacy alias for ContentBlock (for backward compatibility)
-type Content = ContentBlock
 
 -- | A known resource that the server is capable of reading
 data Resource = Resource

@@ -110,9 +110,6 @@ instance Accept HTML where
 instance MimeRender HTML Text where
     mimeRender _ = LBS.fromStrict . TE.encodeUtf8
 
--- Note: LoginForm is now imported from MCP.Server.OAuth.Server
--- Note: OAuthState is now replaced by OAuthTVarEnv from OAuth.InMemory
-
 -- | Login error types
 data LoginError
     = InvalidOAuthParameters Text
@@ -139,8 +136,6 @@ data LoginResult
     | LoginFailure LoginError
     deriving (Show)
 
--- Note: ClientRegistrationRequest and ClientRegistrationResponse are now imported from MCP.Server.OAuth.Server
-
 -- | Client info stored in server
 data ClientInfo = ClientInfo
     { clientName :: Text
@@ -151,20 +146,16 @@ data ClientInfo = ClientInfo
     }
     deriving (Show, Generic)
 
--- Note: TokenResponse is now imported from MCP.Server.OAuth.Server
-
 -- | MCP API definition for HTTP server (following the MCP transport spec)
 type MCPAPI auths = Auth auths AuthUser :> "mcp" :> ReqBody '[JSON] Aeson.Value :> Post '[JSON] Aeson.Value
 
--- | Unprotected MCP API (for backward compatibility)
+-- | Unprotected MCP API without authentication
 type UnprotectedMCPAPI = "mcp" :> ReqBody '[JSON] Aeson.Value :> Post '[JSON] Aeson.Value
 
--- Note: OAuthAPI, ProtectedResourceAPI, and LoginAPI are now imported from MCP.Server.OAuth.Server
-
--- | Complete API with OAuth (legacy name, kept for compatibility)
+-- | Complete API with OAuth and configurable auth schemes
 type CompleteAPI auths = OAuthAPI :<|> MCPAPI auths
 
--- | Full API with OAuth (FR-047: new canonical name)
+-- | Full API with OAuth using JWT authentication
 type FullAPI = OAuthAPI :<|> MCPAPI '[JWT]
 
 -- -----------------------------------------------------------------------------
@@ -301,7 +292,7 @@ mcpAppInternal config tracer stateVar oauthEnv jwtSettings =
             then logStdoutDev baseApp
             else baseApp
   where
-    -- NEW: Use polymorphic server via hoistServerWithContext
+    -- Use polymorphic server via hoistServerWithContext
     oauthServerNew :: HTTPServerConfig -> IOTracer HTTPTrace -> OAuthTVarEnv -> JWTSettings -> Server OAuthAPI
     oauthServerNew cfg httpTracer oauth jwtSet =
         let authEnv = DemoCredentialEnv defaultDemoCredentialStore
@@ -677,7 +668,7 @@ defaultDemoOAuthConfig =
         , supportedGrantTypes = [GrantAuthorizationCode, GrantRefreshToken]
         , supportedAuthMethods = [AuthNone]
         , supportedCodeChallengeMethods = [S256]
-        , -- Demo mode settings (no longer auto-approve, now requires login)
+        , -- Demo mode settings (interactive login required)
           autoApproveAuth = False
         , demoUserIdTemplate = Nothing
         , demoEmailDomain = "example.com"
@@ -798,7 +789,7 @@ runServerHTTP config tracer = do
     -- Initialize the server state
     stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
 
-    -- Initialize OAuth state (NEW: using typeclass-based OAuthTVarEnv)
+    -- Initialize OAuth state using typeclass-based OAuthTVarEnv
     oauthEnv <- newOAuthTVarEnv defaultExpiryConfig
 
     traceWith tracer $ HTTPServerStarting (httpPort config) (httpBaseUrl config)

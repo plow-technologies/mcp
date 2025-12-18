@@ -318,7 +318,6 @@ instance Aeson.ToJSON TokenResponse where
 {- | Token endpoint request.
 
 Sum type capturing the two supported grant types with their specific parameters.
-Replaces the untyped @[(Text, Text)]@ form payload.
 
 = Grant Types
 

@@ -9,12 +9,8 @@ import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (UTCTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeM)
 
--- Old Auth module (for legacy tests - DEPRECATED API)
-import MCP.Server.Auth qualified as Auth
-import Servant.OAuth2.IDP.Auth.Demo qualified as Auth
-
--- New typeclass modules (for law tests)
-import Servant.OAuth2.IDP.Auth.Backend (Username (..), mkPlaintextPassword)
+-- Auth typeclass modules
+import Servant.OAuth2.IDP.Auth.Backend (Salt (..), Username (..), mkHashedPassword, mkPlaintextPassword)
 
 import Test.Hspec
 
@@ -143,44 +139,28 @@ spec = do
             (mkPlaintextPassword "demo123")
             (mkPlaintextPassword "wrongpassword")
 
-    -- Existing tests for old Auth module
-    describe "MCP.Server.Auth" $ do
-        describe "validateCredential" $ do
-            it "validates correct demo credentials" $ do
-                Auth.validateCredential Auth.defaultDemoCredentialStore "demo" "demo123" `shouldBe` True
-
-            it "validates correct admin credentials" $ do
-                Auth.validateCredential Auth.defaultDemoCredentialStore "admin" "admin456" `shouldBe` True
-
-            it "rejects invalid password for demo user" $ do
-                Auth.validateCredential Auth.defaultDemoCredentialStore "demo" "wrongpassword" `shouldBe` False
-
-            it "rejects invalid password for admin user" $ do
-                Auth.validateCredential Auth.defaultDemoCredentialStore "admin" "wrongpass" `shouldBe` False
-
-            it "rejects invalid username" $ do
-                Auth.validateCredential Auth.defaultDemoCredentialStore "nonexistent" "demo123" `shouldBe` False
-
+    -- Hash function tests
+    describe "Servant.OAuth2.IDP.Auth.Backend" $ do
         describe "mkHashedPassword" $ do
             it "produces consistent hashes for same inputs" $ do
                 let saltBytes = BA.convert (TE.encodeUtf8 ("test-salt" :: Text)) :: BA.ScrubbedBytes
-                    salt = Auth.Salt saltBytes
-                    password = Auth.mkPlaintextPassword "test-password"
-                    hash1 = Auth.mkHashedPassword salt password
-                    hash2 = Auth.mkHashedPassword salt password
+                    salt = Salt saltBytes
+                    password = mkPlaintextPassword "test-password"
+                    hash1 = mkHashedPassword salt password
+                    hash2 = mkHashedPassword salt password
                 (hash1 == hash2) `shouldBe` True
 
             it "produces different hashes for different passwords" $ do
                 let saltBytes = BA.convert (TE.encodeUtf8 ("test-salt" :: Text)) :: BA.ScrubbedBytes
-                    salt = Auth.Salt saltBytes
-                    hash1 = Auth.mkHashedPassword salt (Auth.mkPlaintextPassword "test-password")
-                    hash2 = Auth.mkHashedPassword salt (Auth.mkPlaintextPassword "different-password")
+                    salt = Salt saltBytes
+                    hash1 = mkHashedPassword salt (mkPlaintextPassword "test-password")
+                    hash2 = mkHashedPassword salt (mkPlaintextPassword "different-password")
                 (hash1 /= hash2) `shouldBe` True
 
             it "produces different hashes for different salts" $ do
-                let password = Auth.mkPlaintextPassword "test-password"
+                let password = mkPlaintextPassword "test-password"
                     saltBytes1 = BA.convert (TE.encodeUtf8 ("test-salt" :: Text)) :: BA.ScrubbedBytes
                     saltBytes2 = BA.convert (TE.encodeUtf8 ("different-salt" :: Text)) :: BA.ScrubbedBytes
-                    hash1 = Auth.mkHashedPassword (Auth.Salt saltBytes1) password
-                    hash2 = Auth.mkHashedPassword (Auth.Salt saltBytes2) password
+                    hash1 = mkHashedPassword (Salt saltBytes1) password
+                    hash2 = mkHashedPassword (Salt saltBytes2) password
                 (hash1 /= hash2) `shouldBe` True

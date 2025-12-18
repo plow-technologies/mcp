@@ -94,12 +94,6 @@ response <- handleToken formParams
 -- In custom monad
 response <- handleToken formParams
 @
-
-== Migration Note
-
-This is ported from HTTP.hs as part of the typeclass-based architecture
-migration. The shim pattern is used: HTTP.hs maintains the old signature
-by calling this handler via runAppM.
 -}
 handleToken ::
     ( OAuthStateStore m
@@ -154,11 +148,6 @@ The handler:
 -- In AppM (with AppEnv)
 response <- handleAuthCodeGrant paramMap
 @
-
-== Migration Note
-
-This is ported from HTTP.hs as part of the typeclass-based architecture
-migration.
 -}
 handleAuthCodeGrant ::
     ( OAuthStateStore m
@@ -269,11 +258,6 @@ The handler:
 -- In AppM (with AppEnv)
 response <- handleRefreshTokenGrant paramMap
 @
-
-== Migration Note
-
-This is ported from HTTP.hs as part of the typeclass-based architecture
-migration.
 -}
 handleRefreshTokenGrant ::
     ( OAuthStateStore m

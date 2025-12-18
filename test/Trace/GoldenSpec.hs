@@ -104,9 +104,6 @@ spec = do
                 renderStdIOTrace trace `shouldBe` "[StdIO:Protocol] [Protocol] Request received: method='prompts/list', id='req-1'"
 
         describe "HTTPTrace golden outputs" $ do
-            it "HTTPPlaceholder produces expected format" $ do
-                renderHTTPTrace HTTPPlaceholder `shouldBe` "[HTTP] (skeleton)"
-
             it "HTTPServerStarting produces expected format" $ do
                 let trace = HTTPServerStarting{tracePort = 8080, traceBaseUrl = "http://localhost:8080"}
                 renderHTTPTrace trace `shouldBe` "[HTTP] Server starting on port 8080 (http://localhost:8080)"

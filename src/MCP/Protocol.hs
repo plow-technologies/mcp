@@ -768,7 +768,7 @@ $(deriveJSON defaultOptions{omitNothingFields = True, fieldLabelModifier = \case
 
 -- | Call tool result
 data CallToolResult = CallToolResult
-    { content :: [Content]
+    { content :: [ContentBlock]
     , structuredContent :: Maybe Value
     , isError :: Maybe Bool
     , _meta :: Maybe Metadata

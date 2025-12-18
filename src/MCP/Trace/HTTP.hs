@@ -24,15 +24,11 @@ import Servant.OAuth2.IDP.Boundary (OAuthBoundaryTrace (..))
 
 {- | HTTP transport-specific events.
 
-Current implementation is a skeleton with composite constructors.
-Full implementation with leaf constructors will be added in Phase 3.
+Defines trace events for observability of HTTP server operations including
+server lifecycle, request handling, OAuth flows, and MCP message processing.
 -}
 data HTTPTrace
-    = {- | Placeholder constructor for Phase 2 skeleton.
-      Will be replaced with leaf constructors (HTTPServerStarting, etc.) in Phase 3.
-      -}
-      HTTPPlaceholder
-    | -- | HTTP server starting up
+    = -- | HTTP server starting up
       HTTPServerStarting
         { tracePort :: Int
         , traceBaseUrl :: Text
@@ -91,11 +87,9 @@ data HTTPTrace
 
 {- | Render an HTTPTrace to human-readable text.
 
-Current implementation is a stub for Phase 2 skeleton.
 Delegates to sub-renders for nested events.
 -}
 renderHTTPTrace :: HTTPTrace -> Text
-renderHTTPTrace HTTPPlaceholder = "[HTTP] (skeleton)"
 renderHTTPTrace (HTTPServerStarting p baseUrl) =
     "[HTTP] Server starting on port " <> T.pack (show p) <> " (" <> baseUrl <> ")"
 renderHTTPTrace HTTPServerStarted =

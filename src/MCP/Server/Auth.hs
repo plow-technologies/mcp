@@ -49,11 +49,6 @@ module MCP.Server.Auth (
     ProtectedResourceMetadata (..),
     ProtectedResourceAuth,
     ProtectedResourceAuthConfig (..),
-
-    -- * Legacy Credential Management (DEPRECATED - use Auth.Backend instead)
-
-    -- These are kept for backward compatibility but will be removed in a future version
-    validateCredential,
 ) where
 
 -- Re-exports
@@ -68,7 +63,6 @@ import Data.ByteArray (convert)
 import Data.ByteString (ByteString)
 import Data.ByteString.Base64.URL qualified as B64URL
 import Data.ByteString.Lazy qualified as LBS
-import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
@@ -406,18 +400,3 @@ newtype ProtectedResourceAuthConfig = ProtectedResourceAuthConfig
     -}
     }
     deriving (Show, Generic)
-
-{- | Validate a credential against the store using constant-time comparison
-DEPRECATED: This is a legacy wrapper for backward compatibility
-Use MCP.Server.Auth.Backend.validateCredentials instead
--}
-validateCredential :: CredentialStore -> Text -> Text -> Bool
-validateCredential store username password =
-    case mkUsername username of
-        Nothing -> False
-        Just uname ->
-            case Map.lookup uname (storeCredentials store) of
-                Nothing -> False
-                Just storedHash ->
-                    let candidateHash = mkHashedPassword (storeSalt store) (mkPlaintextPassword password)
-                     in storedHash == candidateHash -- ScrubbedBytes Eq is constant-time

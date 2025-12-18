@@ -95,12 +95,6 @@ loginPage <- handleAuthorize responseType clientId redirectUri codeChallenge met
 -- In custom monad
 loginPage <- handleAuthorize responseType clientId redirectUri codeChallenge method scope state resource
 @
-
-== Migration Note
-
-This is ported from HTTP.hs as part of the typeclass-based architecture
-migration. The shim pattern is used: HTTP.hs maintains the old signature
-by calling this handler via runAppM.
 -}
 handleAuthorize ::
     ( OAuthStateStore m

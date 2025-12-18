@@ -74,12 +74,6 @@ response <- handleRegister request
 -- In custom monad
 response <- handleRegister request
 @
-
-== Migration Note
-
-This is ported from HTTP.hs as part of the typeclass-based architecture
-migration. The shim pattern is used: HTTP.hs maintains the old signature
-by calling this handler via runAppM.
 -}
 handleRegister ::
     ( OAuthStateStore m

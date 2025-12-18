@@ -43,10 +43,10 @@ app :: Application
 app = serve (Proxy :: Proxy OAuthAPI) oauthServer
 @
 
-= Migration Status
+= Module Structure
 
-All OAuth handlers have been extracted to Servant.OAuth2.IDP.Handlers module.
-This module now re-exports the handlers and provides the main oauthServer entry point.
+Handler implementations are in Servant.OAuth2.IDP.Handlers module.
+This module re-exports the handlers and provides the main oauthServer entry point.
 -}
 module Servant.OAuth2.IDP.Server (
     -- * API Definition (re-exported from API module)
@@ -116,10 +116,6 @@ import Servant.OAuth2.IDP.Handlers (
 import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (AuthorizationError, ValidationError)
-
--- Note: API types (OAuthAPI, ProtectedResourceAPI, LoginAPI, HTML) are now
--- imported from Servant.OAuth2.IDP.API and re-exported from this module.
--- Handler implementations are imported from Servant.OAuth2.IDP.Handlers.
 
 -- -----------------------------------------------------------------------------
 -- Constraint Alias
@@ -216,7 +212,3 @@ oauthServer =
         :<|> handleAuthorize
         :<|> handleLogin
         :<|> handleToken
-
--- Note: Request/Response types (LoginForm, ClientRegistrationRequest,
--- ClientRegistrationResponse, TokenResponse) are now imported from
--- Servant.OAuth2.IDP.API and re-exported from this module.

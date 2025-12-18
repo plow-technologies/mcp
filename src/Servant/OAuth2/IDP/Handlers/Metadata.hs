@@ -56,12 +56,6 @@ metadata <- handleMetadata  -- Extracts config from AppEnv
 -- In custom monad
 metadata <- handleMetadata  -- Extracts config from custom env
 @
-
-== Migration Note
-
-This is ported from HTTP.hs as part of the typeclass-based architecture
-migration. The shim pattern is used: HTTP.hs maintains the old signature
-by calling this handler via runAppM.
 -}
 handleMetadata ::
     (MonadReader env m, HasType HTTPServerConfig env) =>
@@ -107,12 +101,6 @@ metadata <- handleProtectedResourceMetadata
 -- In custom monad
 metadata <- handleProtectedResourceMetadata
 @
-
-== Migration Note
-
-This is ported from HTTP.hs as part of the typeclass-based architecture
-migration. The shim pattern is used: HTTP.hs maintains the old signature
-by calling this handler via runAppM.
 -}
 handleProtectedResourceMetadata ::
     (MonadReader env m, HasType HTTPServerConfig env) =>
