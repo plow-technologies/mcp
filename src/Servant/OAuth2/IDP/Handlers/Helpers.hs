@@ -30,8 +30,7 @@ import Data.UUID.V4 qualified as UUID
 import Servant.Auth.Server (JWTSettings, ToJWT, makeJWT)
 
 import Data.UUID qualified as UUID
-import MCP.Server.Auth (OAuthConfig (..), authCodePrefix, refreshTokenPrefix)
-import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
+import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Errors (AuthorizationError (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
@@ -53,10 +52,10 @@ extractSessionFromCookie cookieHeader =
             [] -> Nothing
 
 -- | Generate authorization code with config prefix
-generateAuthCode :: HTTPServerConfig -> IO Text
+generateAuthCode :: OAuthEnv -> IO Text
 generateAuthCode config = do
     uuid <- UUID.nextRandom
-    let prefix = maybe "code_" authCodePrefix (httpOAuthConfig config)
+    let prefix = oauthAuthCodePrefix config
     return $ prefix <> UUID.toText uuid
 
 -- | Generate JWT access token for user
@@ -70,8 +69,8 @@ generateJWTAccessToken user jwtSettings = do
             Right tokenText -> return tokenText
 
 -- | Generate refresh token with configurable prefix
-generateRefreshTokenWithConfig :: HTTPServerConfig -> IO Text
+generateRefreshTokenWithConfig :: OAuthEnv -> IO Text
 generateRefreshTokenWithConfig config = do
     uuid <- UUID.nextRandom
-    let prefix = maybe "rt_" refreshTokenPrefix (httpOAuthConfig config)
+    let prefix = oauthRefreshTokenPrefix config
     return $ prefix <> UUID.toText uuid

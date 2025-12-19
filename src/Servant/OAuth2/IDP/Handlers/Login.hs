@@ -23,7 +23,6 @@ import Control.Monad (unless, when)
 import Control.Monad.Error.Class (MonadError, throwError)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, asks)
-import Data.Functor.Contravariant (contramap)
 import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
 import Data.Generics.Sum.Typed (AsType, injectTyped)
@@ -39,17 +38,15 @@ import Servant (
  )
 import Web.HttpApiData (ToHttpApiData (..), toUrlPiece)
 
-import MCP.Server.Auth (OAuthConfig (..))
-import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
-import MCP.Server.Time (MonadTime (..))
-import MCP.Trace.HTTP (HTTPTrace (..))
-import MCP.Trace.OAuth qualified as OAuthTrace
+import Control.Monad.Time (MonadTime (..))
 import Plow.Logging (IOTracer, traceWith)
 import Servant.OAuth2.IDP.API (LoginForm (..))
-import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..), usernameText)
+import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
+import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Errors (AuthorizationError (..), LoginFlowError (..))
 import Servant.OAuth2.IDP.Handlers.Helpers (extractSessionFromCookie, generateAuthCode)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
+import Servant.OAuth2.IDP.Trace (DenialReason (..), OAuthTrace (..), OperationResult (..))
 import Servant.OAuth2.IDP.Types (
     AuthorizationCode (..),
     LoginAction (..),
@@ -63,8 +60,6 @@ import Servant.OAuth2.IDP.Types (
     pendingRedirectUri,
     pendingScope,
     pendingState,
-    unClientId,
-    unSessionId,
  )
 import Servant.OAuth2.IDP.Types.Internal (unsafeAuthCodeId)
 
@@ -79,8 +74,8 @@ This handler is polymorphic over the monad @m@, requiring:
 * 'MonadTime m': Access to current time for expiry checks
 * 'MonadIO m': Ability to generate UUIDs and perform IO
 * 'MonadReader env m': Access to environment containing config and tracer
-* 'HasType HTTPServerConfig env': Config can be extracted via generic-lens
-* 'HasType (IOTracer HTTPTrace) env': Tracer can be extracted via generic-lens
+* 'HasType OAuthEnv env': Config can be extracted via generic-lens
+* 'HasType (IOTracer OAuthTrace) env': Tracer can be extracted via generic-lens
 
 The handler:
 
@@ -112,29 +107,28 @@ handleLogin ::
     , MonadError e m
     , AsType AuthorizationError e
     , AsType LoginFlowError e
-    , HasType HTTPServerConfig env
-    , HasType (IOTracer HTTPTrace) env
+    , HasType OAuthEnv env
+    , HasType (IOTracer OAuthTrace) env
     ) =>
     Maybe Text ->
     LoginForm ->
     m (Headers '[Header "Location" RedirectTarget, Header "Set-Cookie" SessionCookie] NoContent)
 handleLogin mCookie loginForm = do
-    config <- asks (getTyped @HTTPServerConfig)
-    tracer <- asks (getTyped @(IOTracer HTTPTrace))
+    config <- asks (getTyped @OAuthEnv)
+    tracer <- asks (getTyped @(IOTracer OAuthTrace))
 
-    let oauthTracer = contramap HTTPOAuth tracer
-        sessionId = formSessionId loginForm
+    let sessionId = formSessionId loginForm
 
     -- T039: Handle cookies disabled - check if cookie matches form session_id
     case mCookie of
         Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "No cookie header present"
+            -- Note: No specific ValidationError for cookie issues, LoginFlowError handles this
             throwError $ injectTyped @LoginFlowError CookiesRequired
         Just cookie ->
             -- Parse session cookie and verify it matches form session_id
             let cookieSessionId = extractSessionFromCookie cookie
              in unless (cookieSessionId == Just sessionId) $ do
-                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "cookies" "Session cookie mismatch"
+                    -- Note: No specific ValidationError for cookie mismatch, LoginFlowError handles this
                     throwError $ injectTyped @LoginFlowError SessionCookieMismatch
 
     -- Look up pending authorization
@@ -142,28 +136,26 @@ handleLogin mCookie loginForm = do
     pending <- case mPending of
         Just p -> return p
         Nothing -> do
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthValidationError "session" ("Session not found: " <> unSessionId sessionId)
+            -- Note: No specific ValidationError for session not found, LoginFlowError handles this
             throwError $ injectTyped @LoginFlowError $ SessionNotFound sessionId
 
     -- T038: Handle expired sessions
     now <- currentTime
-    let sessionExpirySeconds = fromIntegral $ maybe 600 loginSessionExpirySeconds (httpOAuthConfig config)
+    let sessionExpirySeconds = oauthLoginSessionExpiry config
         expiryTime = addUTCTime sessionExpirySeconds (pendingCreatedAt pending)
     when (now > expiryTime) $ do
-        liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthSessionExpired (unSessionId sessionId)
+        liftIO $ traceWith tracer $ TraceSessionExpired sessionId
         throwError $ injectTyped @LoginFlowError $ SessionExpired sessionId
 
     -- Check if user denied access
     if formAction loginForm == ActionDeny
         then do
             -- Emit denial trace
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationDenied (unClientId $ pendingClientId pending) "User denied authorization"
+            liftIO $ traceWith tracer $ TraceAuthorizationDenied (pendingClientId pending) UserDenied
 
             -- Clear session and redirect with error
             -- Add Secure flag if requireHTTPS is True in OAuth config
-            let secureFlag = case httpOAuthConfig config of
-                    Just oauthConf | requireHTTPS oauthConf -> "; Secure"
-                    _ -> ""
+            let secureFlag = if oauthRequireHTTPS config then "; Secure" else ""
                 clearCookie = SessionCookie $ "mcp_session=; Max-Age=0; Path=/" <> secureFlag
                 errorParams = "error=access_denied&error_description=User%20denied%20access"
                 stateParam = case pendingState pending of
@@ -181,17 +173,17 @@ handleLogin mCookie loginForm = do
                 password = formPassword loginForm
 
             validationResult <- validateCredentials username password
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt (usernameText username) (isJust validationResult)
+            let loginResult = if isJust validationResult then Success else Failure
+            liftIO $ traceWith tracer $ TraceLoginAttempt username loginResult
             case validationResult of
                 Just authUser -> do
                     -- Emit authorization granted trace
-                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (unClientId $ pendingClientId pending) (usernameText username)
+                    liftIO $ traceWith tracer $ TraceAuthorizationGranted (pendingClientId pending) username
 
                     -- Generate authorization code
                     code <- liftIO $ generateAuthCode config
                     codeGenerationTime <- currentTime
-                    let oauthCfg = httpOAuthConfig config
-                        expirySeconds = fromIntegral $ maybe 600 authCodeExpirySeconds oauthCfg
+                    let expirySeconds = oauthAuthCodeExpiry config
                         expiry = addUTCTime expirySeconds codeGenerationTime
                         -- Convert pendingScope from Maybe (Set Scope) to Set Scope
                         scopes = fromMaybe Set.empty (pendingScope pending)
@@ -214,9 +206,7 @@ handleLogin mCookie loginForm = do
 
                     -- Build redirect URL with code
                     -- Add Secure flag if requireHTTPS is True in OAuth config
-                    let secureFlag = case httpOAuthConfig config of
-                            Just oauthConf | requireHTTPS oauthConf -> "; Secure"
-                            _ -> ""
+                    let secureFlag = if oauthRequireHTTPS config then "; Secure" else ""
                         stateParam = case pendingState pending of
                             Just s -> "&state=" <> toUrlPiece s
                             Nothing -> ""
