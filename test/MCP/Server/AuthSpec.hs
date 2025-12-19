@@ -25,42 +25,42 @@ spec = do
             it "creates config with autoApproveAuth disabled" $ do
                 let config =
                         MCPOAuthConfig
-                            { autoApproveAuth = False
-                            , demoUserIdTemplate = "user-{id}"
-                            , demoEmailDomain = "example.com"
-                            , authorizationSuccessTemplate = "<html>Success</html>"
+                            { mcpAutoApproveAuth = False
+                            , mcpDemoUserIdTemplate = "user-{id}"
+                            , mcpDemoEmailDomain = "example.com"
+                            , mcpAuthorizationSuccessTemplate = "<html>Success</html>"
                             }
-                autoApproveAuth config `shouldBe` False
+                mcpAutoApproveAuth config `shouldBe` False
 
             it "creates config with demo user ID template" $ do
                 let template = "demo-user-{id}" :: Text
                     config =
                         MCPOAuthConfig
-                            { autoApproveAuth = True
-                            , demoUserIdTemplate = template
-                            , demoEmailDomain = "test.org"
-                            , authorizationSuccessTemplate = ""
+                            { mcpAutoApproveAuth = True
+                            , mcpDemoUserIdTemplate = template
+                            , mcpDemoEmailDomain = "test.org"
+                            , mcpAuthorizationSuccessTemplate = ""
                             }
-                demoUserIdTemplate config `shouldBe` template
+                mcpDemoUserIdTemplate config `shouldBe` template
 
             it "creates config with demo email domain" $ do
                 let domain = "demo.example.com" :: Text
                     config =
                         MCPOAuthConfig
-                            { autoApproveAuth = True
-                            , demoUserIdTemplate = "user-{id}"
-                            , demoEmailDomain = domain
-                            , authorizationSuccessTemplate = ""
+                            { mcpAutoApproveAuth = True
+                            , mcpDemoUserIdTemplate = "user-{id}"
+                            , mcpDemoEmailDomain = domain
+                            , mcpAuthorizationSuccessTemplate = ""
                             }
-                demoEmailDomain config `shouldBe` domain
+                mcpDemoEmailDomain config `shouldBe` domain
 
             it "creates config with authorization success template" $ do
                 let template = "<html><body>Authorization successful!</body></html>" :: Text
                     config =
                         MCPOAuthConfig
-                            { autoApproveAuth = False
-                            , demoUserIdTemplate = "user-{id}"
-                            , demoEmailDomain = "example.com"
-                            , authorizationSuccessTemplate = template
+                            { mcpAutoApproveAuth = False
+                            , mcpDemoUserIdTemplate = "user-{id}"
+                            , mcpDemoEmailDomain = "example.com"
+                            , mcpAuthorizationSuccessTemplate = template
                             }
-                authorizationSuccessTemplate config `shouldBe` template
+                mcpAuthorizationSuccessTemplate config `shouldBe` template

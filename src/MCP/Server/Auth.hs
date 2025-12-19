@@ -29,6 +29,7 @@ module MCP.Server.Auth (
     OAuthConfig (..),
     OAuthProvider (..),
     OAuthGrantType (..),
+    MCPOAuthConfig (..),
 
     -- * Token Validation
     TokenInfo (..),
@@ -126,6 +127,19 @@ data OAuthConfig = OAuthConfig
     deriving (Generic)
 
 -- Note: No Show instance because CredentialStore contains ScrubbedBytes (no Show)
+
+-- | MCP-specific OAuth configuration (demo-specific fields)
+data MCPOAuthConfig = MCPOAuthConfig
+    { mcpAutoApproveAuth :: Bool
+    -- ^ Demo mode auto-approval flag (bypasses interactive login)
+    , mcpDemoUserIdTemplate :: Text
+    -- ^ Template for generating demo user IDs (e.g., "user-{id}")
+    , mcpDemoEmailDomain :: Text
+    -- ^ Domain suffix for demo user emails (e.g., "example.com")
+    , mcpAuthorizationSuccessTemplate :: Text
+    -- ^ HTML template for authorization success page
+    }
+    deriving (Show, Eq, Generic)
 
 -- | PKCE challenge data
 data PKCEChallenge = PKCEChallenge
