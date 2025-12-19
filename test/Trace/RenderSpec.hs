@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-
+{- HLINT ignore "Avoid partial function" -}
 {- |
 Module      : Trace.RenderSpec
 Description : Tests for trace rendering functions
