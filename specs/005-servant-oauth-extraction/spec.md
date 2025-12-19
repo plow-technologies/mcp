@@ -8,6 +8,22 @@
 
 Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package by removing all `MCP.*` dependencies. This is a refactoring task that moves types and functions from MCP modules to new Servant modules, using explicit parameters and record types rather than new typeclasses.
 
+## Clarifications
+
+### Session 2025-12-19
+
+- Q: Where should generateCodeVerifier be located? → A: Move to Servant.OAuth2.IDP.PKCE (module boundaries are domain-based, not IO vs pure)
+- Q: Where should OAuthGrantType be located? → A: Move to Servant.OAuth2.IDP.Types (alongside other OAuth protocol types)
+- Q: How should OAuthTrace constructors use domain types? → A: Use existing domain newtypes (Username, UserId, RedirectUri) + minimal new ADTs (OperationResult, DenialReason) - balanced approach
+- Q: How should OAuthConfig be split between Servant and MCP? → A: Split into OAuthEnv (Servant, protocol config) + MCPOAuthConfig (MCP, demo fields only)
+- Q: Where should all error types be organized? → A: Move all to Servant.OAuth2.IDP.Errors (consolidate ValidationError, AuthorizationError, LoginFlowError)
+- Q: Should supported* configuration lists use NonEmpty? → A: Yes for supportedResponseTypes, supportedGrantTypes, supportedAuthMethods, supportedCodeChallengeMethods (RFC requires ≥1); keep [Scope] for supportedScopes (can be empty)
+- Q: Should type precision improvements be included in this extraction? → A: Yes, include critical fixes (OAuth error codes ADT, generator return types, storage keys) - prevents future breaking changes
+- Q: How should OAuthErrorResponse.oauthErrorCode be typed? → A: Create OAuthErrorCode ADT (ErrInvalidRequest | ErrInvalidClient | ErrInvalidGrant | ...) with ToJSON to snake_case per RFC 6749
+- Q: Should generator functions return domain types? → A: Yes, all generators return domain types (IO AuthCodeId, m AccessTokenId, IO RefreshTokenId). CRITICAL: Domain types must be threaded throughout (no Text conversions mid-flow), and smart constructor hygiene enforced (export only smart constructors, NOT type constructors) to prove correct construction
+- Q: How should LoginForm.formAction be typed? → A: Create LoginAction ADT (ActionApprove | ActionDeny) with FromHttpApiData/ToHttpApiData - enables exhaustiveness checking, prevents typos
+- Q: How should TokenResponse.expires_in be typed? → A: Create newtype over NominalDiffTime (e.g., `newtype TokenValidity = TokenValidity NominalDiffTime`) with custom ToJSON instance outputting integer seconds for OAuth wire format compliance. Name denotes what it IS (token validity duration), not the field name.
+
 ## Goals
 
 1. **Package Independence**: `Servant.OAuth2.IDP.*` modules should have zero imports from `MCP.*` namespace
@@ -42,39 +58,125 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - `ProtectedResourceMetadata` (RFC 9728)
 - All associated JSON instances
 
+#### FR-002b: Move OAuthGrantType to Servant.OAuth2.IDP.Types
+**Priority**: P0 (Critical)
+**Description**: Move `OAuthGrantType` enum from `MCP.Server.Auth` to existing `Servant.OAuth2.IDP.Types` module (core OAuth 2.1 protocol type per RFC 6749)
+**Types to Move**:
+- `OAuthGrantType` data type with constructors (AuthorizationCode, RefreshToken, etc.)
+- All associated JSON instances
+
 #### FR-003: Create Servant.OAuth2.IDP.PKCE Module
 **Priority**: P0 (Critical)
-**Description**: Move PKCE validation functions from `MCP.Server.Auth` to new `Servant.OAuth2.IDP.PKCE` module
+**Description**: Move PKCE functions from `MCP.Server.Auth` to new `Servant.OAuth2.IDP.PKCE` module (domain-based boundaries, not IO vs pure)
 **Functions to Move**:
+- `generateCodeVerifier :: IO CodeVerifier` (IO action using cryptonite random, returns domain newtype)
 - `validateCodeVerifier :: CodeVerifier -> CodeChallenge -> Bool`
-- `generateCodeChallenge :: Text -> Text`
+- `generateCodeChallenge :: CodeVerifier -> CodeChallenge` (takes and returns domain newtypes)
 
 #### FR-004: Create Servant.OAuth2.IDP.Config Module
 **Priority**: P1 (High)
-**Description**: Define `OAuthEnv` record containing protocol-agnostic OAuth configuration
-**Fields**:
+**Description**: Define `OAuthEnv` record containing protocol-agnostic OAuth configuration (split from MCP.Server.Auth.OAuthConfig)
+**OAuthEnv Fields** (protocol config, moves to Servant):
 - `baseUrl :: URI`
 - `authCodeExpiry :: NominalDiffTime`
 - `accessTokenExpiry :: NominalDiffTime`
 - `loginSessionExpiry :: NominalDiffTime`
-- Token prefixes (authCode, refreshToken, clientId)
-- Supported scopes, response types, grant types, auth methods, code challenge methods
+- `authCodePrefix :: Text`
+- `refreshTokenPrefix :: Text`
+- `clientIdPrefix :: Text`
+- `supportedScopes :: [Scope]` (can be empty - no required scopes)
+- `supportedResponseTypes :: NonEmpty ResponseType` (RFC requires ≥1)
+- `supportedGrantTypes :: NonEmpty OAuthGrantType` (RFC requires ≥1)
+- `supportedAuthMethods :: NonEmpty TokenAuthMethod` (RFC requires ≥1)
+- `supportedCodeChallengeMethods :: NonEmpty CodeChallengeMethod` (RFC requires ≥1)
+**MCPOAuthConfig** (demo fields, stays in MCP.Server.Auth):
+- `autoApproveAuth :: Bool` (demo mode auto-approval)
+- `demoUserIdTemplate :: Text` (template for demo user IDs)
+- `demoEmailDomain :: Text` (domain for demo emails)
+- `authorizationSuccessTemplate :: Text` (HTML template for success page)
+**Note**: MCPOAuthConfig will be created/updated in MCP.Server.Auth to hold demo-specific fields extracted from old OAuthConfig
+
+#### FR-004b: Create Servant.OAuth2.IDP.Errors Module
+**Priority**: P0 (Critical)
+**Description**: Consolidate all error types from various modules into new `Servant.OAuth2.IDP.Errors` module
+**ValidationError Type** (currently in Servant.OAuth2.IDP.Types, move to Errors):
+**New Constructors to Add**:
+- `UnsupportedCodeChallengeMethod CodeChallengeMethod` (currently uses AuthorizationError InvalidRequest)
+- `MissingTokenParameter TokenParameter` (for missing code/code_verifier/refresh_token)
+- `InvalidTokenParameterFormat TokenParameter Text` (for parse errors with parameter name and error detail)
+- `EmptyRedirectUris` (for registration with empty redirect_uris list)
+**Existing Constructors** (move from Types):
+- `RedirectUriMismatch ClientId RedirectUri`
+- `UnsupportedResponseType Text`
+- `ClientNotRegistered ClientId`
+- `MissingRequiredScope Scope`
+- `InvalidStateParameter Text`
+**AuthorizationError Type** (currently in Servant.OAuth2.IDP.Types, move to Errors):
+- Move entire type as-is (no changes needed)
+**LoginFlowError Type** (currently in Servant.OAuth2.IDP.LoginFlowError module, move to Errors):
+- Move entire type as-is (no changes needed)
+- Delete `src/Servant/OAuth2/IDP/LoginFlowError.hs` after moving
+**New Supporting Types**:
+- `data TokenParameter = TokenParamCode | TokenParamCodeVerifier | TokenParamRefreshToken deriving (Eq, Show)`
+- `data OAuthErrorCode = ErrInvalidRequest | ErrInvalidClient | ErrInvalidGrant | ErrUnauthorizedClient | ErrUnsupportedGrantType | ErrInvalidScope | ErrAccessDenied | ErrUnsupportedResponseType | ErrServerError | ErrTemporarilyUnavailable` (RFC 6749 error codes with ToJSON to snake_case)
+**Type Precision Fixes**:
+- Change `OAuthErrorResponse.oauthErrorCode :: Text` to `OAuthErrorResponse.oauthErrorCode :: OAuthErrorCode`
+- Update `authorizationErrorToResponse` to use OAuthErrorCode ADT (enables exhaustiveness checking)
+
+#### FR-004c: Type Precision and Smart Constructor Hygiene
+**Priority**: P0 (Critical)
+**Description**: Enforce type-driven design principles across all Servant.OAuth2.IDP.* modules
+**Reference**: See `.specify/memory/constitution.md` Principle I (Type-Driven Design) and Development Standards (Naming Conventions)
+**Domain-Centric Naming** (MUST enforce):
+- Type names MUST denote what they ARE (domain concept), not what field they populate
+- Good: `TokenValidity` (describes the concept - how long a token is valid)
+- Bad: `ExpiresIn` (mirrors the JSON field name, not the domain concept)
+- Good: `ClientName` (describes what it IS)
+- Bad: `NameField` (describes where it goes)
+- This principle extends Constitution Principle I: "Domain concepts MUST have explicit types (no primitive obsession)"
+**Smart Constructor Hygiene** (MUST enforce per Constitution Principle II):
+- Export pattern: `module Foo (FooType, mkFooType, unFooType, ...)` - export type name but NOT constructor
+- MUST NOT export: `FooType(..)` or `FooType(FooType)` - not even for tests
+- If pattern matching is needed by consumers, export pattern synonyms instead of raw constructors
+- This allows proving types are correctly constructed by construction
+**Generator Return Types** (Helpers.hs changes):
+- `generateAuthCode :: OAuthEnv -> IO AuthCodeId` (was `HTTPServerConfig -> IO Text`)
+- `generateJWTAccessToken :: OAuthUser m -> JWTSettings -> m AccessTokenId` (was `m Text`)
+- `generateRefreshTokenWithConfig :: OAuthEnv -> IO RefreshTokenId` (was `HTTPServerConfig -> IO Text`)
+**Type Threading** (MUST NOT convert to Text mid-flow):
+- Domain types flow from generation to storage to response without unwrapping
+- Storage maps use domain types as keys: `Map AuthCodeId (AuthorizationCode user)` not `Map Text ...`
+- Example anti-pattern to eliminate: `AuthCodeId (unAuthCodeId x)` or `let code = unAuthCodeId id in AuthCodeId code`
+**Modules Affected**:
+- `Servant.OAuth2.IDP.Types` - audit all exports for smart constructor hygiene
+- `Servant.OAuth2.IDP.Store` - change storage key types from Text to domain types
+- `Servant.OAuth2.IDP.Store.InMemory` - update OAuthState record to use domain type keys
+- `Servant.OAuth2.IDP.Handlers.Helpers` - update generator signatures
+**New Types to Add**:
+- `data LoginAction = ActionApprove | ActionDeny` with FromHttpApiData/ToHttpApiData instances
+- Update `LoginForm.formAction :: Text` to `LoginForm.formAction :: LoginAction`
+- Update Login handler to pattern match on LoginAction ADT instead of string comparison
+- `newtype TokenValidity = TokenValidity { unTokenValidity :: NominalDiffTime }` with custom ToJSON (outputs integer seconds for OAuth wire format) - name denotes what it IS, not the field name
+- Update `TokenResponse.expires_in :: Maybe Int` to `TokenResponse.expires_in :: Maybe TokenValidity` (resolves FIXME comment)
 
 #### FR-005: Create Servant.OAuth2.IDP.Trace Module
 **Priority**: P1 (High)
-**Description**: Define `OAuthTrace` ADT for OAuth-specific trace events
-**Constructors**:
-- `TraceClientRegistration ClientId Text`
-- `TraceAuthorizationRequest ClientId [Scope] Bool`
+**Description**: Define `OAuthTrace` ADT for OAuth-specific trace events using domain newtypes and minimal trace-specific ADTs
+**Supporting Types**:
+- `data OperationResult = Success | Failure` (for boolean success/failure without primitives)
+- `data DenialReason = UserDenied | InvalidRequest | UnauthorizedClient | ServerError Text` (for authorization denial reasons)
+**Constructors** (using domain newtypes from Servant.OAuth2.IDP.Types):
+- `TraceClientRegistration ClientId RedirectUri` (use RedirectUri instead of Text)
+- `TraceAuthorizationRequest ClientId [Scope] OperationResult` (use OperationResult instead of Bool)
 - `TraceLoginPageServed SessionId`
-- `TraceLoginAttempt Text Bool`
-- `TracePKCEValidation Bool`
-- `TraceAuthorizationGranted ClientId Text`
-- `TraceAuthorizationDenied ClientId Text`
-- `TraceTokenExchange GrantType Bool`
-- `TraceTokenRefresh Bool`
+- `TraceLoginAttempt Username OperationResult` (use Username and OperationResult)
+- `TracePKCEValidation OperationResult` (use OperationResult)
+- `TraceAuthorizationGranted ClientId Username` (use Username for authenticated user)
+- `TraceAuthorizationDenied ClientId DenialReason` (use DenialReason ADT)
+- `TraceTokenExchange OAuthGrantType OperationResult` (OAuthGrantType already domain type)
+- `TraceTokenRefresh OperationResult`
 - `TraceSessionExpired SessionId`
-- `TraceValidationError Text Text`
+- `TraceValidationError ValidationError` (use ValidationError domain type, not Text primitives)
 
 #### FR-006: Update Handler Signatures
 **Priority**: P1 (High)
@@ -93,12 +195,25 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 
 #### FR-008: Remove Types from MCP.Server.Auth
 **Priority**: P2 (Medium)
-**Description**: Clean break - remove moved types from MCP.Server.Auth exports
-**Types to Remove**:
-- `OAuthMetadata`
-- `ProtectedResourceMetadata`
-- `validateCodeVerifier`
-- `generateCodeChallenge`
+**Description**: Clean break - remove moved types from MCP.Server.Auth exports, create MCPOAuthConfig for demo fields
+**Types to Remove** (moved to Servant.OAuth2.IDP.*):
+- `OAuthMetadata` (→ Metadata)
+- `ProtectedResourceMetadata` (→ Metadata)
+- `OAuthGrantType` (→ Types)
+- `generateCodeVerifier` (→ PKCE)
+- `validateCodeVerifier` (→ PKCE)
+- `generateCodeChallenge` (→ PKCE)
+- `ValidationError` (→ Errors)
+- `AuthorizationError` (→ Errors)
+**Types to Create**:
+- `MCPOAuthConfig` record with demo-specific fields (autoApproveAuth, demoUserIdTemplate, demoEmailDomain, authorizationSuccessTemplate)
+**Types Staying in MCP.Server.Auth**:
+- `OAuthProvider` (MCP-specific provider configuration)
+- `TokenInfo` (token introspection response, MCP-specific)
+- `extractBearerToken` (utility function used by MCP handlers)
+- `PKCEChallenge` (if still needed - contains both CodeChallenge and CodeVerifier for convenience)
+- `ProtectedResourceAuth` (type-level auth tag for MCP)
+- `ProtectedResourceAuthConfig` (config for above)
 
 ## Acceptance Criteria
 
@@ -111,34 +226,43 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 
 - `monad-time` package (already a dependency via MCP.Server.Time)
 - `network-uri` package for URI type in OAuthEnv
+- `base` package for NonEmpty from Data.List.NonEmpty (used in OAuthEnv supported* fields)
 
 ## Files to Create
 
 | File | Purpose |
 |------|---------|
-| `src/Servant/OAuth2/IDP/Trace.hs` | OAuthTrace ADT |
-| `src/Servant/OAuth2/IDP/Config.hs` | OAuthEnv record |
+| `src/Servant/OAuth2/IDP/Trace.hs` | OAuthTrace ADT with domain types |
+| `src/Servant/OAuth2/IDP/Config.hs` | OAuthEnv record (protocol config) |
 | `src/Servant/OAuth2/IDP/Metadata.hs` | OAuthMetadata, ProtectedResourceMetadata |
-| `src/Servant/OAuth2/IDP/PKCE.hs` | PKCE validation functions |
+| `src/Servant/OAuth2/IDP/PKCE.hs` | PKCE functions (generate/validate, domain newtypes) |
+| `src/Servant/OAuth2/IDP/Errors.hs` | All error types (ValidationError, AuthorizationError, LoginFlowError) |
 
 ## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/Servant/OAuth2/IDP/Store.hs` | MonadTime import |
+| `src/Servant/OAuth2/IDP/Types.hs` | Remove ValidationError, AuthorizationError (moved to Errors), add OAuthGrantType (from MCP.Server.Auth) |
+| `src/Servant/OAuth2/IDP/Store.hs` | MonadTime import, Errors import |
 | `src/Servant/OAuth2/IDP/Store/InMemory.hs` | MonadTime import |
 | `src/Servant/OAuth2/IDP/API.hs` | Metadata import |
-| `src/Servant/OAuth2/IDP/Server.hs` | Config/Trace types |
-| `src/Servant/OAuth2/IDP/Handlers/Helpers.hs` | Config record, trace events |
+| `src/Servant/OAuth2/IDP/Server.hs` | Config/Trace types, Errors import |
+| `src/Servant/OAuth2/IDP/Handlers/Helpers.hs` | Config record, trace events, Errors import |
 | `src/Servant/OAuth2/IDP/Handlers/Metadata.hs` | Config record, Metadata import |
-| `src/Servant/OAuth2/IDP/Handlers/Registration.hs` | Config/Trace types |
-| `src/Servant/OAuth2/IDP/Handlers/Authorization.hs` | Config/Trace types |
-| `src/Servant/OAuth2/IDP/Handlers/Login.hs` | Config/Trace types |
-| `src/Servant/OAuth2/IDP/Handlers/Token.hs` | Config/Trace types, PKCE import |
+| `src/Servant/OAuth2/IDP/Handlers/Registration.hs` | Config/Trace types, Errors import |
+| `src/Servant/OAuth2/IDP/Handlers/Authorization.hs` | Config/Trace types, Errors import, MonadTime import |
+| `src/Servant/OAuth2/IDP/Handlers/Login.hs` | Config/Trace types, Errors import, MonadTime import |
+| `src/Servant/OAuth2/IDP/Handlers/Token.hs` | Config/Trace types, PKCE import, Errors import |
 | `src/Servant/OAuth2/IDP/Test/Internal.hs` | MonadTime import, fix doc comment typo |
-| `src/MCP/Server/Auth.hs` | Remove moved types (clean break) |
-| `src/MCP/Server/HTTP/AppEnv.hs` | Add OAuthEnv, tracer adapter |
-| `mcp-haskell.cabal` | Add new modules |
+| `src/MCP/Server/Auth.hs` | Remove moved types (clean break), create MCPOAuthConfig |
+| `src/MCP/Server/HTTP/AppEnv.hs` | Add OAuthEnv field, tracer adapter, MCPOAuthConfig |
+| `mcp-haskell.cabal` | Add new modules, remove LoginFlowError module |
+
+## Files to Delete
+
+| File | Reason |
+|------|--------|
+| `src/Servant/OAuth2/IDP/LoginFlowError.hs` | LoginFlowError moved to Errors module |
 
 ## Risks
 

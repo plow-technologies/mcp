@@ -17,7 +17,7 @@ Prepare `Servant.OAuth2.IDP.*` modules for extraction to a separate package by r
 **Project Type**: Single Haskell library
 **Performance Goals**: N/A (no runtime changes)
 **Constraints**: Must maintain API compatibility for OAuth functionality
-**Scale/Scope**: ~15 files modified, 4 new files created
+**Scale/Scope**: ~15 files modified, 5 new files created, 1 file deleted
 
 ## Constitution Check
 
@@ -66,8 +66,8 @@ src/
 │   │   ├── Metadata.hs       # MODIFY: Use OAuthEnv, import from Servant
 │   │   ├── Registration.hs   # MODIFY: Use OAuthEnv, OAuthTrace
 │   │   └── Token.hs          # MODIFY: Use OAuthEnv, OAuthTrace, PKCE
+│   ├── Errors.hs             # NEW: ValidationError, AuthorizationError, LoginFlowError, OAuthErrorCode
 │   ├── Handlers.hs           # UNCHANGED (re-exports)
-│   ├── LoginFlowError.hs     # UNCHANGED
 │   ├── Metadata.hs           # NEW: OAuthMetadata, ProtectedResourceMetadata
 │   ├── PKCE.hs               # NEW: validateCodeVerifier, generateCodeChallenge
 │   ├── Server.hs             # MODIFY: Use OAuthEnv, OAuthTrace
@@ -178,18 +178,18 @@ See [data-model.md](./data-model.md).
 
 ```haskell
 data OAuthEnv = OAuthEnv
-    { oauthBaseUrl :: Text
+    { oauthBaseUrl :: URI                                              -- URI from Network.URI
     , oauthAuthCodeExpiry :: NominalDiffTime
     , oauthAccessTokenExpiry :: NominalDiffTime
     , oauthLoginSessionExpiry :: NominalDiffTime
     , oauthAuthCodePrefix :: Text
     , oauthRefreshTokenPrefix :: Text
     , oauthClientIdPrefix :: Text
-    , oauthSupportedScopes :: [Scope]
-    , oauthSupportedResponseTypes :: [ResponseType]
-    , oauthSupportedGrantTypes :: [GrantType]
-    , oauthSupportedAuthMethods :: [ClientAuthMethod]
-    , oauthSupportedCodeChallengeMethods :: [CodeChallengeMethod]
+    , oauthSupportedScopes :: [Scope]                                  -- Can be empty
+    , oauthSupportedResponseTypes :: NonEmpty ResponseType             -- RFC requires ≥1
+    , oauthSupportedGrantTypes :: NonEmpty OAuthGrantType              -- RFC requires ≥1
+    , oauthSupportedAuthMethods :: NonEmpty TokenAuthMethod            -- RFC requires ≥1
+    , oauthSupportedCodeChallengeMethods :: NonEmpty CodeChallengeMethod  -- RFC requires ≥1
     }
     deriving (Generic)
 ```
@@ -197,24 +197,36 @@ data OAuthEnv = OAuthEnv
 #### OAuthTrace (new)
 
 ```haskell
+-- Supporting types for OAuthTrace (defined in Servant.OAuth2.IDP.Trace)
+data OperationResult = Success | Failure
+    deriving (Show, Eq)
+
+data DenialReason
+    = UserDenied
+    | InvalidRequest
+    | UnauthorizedClient
+    | ServerError Text
+    deriving (Show, Eq)
+
+-- Main trace ADT using domain newtypes from Servant.OAuth2.IDP.Types
 data OAuthTrace
-    = TraceClientRegistration ClientId ClientName
-    | TraceAuthorizationRequest ClientId [Scope] Bool  -- hasState
+    = TraceClientRegistration ClientId RedirectUri           -- Domain newtypes
+    | TraceAuthorizationRequest ClientId [Scope] OperationResult
     | TraceLoginPageServed SessionId
-    | TraceLoginAttempt Text Bool                      -- username, success
-    | TracePKCEValidation Bool                         -- isValid
-    | TraceAuthorizationGranted ClientId UserId
-    | TraceAuthorizationDenied ClientId Text           -- reason
-    | TraceTokenExchange GrantType Bool                -- success
-    | TraceTokenRefresh Bool                           -- success
+    | TraceLoginAttempt Username OperationResult             -- Username from Types
+    | TracePKCEValidation OperationResult
+    | TraceAuthorizationGranted ClientId Username
+    | TraceAuthorizationDenied ClientId DenialReason         -- ADT not Text
+    | TraceTokenExchange OAuthGrantType OperationResult      -- OAuthGrantType from Types
+    | TraceTokenRefresh OperationResult
     | TraceSessionExpired SessionId
-    | TraceValidationError Text Text                   -- errorType, detail
+    | TraceValidationError ValidationError                   -- ValidationError from Errors
     deriving (Show, Eq)
 ```
 
 ### Migration Path
 
-1. **Phase A** (Additive): Create new Servant modules (`Trace`, `Config`, `Metadata`, `PKCE`)
+1. **Phase A** (Additive): Create new Servant modules (`Trace`, `Config`, `Metadata`, `PKCE`, `Errors`)
 2. **Phase B** (Update Servant): Change imports in Servant handlers to use new modules
 3. **Phase C** (Update MCP): Add `OAuthEnv` to `AppEnv`, create adapter functions
 4. **Phase D** (Clean Break): Remove moved types from `MCP.Server.Auth`
@@ -229,11 +241,12 @@ No external API contracts change. Internal module boundaries shift.
 
 ### Phase A: Create New Servant Modules
 
-1. Create `src/Servant/OAuth2/IDP/Trace.hs` with `OAuthTrace` ADT
+1. Create `src/Servant/OAuth2/IDP/Trace.hs` with `OAuthTrace` ADT and supporting types (`OperationResult`, `DenialReason`)
 2. Create `src/Servant/OAuth2/IDP/Config.hs` with `OAuthEnv` record
-3. Create `src/Servant/OAuth2/IDP/Metadata.hs` with moved types
-4. Create `src/Servant/OAuth2/IDP/PKCE.hs` with moved functions
-5. Update `mcp-haskell.cabal` with new modules
+3. Create `src/Servant/OAuth2/IDP/Metadata.hs` with moved types (`OAuthMetadata`, `ProtectedResourceMetadata`)
+4. Create `src/Servant/OAuth2/IDP/PKCE.hs` with moved functions (`generateCodeVerifier`, `validateCodeVerifier`, `generateCodeChallenge`)
+5. Create `src/Servant/OAuth2/IDP/Errors.hs` with consolidated error types (`ValidationError`, `AuthorizationError`, `LoginFlowError`, `OAuthErrorCode`, `TokenParameter`)
+6. Update `mcp-haskell.cabal` with new modules, remove `LoginFlowError` module
 
 ### Phase B: Update Servant Imports
 
