@@ -95,6 +95,7 @@ library
         MCP.Server.Auth
         MCP.Server.Time
         Servant.OAuth2.IDP.API
+        Servant.OAuth2.IDP.Config
         Servant.OAuth2.IDP.Types
         Servant.OAuth2.IDP.Metadata
         Servant.OAuth2.IDP.PKCE
@@ -295,6 +296,7 @@ test-suite mcp-test
         MCP.Server.AuthSpec
         Security.SessionCookieSpec
         Servant.OAuth2.IDP.APISpec
+        Servant.OAuth2.IDP.ConfigSpec
         Servant.OAuth2.IDP.TokenRequestSpec
         Servant.OAuth2.IDP.LucidRenderingSpec
         Servant.OAuth2.IDP.TypesSpec
