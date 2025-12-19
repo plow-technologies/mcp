@@ -30,6 +30,7 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - Q: How should token handler parameters be typed (currently Map Text Text)? → A: Pass typed fields directly from existing `TokenRequest` ADT (already has AuthCodeId, CodeVerifier, RefreshTokenId, ResourceIndicator). No new types needed - just fix handler signatures to accept typed params instead of Map. Text/String/Bytes only at system boundaries (FromForm instance).
 - Q: Which types violate smart constructor hygiene (export raw constructors despite having validation)? → A: 9 types in Types.hs and Auth/Backend.hs export `(..)` but have smart constructors with validation. Fix by changing exports from `Type(..)` to `Type` (type only). Critical: RedirectUri (bypasses SSRF protection), SessionId (bypasses UUID validation), Scope (bypasses RFC compliance), Username (bypasses auth validation). Standard: AuthCodeId, ClientId, RefreshTokenId, UserId, ClientName.
 - Q: Should ClientInfo.clientName use the ClientName newtype? → A: Yes, change `clientName :: Text` to `clientName :: ClientName` - the newtype already exists with validation.
+- Q: How should MalformedRequest carry error context? → A: Create specific MalformedReason ADT enumerating causes (exhaustive pattern matching, no Text escape hatch)
 
 ## Goals
 
@@ -127,7 +128,8 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - `InvalidStateParameter Text`
 **AuthorizationError Type** (currently in Servant.OAuth2.IDP.Types, move to Errors):
 - Move type and replace Text payloads with precise ADTs
-- `data InvalidRequestReason = MissingParameter TokenParameter | InvalidParameterFormat TokenParameter | UnsupportedCodeChallengeMethod CodeChallengeMethod | MalformedRequest`
+- `data MalformedReason = InvalidUriSyntax Text | DuplicateParameter Text | UnparseableBody Text` (exhaustive enumeration of malformation causes not covered by other InvalidRequestReason constructors)
+- `data InvalidRequestReason = MissingParameter TokenParameter | InvalidParameterFormat TokenParameter | UnsupportedCodeChallengeMethod CodeChallengeMethod | MalformedRequest MalformedReason`
 - `data InvalidClientReason = ClientNotFound ClientId | InvalidClientCredentials | ClientSecretMismatch`
 - `data InvalidGrantReason = CodeNotFound AuthCodeId | CodeExpired AuthCodeId | CodeAlreadyUsed AuthCodeId | RefreshTokenNotFound RefreshTokenId | RefreshTokenExpired RefreshTokenId | RefreshTokenRevoked RefreshTokenId`
 - `data UnauthorizedClientReason = GrantTypeNotAllowed OAuthGrantType | ScopeNotAllowed Scope | RedirectUriNotRegistered RedirectUri`
