@@ -28,3 +28,8 @@ core-reviews
 cabal.project.freeze
 code-reviews
 *.log
+.env*
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
