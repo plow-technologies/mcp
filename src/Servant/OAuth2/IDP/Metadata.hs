@@ -19,7 +19,7 @@ Both types use custom JSON instances with snake_case field names per the RFCs.
 -}
 module Servant.OAuth2.IDP.Metadata (
     -- * OAuth Authorization Server Metadata (RFC 8414)
-    OAuthMetadata,
+    OAuthMetadata (..),
     mkOAuthMetadata,
     -- ** Field Accessors
     oauthIssuer,

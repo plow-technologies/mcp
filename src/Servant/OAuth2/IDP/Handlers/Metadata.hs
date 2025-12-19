@@ -22,13 +22,10 @@ import Control.Monad.Reader (MonadReader, asks)
 import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
 import Data.List.NonEmpty qualified as NE
+import Data.Text qualified as T
 
-import MCP.Server.Auth (
-    OAuthMetadata (..),
- )
-import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
-import Servant.OAuth2.IDP.Metadata (ProtectedResourceMetadata)
+import Servant.OAuth2.IDP.Metadata (OAuthMetadata (..), ProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Types (
     oauthGrantTypeToGrantType,
  )
@@ -40,28 +37,27 @@ Returns discovery metadata per RFC 8414 and MCP OAuth specification.
 This handler is polymorphic over the monad @m@, requiring only:
 
 * 'MonadReader env m': Access to environment containing config
-* 'HasType HTTPServerConfig env': Config can be extracted via generic-lens
+* 'HasType OAuthEnv env': OAuthEnv can be extracted via generic-lens
 
-The handler extracts the HTTPServerConfig from the environment using
-@typed \@HTTPServerConfig@ and builds the metadata response.
+The handler extracts the OAuthEnv from the environment using
+@typed \@OAuthEnv@ and builds the metadata response.
 
 == Usage
 
 @
 -- In AppM (with AppEnv)
-metadata <- handleMetadata  -- Extracts config from AppEnv
+metadata <- handleMetadata  -- Extracts OAuthEnv from AppEnv
 
 -- In custom monad
-metadata <- handleMetadata  -- Extracts config from custom env
+metadata <- handleMetadata  -- Extracts OAuthEnv from custom env
 @
 -}
 handleMetadata ::
-    (MonadReader env m, HasType HTTPServerConfig env, HasType OAuthEnv env) =>
+    (MonadReader env m, HasType OAuthEnv env) =>
     m OAuthMetadata
 handleMetadata = do
-    config <- asks (getTyped @HTTPServerConfig)
     oauthEnv <- asks (getTyped @OAuthEnv)
-    let baseUrl = httpBaseUrl config
+    let baseUrl = T.pack (show (oauthBaseUrl oauthEnv))
     return
         OAuthMetadata
             { issuer = baseUrl

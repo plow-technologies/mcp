@@ -89,7 +89,6 @@ import Servant (
  )
 import Servant.Auth.Server (JWTSettings, ToJWT)
 
-import MCP.Server.HTTP.AppEnv (HTTPServerConfig)
 import MCP.Trace.HTTP (HTTPTrace)
 import Plow.Logging (IOTracer)
 import Servant.OAuth2.IDP.API (
@@ -104,6 +103,7 @@ import Servant.OAuth2.IDP.API (
  )
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Config (OAuthEnv)
+import Servant.OAuth2.IDP.Errors (AuthorizationError, LoginFlowError, ValidationError)
 import Servant.OAuth2.IDP.Handlers (
     handleAuthCodeGrant,
     handleAuthorize,
@@ -114,7 +114,6 @@ import Servant.OAuth2.IDP.Handlers (
     handleRegister,
     handleToken,
  )
-import Servant.OAuth2.IDP.Errors (AuthorizationError, LoginFlowError, ValidationError)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Trace (OAuthTrace)
 
@@ -201,7 +200,6 @@ oauthServer ::
     , AsType ValidationError e
     , AsType AuthorizationError e
     , AsType LoginFlowError e
-    , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
     , HasType OAuthEnv env
     , HasType (IOTracer OAuthTrace) env

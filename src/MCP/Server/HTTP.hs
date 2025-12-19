@@ -99,7 +99,6 @@ import Plow.Logging (IOTracer (..), Tracer (..), traceWith)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..), DemoCredentialEnv (..), defaultDemoCredentialStore)
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
-import Servant.OAuth2.IDP.Metadata (mkProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Errors (
     AuthorizationError (..),
     InvalidRequestReason (..),
@@ -108,6 +107,7 @@ import Servant.OAuth2.IDP.Errors (
     OAuthErrorResponse (..),
     ValidationError (..),
  )
+import Servant.OAuth2.IDP.Metadata (mkProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI, oauthServer)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
@@ -691,12 +691,12 @@ defaultDemoOAuthBundle =
             Nothing -> Prelude.error "Invalid hardcoded base URL in defaultDemoOAuthBundle"
         baseUrlText = "http://localhost:8080"
         resourceMetadata = case mkProtectedResourceMetadata
-                baseUrlText
-                [baseUrlText]
-                (Just [unsafeScope "mcp:read", unsafeScope "mcp:write"])
-                (Just ["header"])
-                Nothing
-                Nothing of
+            baseUrlText
+            [baseUrlText]
+            (Just [unsafeScope "mcp:read", unsafeScope "mcp:write"])
+            (Just ["header"])
+            Nothing
+            Nothing of
             Just m -> m
             Nothing -> Prelude.error "Invalid hardcoded resource metadata in defaultDemoOAuthBundle"
         oauthEnv =
@@ -725,15 +725,15 @@ defaultDemoOAuthBundle =
 -- | Default protected resource metadata for a given base URL
 defaultProtectedResourceMetadata :: Text -> ProtectedResourceMetadata
 defaultProtectedResourceMetadata baseUrl =
-    ProtectedResourceMetadata
-        { resource = baseUrl
-        , authorizationServers = [baseUrl]
-        , scopesSupported = Just [unsafeScope "mcp:read", unsafeScope "mcp:write"]
-        , bearerMethodsSupported = Just ["header"]
-        , resourceName = Nothing
-        , resourceDocumentation = Nothing
-        }
-
+    case mkProtectedResourceMetadata
+        baseUrl
+        [baseUrl]
+        (Just [unsafeScope "mcp:read", unsafeScope "mcp:write"])
+        (Just ["header"])
+        Nothing
+        Nothing of
+        Just metadata -> metadata
+        Nothing -> Prelude.error "defaultProtectedResourceMetadata: invalid base URL (must be absolute HTTPS URI)"
 
 -- | Map scope to human-readable description
 scopeToDescription :: Text -> Text
