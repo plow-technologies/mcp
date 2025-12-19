@@ -24,6 +24,10 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - Q: How should LoginForm.formAction be typed? → A: Create LoginAction ADT (ActionApprove | ActionDeny) with FromHttpApiData/ToHttpApiData - enables exhaustiveness checking, prevents typos
 - Q: How should TokenResponse.expires_in be typed? → A: Create newtype over NominalDiffTime (e.g., `newtype TokenValidity = TokenValidity NominalDiffTime`) with custom ToJSON instance outputting integer seconds for OAuth wire format compliance. Name denotes what it IS (token validity duration), not the field name.
 - Q: MCPOAuthConfig field name collision with OAuthConfig - how to resolve? → A: Remove OAuthConfig entirely (Option B). OAuthConfig is replaced by OAuthEnv (Servant) + MCPOAuthConfig (MCP). With OAuthConfig gone, MCPOAuthConfig uses unprefixed field names (autoApproveAuth, demoUserIdTemplate, etc.). OAuthEnv lives in AppEnv.envOAuthEnv; MCPOAuthConfig lives in HTTPServerConfig.httpMCPOAuthConfig (presence = OAuth enabled). Provide DemoOAuthBundle convenience type for test migration.
+- Q: How should AuthorizationError Text payloads be typed? → A: Create precise ADTs for each error constructor payload (e.g., InvalidRequestReason, InvalidClientReason, etc.). Text rendering is a UI concern; internally use precise enums for exhaustive pattern matching and performance.
+- Q: How should token handler parameters be typed (currently Map Text Text)? → A: Pass typed fields directly from existing `TokenRequest` ADT (already has AuthCodeId, CodeVerifier, RefreshTokenId, ResourceIndicator). No new types needed - just fix handler signatures to accept typed params instead of Map. Text/String/Bytes only at system boundaries (FromForm instance).
+- Q: Which types violate smart constructor hygiene (export raw constructors despite having validation)? → A: 9 types in Types.hs and Auth/Backend.hs export `(..)` but have smart constructors with validation. Fix by changing exports from `Type(..)` to `Type` (type only). Critical: RedirectUri (bypasses SSRF protection), SessionId (bypasses UUID validation), Scope (bypasses RFC compliance), Username (bypasses auth validation). Standard: AuthCodeId, ClientId, RefreshTokenId, UserId, ClientName.
+- Q: Should ClientInfo.clientName use the ClientName newtype? → A: Yes, change `clientName :: Text` to `clientName :: ClientName` - the newtype already exists with validation.
 
 ## Goals
 
@@ -120,7 +124,16 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - `MissingRequiredScope Scope`
 - `InvalidStateParameter Text`
 **AuthorizationError Type** (currently in Servant.OAuth2.IDP.Types, move to Errors):
-- Move entire type as-is (no changes needed)
+- Move type and replace Text payloads with precise ADTs
+- `data InvalidRequestReason = MissingParameter TokenParameter | InvalidParameterFormat TokenParameter | UnsupportedCodeChallengeMethod CodeChallengeMethod | MalformedRequest`
+- `data InvalidClientReason = ClientNotFound ClientId | InvalidClientCredentials | ClientSecretMismatch`
+- `data InvalidGrantReason = CodeNotFound AuthCodeId | CodeExpired AuthCodeId | CodeAlreadyUsed AuthCodeId | RefreshTokenNotFound RefreshTokenId | RefreshTokenExpired RefreshTokenId | RefreshTokenRevoked RefreshTokenId`
+- `data UnauthorizedClientReason = GrantTypeNotAllowed OAuthGrantType | ScopeNotAllowed Scope | RedirectUriNotRegistered RedirectUri`
+- `data UnsupportedGrantTypeReason = UnknownGrantType Text | GrantTypeDisabled OAuthGrantType`
+- `data InvalidScopeReason = UnknownScope Text | ScopeNotPermitted Scope`
+- `data AccessDeniedReason = UserDenied | ResourceOwnerDenied | ConsentRequired`
+- Updated constructors: `InvalidRequest InvalidRequestReason | InvalidClient InvalidClientReason | InvalidGrant InvalidGrantReason | UnauthorizedClient UnauthorizedClientReason | UnsupportedGrantType UnsupportedGrantTypeReason | InvalidScope InvalidScopeReason | AccessDenied AccessDeniedReason | ExpiredCode | InvalidRedirectUri | PKCEVerificationFailed`
+- Create `renderAuthorizationError :: AuthorizationError -> Text` for human-readable error_description (UI layer)
 **LoginFlowError Type** (currently in Servant.OAuth2.IDP.LoginFlowError module, move to Errors):
 - Move entire type as-is (no changes needed)
 - Delete `src/Servant/OAuth2/IDP/LoginFlowError.hs` after moving
@@ -147,6 +160,19 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - MUST NOT export: `FooType(..)` or `FooType(FooType)` - not even for tests
 - If pattern matching is needed by consumers, export pattern synonyms instead of raw constructors
 - This allows proving types are correctly constructed by construction
+**Smart Constructor Export Fixes Required** (9 types currently violate hygiene):
+- **Critical (security bypass)**:
+  - `RedirectUri (..)` → `RedirectUri` (bypasses SSRF protection in mkRedirectUri)
+  - `SessionId (..)` → `SessionId` (bypasses UUID format validation)
+  - `Scope (..)` → `Scope` (bypasses RFC 6749 whitespace/empty validation)
+  - `Username (..)` → `Username` (in Auth/Backend.hs, bypasses non-empty validation)
+- **Standard (data integrity)**:
+  - `AuthCodeId (..)` → `AuthCodeId` (bypasses non-empty validation)
+  - `ClientId (..)` → `ClientId` (bypasses non-empty validation)
+  - `RefreshTokenId (..)` → `RefreshTokenId` (bypasses non-empty validation)
+  - `UserId (..)` → `UserId` (bypasses non-empty validation)
+  - `ClientName (..)` → `ClientName` (bypasses non-empty validation)
+- Internal module `Types/Internal.hs` may keep `(..)` exports for boundary translation (by design)
 **Generator Return Types** (Helpers.hs changes):
 - `generateAuthCode :: OAuthEnv -> IO AuthCodeId` (was `HTTPServerConfig -> IO Text`)
 - `generateJWTAccessToken :: OAuthUser m -> JWTSettings -> m AccessTokenId` (was `m Text`)
@@ -155,8 +181,11 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - Domain types flow from generation to storage to response without unwrapping
 - Storage maps use domain types as keys: `Map AuthCodeId (AuthorizationCode user)` not `Map Text ...`
 - Example anti-pattern to eliminate: `AuthCodeId (unAuthCodeId x)` or `let code = unAuthCodeId id in AuthCodeId code`
+**Record Field Type Fixes** (use existing newtypes instead of raw Text):
+- `ClientInfo.clientName :: Text` → `ClientInfo.clientName :: ClientName` (newtype exists at Types.hs:557)
 **Modules Affected**:
-- `Servant.OAuth2.IDP.Types` - audit all exports for smart constructor hygiene
+- `Servant.OAuth2.IDP.Types` - audit all exports for smart constructor hygiene (8 types)
+- `Servant.OAuth2.IDP.Auth.Backend` - fix Username export for smart constructor hygiene
 - `Servant.OAuth2.IDP.Store` - change storage key types from Text to domain types
 - `Servant.OAuth2.IDP.Store.InMemory` - update OAuthState record to use domain type keys
 - `Servant.OAuth2.IDP.Handlers.Helpers` - update generator signatures
@@ -166,6 +195,12 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - Update Login handler to pattern match on LoginAction ADT instead of string comparison
 - `newtype TokenValidity = TokenValidity { unTokenValidity :: NominalDiffTime }` with custom ToJSON (outputs integer seconds for OAuth wire format) - name denotes what it IS, not the field name
 - Update `TokenResponse.expires_in :: Maybe Int` to `TokenResponse.expires_in :: Maybe TokenValidity` (resolves FIXME comment)
+**Token Handler Signatures** (eliminate Map Text Text anti-pattern):
+- `TokenRequest` ADT already has typed fields (`AuthCodeId`, `CodeVerifier`, `RefreshTokenId`, `ResourceIndicator`) - NO new types needed
+- Update `handleAuthCodeGrant :: ... -> AuthCodeId -> CodeVerifier -> Maybe ResourceIndicator -> m TokenResponse` (was `Map Text Text`)
+- Update `handleRefreshTokenGrant :: ... -> RefreshTokenId -> Maybe ResourceIndicator -> m TokenResponse` (was `Map Text Text`)
+- Update `handleToken` to pass typed fields directly from `TokenRequest` pattern match (remove Map.fromList/unAuthCodeId unwrapping)
+- Parsing from wire format (Text) happens ONLY at Servant API boundary via `FromForm TokenRequest` instance
 
 #### FR-005: Create Servant.OAuth2.IDP.Trace Module
 **Priority**: P1 (High)

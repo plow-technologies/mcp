@@ -17,7 +17,7 @@ Prepare `Servant.OAuth2.IDP.*` modules for extraction to a separate package by r
 **Project Type**: Single Haskell library
 **Performance Goals**: N/A (no runtime changes)
 **Constraints**: Must maintain API compatibility for OAuth functionality
-**Scale/Scope**: ~15 files modified, 5 new files created, 1 file deleted
+**Scale/Scope**: ~17 files modified, 5 new files created, 1 file deleted (includes Phase F type precision fixes)
 
 ## Constitution Check
 
@@ -54,7 +54,7 @@ src/
 ├── Servant/OAuth2/IDP/
 │   ├── API.hs              # MODIFY: Import Metadata from new location
 │   ├── Auth/
-│   │   ├── Backend.hs      # UNCHANGED
+│   │   ├── Backend.hs      # MODIFY: Smart constructor hygiene (Username export)
 │   │   └── Demo.hs         # UNCHANGED
 │   ├── Boundary.hs         # UNCHANGED
 │   ├── Config.hs           # NEW: OAuthEnv record
@@ -65,8 +65,8 @@ src/
 │   │   ├── Login.hs          # MODIFY: Use OAuthEnv, OAuthTrace
 │   │   ├── Metadata.hs       # MODIFY: Use OAuthEnv, import from Servant
 │   │   ├── Registration.hs   # MODIFY: Use OAuthEnv, OAuthTrace
-│   │   └── Token.hs          # MODIFY: Use OAuthEnv, OAuthTrace, PKCE
-│   ├── Errors.hs             # NEW: ValidationError, AuthorizationError, LoginFlowError, OAuthErrorCode
+│   │   └── Token.hs          # MODIFY: Use OAuthEnv, OAuthTrace, PKCE, typed handler params
+│   ├── Errors.hs             # NEW: ValidationError, AuthorizationError (with ADT payloads), LoginFlowError, OAuthErrorCode
 │   ├── Handlers.hs           # UNCHANGED (re-exports)
 │   ├── Metadata.hs           # NEW: OAuthMetadata, ProtectedResourceMetadata
 │   ├── PKCE.hs               # NEW: validateCodeVerifier, generateCodeChallenge
@@ -77,7 +77,7 @@ src/
 │   ├── Test/
 │   │   └── Internal.hs       # MODIFY: MonadTime import, fix doc comment typo
 │   ├── Trace.hs              # NEW: OAuthTrace ADT
-│   └── Types.hs              # UNCHANGED
+│   └── Types.hs              # MODIFY: Smart constructor hygiene (8 exports), ClientInfo.clientName
 └── MCP/
     ├── Server/
     │   ├── Auth.hs           # MODIFY: Remove moved types
@@ -272,7 +272,7 @@ No external API contracts change. Internal module boundaries shift.
 2. Create `src/Servant/OAuth2/IDP/Config.hs` with `OAuthEnv` record
 3. Create `src/Servant/OAuth2/IDP/Metadata.hs` with moved types (`OAuthMetadata`, `ProtectedResourceMetadata`)
 4. Create `src/Servant/OAuth2/IDP/PKCE.hs` with moved functions (`generateCodeVerifier`, `validateCodeVerifier`, `generateCodeChallenge`)
-5. Create `src/Servant/OAuth2/IDP/Errors.hs` with consolidated error types (`ValidationError`, `AuthorizationError`, `LoginFlowError`, `OAuthErrorCode`, `TokenParameter`)
+5. Create `src/Servant/OAuth2/IDP/Errors.hs` with consolidated error types (`ValidationError`, `AuthorizationError`, `LoginFlowError`, `OAuthErrorCode`, `TokenParameter`). See Phase F for AuthorizationError ADT payloads.
 6. Update `mcp-haskell.cabal` with new modules, remove `LoginFlowError` module
 
 ### Phase B: Update Servant Imports
@@ -280,7 +280,7 @@ No external API contracts change. Internal module boundaries shift.
 1. Update `Store.hs` and `Store/InMemory.hs` - MonadTime import
 2. Update `API.hs` - Metadata import
 3. Update `Handlers/Metadata.hs` - use Servant Metadata
-4. Update `Handlers/Token.hs` - use PKCE from Servant
+4. Update `Handlers/Token.hs` - use PKCE from Servant. See Phase F for handler signature changes.
 5. Update `Handlers/Helpers.hs` - OAuthEnv and trace
 6. Update `Handlers/Registration.hs` - OAuthEnv and trace
 7. Update `Handlers/Authorization.hs` - OAuthEnv and trace
@@ -396,3 +396,156 @@ No external API contracts change. Internal module boundaries shift.
 2. Verify: `rg "defaultDemoOAuthConfig" .` returns empty (all replaced)
 3. Verify: `cabal build` succeeds
 4. Verify: `cabal test` passes
+
+---
+
+### Phase F: Type Precision Refinements (Spec Refinement 2025-12-19)
+
+*Added 2025-12-19 per codebase anti-pattern analysis. Can be done in parallel with Phase E.*
+
+#### F.1: Smart Constructor Hygiene Fixes (Types.hs)
+
+Fix 8 types that export raw constructors despite having smart constructor validation:
+
+1. Change `AuthCodeId (..)` → `AuthCodeId` in module export list
+2. Change `ClientId (..)` → `ClientId` in module export list
+3. Change `SessionId (..)` → `SessionId` in module export list (UUID validation bypass)
+4. Change `RefreshTokenId (..)` → `RefreshTokenId` in module export list
+5. Change `UserId (..)` → `UserId` in module export list
+6. Change `RedirectUri (..)` → `RedirectUri` in module export list (**critical**: SSRF protection bypass)
+7. Change `Scope (..)` → `Scope` in module export list (RFC 6749 validation bypass)
+8. Change `ClientName (..)` → `ClientName` in module export list
+
+**Note**: `Types/Internal.hs` intentionally keeps `(..)` exports for boundary translation (by design).
+
+#### F.2: Smart Constructor Hygiene Fixes (Auth/Backend.hs)
+
+1. Change `Username (..)` → `Username` in module export list (non-empty validation bypass)
+
+#### F.3: AuthorizationError ADT Payloads (Errors.hs)
+
+Replace Text payloads with precise ADTs for exhaustive pattern matching:
+
+1. Create `InvalidRequestReason` ADT:
+   ```haskell
+   data InvalidRequestReason
+       = MissingParameter TokenParameter
+       | InvalidParameterFormat TokenParameter
+       | UnsupportedCodeChallengeMethod CodeChallengeMethod
+       | MalformedRequest
+   ```
+
+2. Create `InvalidClientReason` ADT:
+   ```haskell
+   data InvalidClientReason
+       = ClientNotFound ClientId
+       | InvalidClientCredentials
+       | ClientSecretMismatch
+   ```
+
+3. Create `InvalidGrantReason` ADT:
+   ```haskell
+   data InvalidGrantReason
+       = CodeNotFound AuthCodeId
+       | CodeExpired AuthCodeId
+       | CodeAlreadyUsed AuthCodeId
+       | RefreshTokenNotFound RefreshTokenId
+       | RefreshTokenExpired RefreshTokenId
+       | RefreshTokenRevoked RefreshTokenId
+   ```
+
+4. Create `UnauthorizedClientReason` ADT:
+   ```haskell
+   data UnauthorizedClientReason
+       = GrantTypeNotAllowed OAuthGrantType
+       | ScopeNotAllowed Scope
+       | RedirectUriNotRegistered RedirectUri
+   ```
+
+5. Create `UnsupportedGrantTypeReason` ADT:
+   ```haskell
+   data UnsupportedGrantTypeReason
+       = UnknownGrantType Text  -- Keep Text for unknown input
+       | GrantTypeDisabled OAuthGrantType
+   ```
+
+6. Create `InvalidScopeReason` ADT:
+   ```haskell
+   data InvalidScopeReason
+       = UnknownScope Text  -- Keep Text for unknown input
+       | ScopeNotPermitted Scope
+   ```
+
+7. Create `AccessDeniedReason` ADT:
+   ```haskell
+   data AccessDeniedReason
+       = UserDenied
+       | ResourceOwnerDenied
+       | ConsentRequired
+   ```
+
+8. Update `AuthorizationError` constructors to use new ADTs:
+   ```haskell
+   data AuthorizationError
+       = InvalidRequest InvalidRequestReason
+       | InvalidClient InvalidClientReason
+       | InvalidGrant InvalidGrantReason
+       | UnauthorizedClient UnauthorizedClientReason
+       | UnsupportedGrantType UnsupportedGrantTypeReason
+       | InvalidScope InvalidScopeReason
+       | AccessDenied AccessDeniedReason
+       | ExpiredCode
+       | InvalidRedirectUri
+       | PKCEVerificationFailed
+   ```
+
+9. Create `renderAuthorizationError :: AuthorizationError -> Text` for human-readable error_description
+
+10. Update all handler call sites to use new ADT constructors
+
+#### F.4: Token Handler Signature Changes (Handlers/Token.hs)
+
+Eliminate `Map Text Text` anti-pattern by passing typed fields directly:
+
+1. Change `handleAuthCodeGrant` signature:
+   ```haskell
+   -- FROM:
+   handleAuthCodeGrant :: ... -> Map Text Text -> m TokenResponse
+   -- TO:
+   handleAuthCodeGrant :: ... -> AuthCodeId -> CodeVerifier -> Maybe ResourceIndicator -> m TokenResponse
+   ```
+
+2. Change `handleRefreshTokenGrant` signature:
+   ```haskell
+   -- FROM:
+   handleRefreshTokenGrant :: ... -> Map Text Text -> m TokenResponse
+   -- TO:
+   handleRefreshTokenGrant :: ... -> RefreshTokenId -> Maybe ResourceIndicator -> m TokenResponse
+   ```
+
+3. Update `handleToken` to pass typed fields directly:
+   ```haskell
+   handleToken tokenRequest = case tokenRequest of
+       AuthorizationCodeGrant code verifier mResource ->
+           handleAuthCodeGrant code verifier mResource  -- Direct pass, no Map
+       RefreshTokenGrant refreshToken mResource ->
+           handleRefreshTokenGrant refreshToken mResource  -- Direct pass, no Map
+   ```
+
+4. Remove `Map.fromList` and `unAuthCodeId`/`unCodeVerifier` unwrapping from `handleToken`
+
+5. Remove `Map.lookup` parsing logic from `handleAuthCodeGrant` and `handleRefreshTokenGrant`
+
+#### F.5: Record Field Type Fixes (Types.hs)
+
+1. Change `ClientInfo.clientName :: Text` → `ClientInfo.clientName :: ClientName`
+2. Update `FromJSON ClientInfo` to parse through `ClientName` smart constructor
+3. Update `ToJSON ClientInfo` to use `unClientName`
+
+#### F.6: Verification
+
+1. Verify: `rg "FIXME" src/Servant/OAuth2/IDP/` returns empty (all FIXMEs resolved)
+2. Verify: `rg "\\.\\.\\.)" src/Servant/OAuth2/IDP/Types.hs` shows only legitimate enum exports
+3. Verify: `rg "Map Text Text" src/Servant/OAuth2/IDP/Handlers/Token.hs` returns empty
+4. Verify: `cabal build` succeeds
+5. Verify: `cabal test` passes
