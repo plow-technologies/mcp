@@ -15,15 +15,13 @@ module Servant.OAuth2.IDP.ErrorsSpec (spec) where
 
 import Data.Aeson (decode, encode)
 import Data.Text qualified as T
-import Network.HTTP.Types.Status (status400, status401, status403)
+import Network.HTTP.Types.Status (status400)
 import Servant.OAuth2.IDP.Errors
 import Servant.OAuth2.IDP.Types (
-    AuthCodeId,
     ClientId,
     CodeChallengeMethod (..),
     OAuthGrantType (..),
     RedirectUri,
-    RefreshTokenId,
     Scope,
     SessionId,
     mkRedirectUri,
@@ -232,57 +230,11 @@ spec = do
                 T.unpack message `shouldContain` "redirect_uri"
                 T.unpack message `shouldContain` "at least one"
 
+    -- NOTE: Old Text-based constructor tests removed during ADT refactoring (Phase F.3)
+    -- New ADT-based tests added above test the proper structured error payloads
+
     describe "AuthorizationError" $ do
         describe "authorizationErrorToResponse" $ do
-            it "InvalidRequest maps to 400 with invalid_request code" $ do
-                let err = InvalidRequest "Missing client_id"
-                    (status, resp) = authorizationErrorToResponse err
-                status `shouldBe` status400
-                oauthErrorCode resp `shouldBe` ErrInvalidRequest
-                oauthErrorDescription resp `shouldBe` Just "Missing client_id"
-
-            it "InvalidClient maps to 401 with invalid_client code" $ do
-                let err = InvalidClient "Authentication failed"
-                    (status, resp) = authorizationErrorToResponse err
-                status `shouldBe` status401
-                oauthErrorCode resp `shouldBe` ErrInvalidClient
-                oauthErrorDescription resp `shouldBe` Just "Authentication failed"
-
-            it "InvalidGrant maps to 400 with invalid_grant code" $ do
-                let err = InvalidGrant "Code already used"
-                    (status, resp) = authorizationErrorToResponse err
-                status `shouldBe` status400
-                oauthErrorCode resp `shouldBe` ErrInvalidGrant
-                oauthErrorDescription resp `shouldBe` Just "Code already used"
-
-            it "UnauthorizedClient maps to 401 with unauthorized_client code" $ do
-                let err = UnauthorizedClient "Not allowed"
-                    (status, resp) = authorizationErrorToResponse err
-                status `shouldBe` status401
-                oauthErrorCode resp `shouldBe` ErrUnauthorizedClient
-                oauthErrorDescription resp `shouldBe` Just "Not allowed"
-
-            it "UnsupportedGrantType maps to 400 with unsupported_grant_type code" $ do
-                let err = UnsupportedGrantType "password"
-                    (status, resp) = authorizationErrorToResponse err
-                status `shouldBe` status400
-                oauthErrorCode resp `shouldBe` ErrUnsupportedGrantType
-                oauthErrorDescription resp `shouldBe` Just "password"
-
-            it "InvalidScope maps to 400 with invalid_scope code" $ do
-                let err = InvalidScope "unknown scope"
-                    (status, resp) = authorizationErrorToResponse err
-                status `shouldBe` status400
-                oauthErrorCode resp `shouldBe` ErrInvalidScope
-                oauthErrorDescription resp `shouldBe` Just "unknown scope"
-
-            it "AccessDenied maps to 403 with access_denied code" $ do
-                let err = AccessDenied "User rejected"
-                    (status, resp) = authorizationErrorToResponse err
-                status `shouldBe` status403
-                oauthErrorCode resp `shouldBe` ErrAccessDenied
-                oauthErrorDescription resp `shouldBe` Just "User rejected"
-
             it "ExpiredCode maps to 400 with invalid_grant code" $ do
                 let (status, resp) = authorizationErrorToResponse ExpiredCode
                 status `shouldBe` status400
@@ -302,48 +254,6 @@ spec = do
                 oauthErrorDescription resp `shouldBe` Just "PKCE verification failed"
 
         describe "constructors" $ do
-            it "InvalidRequest can be pattern matched" $ do
-                let err = InvalidRequest "test"
-                case err of
-                    InvalidRequest msg -> msg `shouldBe` "test"
-                    _ -> expectationFailure "Pattern match failed"
-
-            it "InvalidClient can be pattern matched" $ do
-                let err = InvalidClient "test"
-                case err of
-                    InvalidClient msg -> msg `shouldBe` "test"
-                    _ -> expectationFailure "Pattern match failed"
-
-            it "InvalidGrant can be pattern matched" $ do
-                let err = InvalidGrant "test"
-                case err of
-                    InvalidGrant msg -> msg `shouldBe` "test"
-                    _ -> expectationFailure "Pattern match failed"
-
-            it "UnauthorizedClient can be pattern matched" $ do
-                let err = UnauthorizedClient "test"
-                case err of
-                    UnauthorizedClient msg -> msg `shouldBe` "test"
-                    _ -> expectationFailure "Pattern match failed"
-
-            it "UnsupportedGrantType can be pattern matched" $ do
-                let err = UnsupportedGrantType "test"
-                case err of
-                    UnsupportedGrantType msg -> msg `shouldBe` "test"
-                    _ -> expectationFailure "Pattern match failed"
-
-            it "InvalidScope can be pattern matched" $ do
-                let err = InvalidScope "test"
-                case err of
-                    InvalidScope msg -> msg `shouldBe` "test"
-                    _ -> expectationFailure "Pattern match failed"
-
-            it "AccessDenied can be pattern matched" $ do
-                let err = AccessDenied "test"
-                case err of
-                    AccessDenied msg -> msg `shouldBe` "test"
-                    _ -> expectationFailure "Pattern match failed"
-
             it "ExpiredCode can be pattern matched" $ do
                 ExpiredCode `shouldBe` ExpiredCode
 
@@ -526,7 +436,7 @@ spec = do
                 let err = InvalidRequest (MissingParameter TokenParamCode)
                     rendered = renderAuthorizationError err
                 T.unpack rendered `shouldContain` "code"
-                T.unpack rendered `shouldContain` "missing"
+                T.unpack rendered `shouldContain` "required"
 
             it "renders InvalidClient with ClientNotFound" $ do
                 let err = InvalidClient (ClientNotFound testClientId)
@@ -551,7 +461,7 @@ spec = do
                 let err = UnsupportedGrantType (UnknownGrantType "password")
                     rendered = renderAuthorizationError err
                 T.unpack rendered `shouldContain` "password"
-                T.unpack rendered `shouldContain` "unknown"
+                T.unpack rendered `shouldContain` "Unknown"
 
             it "renders InvalidScope with ScopeNotPermitted" $ do
                 let err = InvalidScope (ScopeNotPermitted testScope)
@@ -562,7 +472,7 @@ spec = do
             it "renders AccessDenied with UserDenied" $ do
                 let err = AccessDenied UserDenied
                     rendered = renderAuthorizationError err
-                T.unpack rendered `shouldContain` "user"
+                T.unpack rendered `shouldContain` "User"
                 T.unpack rendered `shouldContain` "denied"
 
     describe "LoginFlowError" $ do

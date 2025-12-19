@@ -48,6 +48,7 @@ import Servant.OAuth2.IDP.Trace (
  )
 import Servant.OAuth2.IDP.Errors (
     AuthorizationError (..),
+    InvalidRequestReason (..),
     ValidationError (..),
  )
 import Servant.OAuth2.IDP.Handlers.HTML (LoginPage (..))
@@ -123,7 +124,6 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
     tracer <- asks (getTyped @(IOTracer OAuthTrace))
 
     let responseTypeText = toUrlPiece responseType
-        codeChallengeMethodText = toUrlPiece codeChallengeMethod
 
     -- Validate response_type (only "code" supported)
     when (responseType /= ResponseCode) $ do
@@ -132,7 +132,7 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
 
     -- Validate code_challenge_method (only "S256" supported)
     when (codeChallengeMethod /= S256) $ do
-        throwError $ injectTyped @AuthorizationError $ InvalidRequest ("Unsupported code_challenge_method: " <> codeChallengeMethodText)
+        throwError $ injectTyped @AuthorizationError $ InvalidRequest MalformedRequest
 
     -- Look up client to verify it's registered
     mClientInfo <- lookupClient clientId

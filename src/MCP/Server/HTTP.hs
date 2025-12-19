@@ -102,7 +102,12 @@ import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..), DemoCredentialEnv (..), defaultDemoCredentialStore)
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Errors (LoginFlowError, ValidationError (..))
-import Servant.OAuth2.IDP.Errors (AuthorizationError (..), OAuthErrorCode (..), OAuthErrorResponse (..))
+import Servant.OAuth2.IDP.Errors (
+    AuthorizationError (..),
+    InvalidRequestReason (..),
+    OAuthErrorCode (..),
+    OAuthErrorResponse (..),
+ )
 import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI, oauthServer)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
@@ -282,7 +287,7 @@ mcpAppWithOAuth runM jwtSettings =
         -- Call mcpServerAuth by lifting from Handler back to m
         result <- liftIO $ runHandler $ mcpServerAuth config tracer stateVar authResult requestValue
         case result of
-            Left err -> throwError (injectTyped @AuthorizationError (InvalidGrant $ T.pack $ show err))
+            Left _err -> throwError (injectTyped @AuthorizationError (InvalidRequest MalformedRequest))
             Right val -> pure val
 
 -- | Create a WAI Application for the MCP HTTP server (internal monomorphic version)

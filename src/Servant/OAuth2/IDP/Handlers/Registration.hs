@@ -39,7 +39,10 @@ import Servant.OAuth2.IDP.API (
     ClientRegistrationRequest (..),
     ClientRegistrationResponse (..),
  )
-import Servant.OAuth2.IDP.Errors (AuthorizationError (..))
+import Servant.OAuth2.IDP.Errors (
+    AuthorizationError (..),
+    InvalidRequestReason (..),
+ )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     ClientInfo (..),
@@ -96,7 +99,7 @@ handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqR
     when (null reqRedirects) $
         throwError $
             injectTyped @AuthorizationError $
-                InvalidRequest "redirect_uris must not be empty"
+                InvalidRequest MalformedRequest
 
     -- Generate client ID
     let prefix = maybe "client_" clientIdPrefix (httpOAuthConfig config)

@@ -34,7 +34,12 @@ import Plow.Logging (IOTracer, traceWith)
 import Servant.Auth.Server (JWTSettings, ToJWT)
 import Servant.OAuth2.IDP.API (TokenRequest (..), TokenResponse (..))
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
-import Servant.OAuth2.IDP.Errors (AuthorizationError (..))
+import Servant.OAuth2.IDP.Errors (
+    AuthorizationError (..),
+    InvalidGrantReason (..),
+    InvalidRequestReason (..),
+    TokenParameter (..),
+ )
 import Servant.OAuth2.IDP.Handlers.Helpers (generateJWTAccessToken, generateRefreshTokenWithConfig)
 import Servant.OAuth2.IDP.PKCE (validateCodeVerifier)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
@@ -167,19 +172,19 @@ handleAuthCodeGrant params = do
     -- Parse code from Text to AuthCodeId
     code <- case Map.lookup "code" params of
         Nothing -> do
-            throwError $ injectTyped @AuthorizationError $ InvalidRequest "Missing authorization code"
+            throwError $ injectTyped @AuthorizationError $ InvalidRequest (MissingParameter TokenParamCode)
         Just codeText -> case parseUrlPiece codeText of
             Left _err -> do
-                throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid authorization code"
+                throwError $ injectTyped @AuthorizationError $ InvalidRequest (InvalidParameterFormat TokenParamCode)
             Right authCodeId -> return authCodeId
 
     -- Parse code_verifier from Text to CodeVerifier
     codeVerifier <- case Map.lookup "code_verifier" params of
         Nothing -> do
-            throwError $ injectTyped @AuthorizationError $ InvalidRequest "Missing code_verifier"
+            throwError $ injectTyped @AuthorizationError $ InvalidRequest (MissingParameter TokenParamCodeVerifier)
         Just verifierText -> case parseUrlPiece verifierText of
             Left _err -> do
-                throwError $ injectTyped @AuthorizationError $ InvalidRequest "Invalid code_verifier"
+                throwError $ injectTyped @AuthorizationError $ InvalidRequest (InvalidParameterFormat TokenParamCodeVerifier)
             Right verifier -> return verifier
 
     -- Atomically consume authorization code (lookup + delete, prevents replay attacks)
@@ -189,7 +194,7 @@ handleAuthCodeGrant params = do
         Nothing -> do
             -- consumeAuthCode returns Nothing if code doesn't exist, is expired, or already used
             liftIO $ traceWith tracer $ TraceTokenExchange OAuthAuthorizationCode Failure
-            throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid or expired authorization code"
+            throwError $ injectTyped @AuthorizationError $ InvalidGrant (CodeNotFound code)
 
     -- Verify PKCE
     let authChallenge = authCodeChallenge authCode
@@ -269,10 +274,10 @@ handleRefreshTokenGrant params = do
     -- Parse refresh_token from Text to RefreshTokenId
     refreshTokenId <- case Map.lookup "refresh_token" params of
         Nothing -> do
-            throwError $ injectTyped @AuthorizationError $ InvalidRequest "Missing refresh_token"
+            throwError $ injectTyped @AuthorizationError $ InvalidRequest (MissingParameter TokenParamRefreshToken)
         Just tokenText -> case parseUrlPiece tokenText of
             Left _err -> do
-                throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid refresh_token"
+                throwError $ injectTyped @AuthorizationError $ InvalidRequest (InvalidParameterFormat TokenParamRefreshToken)
             Right rtId -> return rtId
 
     -- Look up refresh token
@@ -281,7 +286,7 @@ handleRefreshTokenGrant params = do
         Just info -> return info
         Nothing -> do
             liftIO $ traceWith tracer $ TraceTokenRefresh Failure
-            throwError $ injectTyped @AuthorizationError $ InvalidGrant "Invalid refresh_token"
+            throwError $ injectTyped @AuthorizationError $ InvalidGrant (RefreshTokenNotFound refreshTokenId)
 
     -- Generate new JWT access token
     newAccessTokenText <- generateJWTAccessToken user jwtSettings

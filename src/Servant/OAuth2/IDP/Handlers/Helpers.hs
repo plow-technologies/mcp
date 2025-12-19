@@ -31,7 +31,10 @@ import Servant.Auth.Server (JWTSettings, ToJWT, makeJWT)
 
 import Data.UUID qualified as UUID
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
-import Servant.OAuth2.IDP.Errors (AuthorizationError (..))
+import Servant.OAuth2.IDP.Errors (
+    AuthorizationError (..),
+    InvalidRequestReason (..),
+ )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     SessionId (..),
@@ -63,9 +66,9 @@ generateJWTAccessToken :: (OAuthStateStore m, ToJWT (OAuthUser m), MonadIO m, Mo
 generateJWTAccessToken user jwtSettings = do
     accessTokenResult <- liftIO $ makeJWT user jwtSettings Nothing
     case accessTokenResult of
-        Left _err -> throwError $ injectTyped @AuthorizationError $ InvalidRequest "Token generation failed"
+        Left _err -> throwError $ injectTyped @AuthorizationError $ InvalidRequest MalformedRequest
         Right accessToken -> case TE.decodeUtf8' $ LBS.toStrict accessToken of
-            Left _decodeErr -> throwError $ injectTyped @AuthorizationError $ InvalidRequest "Token encoding failed"
+            Left _decodeErr -> throwError $ injectTyped @AuthorizationError $ InvalidRequest MalformedRequest
             Right tokenText -> return tokenText
 
 -- | Generate refresh token with configurable prefix
