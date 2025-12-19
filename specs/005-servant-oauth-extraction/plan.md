@@ -190,6 +190,27 @@ AppEnv
 
 **Migration Aid**: Create `DemoOAuthBundle` convenience type + `defaultDemoOAuthBundle` for test migration (replaces `defaultDemoOAuthConfig`).
 
+### R-006: handleProtectedResourceMetadata HTTPServerConfig Dependency (Spec Refinement 2025-12-19)
+
+**Question**: How should `handleProtectedResourceMetadata` obtain resource server configuration without depending on `HTTPServerConfig` (MCP namespace)?
+
+**Finding**: Current implementation in `Handlers/Metadata.hs`:
+- Requires `HasType HTTPServerConfig env` to access `httpBaseUrl` and `httpProtectedResourceMetadata`
+- Uses conditional logic: return override if present, else construct default from base URL
+- This creates MCP dependency in Servant handler, violating extraction goal (FR-001)
+
+**Decision**: Add resource server config directly to `OAuthEnv` (Spec clarification 2025-12-19):
+- Add `resourceServerBaseUrl :: URI` field to `OAuthEnv`
+- Add `resourceServerMetadata :: ProtectedResourceMetadata` field to `OAuthEnv` (not `Maybe` - direct config, no override pattern)
+- Handler becomes trivial: `handleProtectedResourceMetadata = asks (oauthResourceServerMetadata . getTyped @OAuthEnv)`
+- Construction logic moves to MCP layer: `mkOAuthEnv` builds `ProtectedResourceMetadata` from `HTTPServerConfig` fields
+
+**Benefits**:
+- Servant handler has zero MCP dependencies
+- Cleaner separation: protocol config (Servant) vs application config (MCP)
+- Simpler handler (no conditional logic)
+- `defaultProtectedResourceMetadata` helper becomes optional (kept for testing/utilities)
+
 ---
 
 ## Phase 1: Design
@@ -217,6 +238,8 @@ data OAuthEnv = OAuthEnv
     , oauthSupportedGrantTypes :: NonEmpty OAuthGrantType              -- RFC requires ≥1
     , oauthSupportedAuthMethods :: NonEmpty TokenAuthMethod            -- RFC requires ≥1
     , oauthSupportedCodeChallengeMethods :: NonEmpty CodeChallengeMethod  -- RFC requires ≥1
+    , oauthResourceServerBaseUrl :: URI                                -- Base URL for resource server (R-006)
+    , oauthResourceServerMetadata :: ProtectedResourceMetadata         -- RFC 9728 metadata (R-006)
     }
     deriving (Generic)
 ```
@@ -269,7 +292,7 @@ No external API contracts change. Internal module boundaries shift.
 ### Phase A: Create New Servant Modules
 
 1. Create `src/Servant/OAuth2/IDP/Trace.hs` with `OAuthTrace` ADT and supporting types (`OperationResult`, `DenialReason`)
-2. Create `src/Servant/OAuth2/IDP/Config.hs` with `OAuthEnv` record
+2. Create `src/Servant/OAuth2/IDP/Config.hs` with `OAuthEnv` record (includes `resourceServerBaseUrl` and `resourceServerMetadata` fields per R-006)
 3. Create `src/Servant/OAuth2/IDP/Metadata.hs` with moved types (`OAuthMetadata`, `ProtectedResourceMetadata`)
 4. Create `src/Servant/OAuth2/IDP/PKCE.hs` with moved functions (`generateCodeVerifier`, `validateCodeVerifier`, `generateCodeChallenge`)
 5. Create `src/Servant/OAuth2/IDP/Errors.hs` with consolidated error types (`ValidationError`, `AuthorizationError`, `LoginFlowError`, `OAuthErrorCode`, `TokenParameter`). See Phase F for AuthorizationError ADT payloads.
@@ -279,7 +302,7 @@ No external API contracts change. Internal module boundaries shift.
 
 1. Update `Store.hs` and `Store/InMemory.hs` - MonadTime import
 2. Update `API.hs` - Metadata import
-3. Update `Handlers/Metadata.hs` - use Servant Metadata
+3. Update `Handlers/Metadata.hs` - use Servant Metadata, switch from HTTPServerConfig to OAuthEnv, simplify `handleProtectedResourceMetadata` to just return `oauthResourceServerMetadata` field (per R-006)
 4. Update `Handlers/Token.hs` - use PKCE from Servant. See Phase F for handler signature changes.
 5. Update `Handlers/Helpers.hs` - OAuthEnv and trace
 6. Update `Handlers/Registration.hs` - OAuthEnv and trace
@@ -291,7 +314,7 @@ No external API contracts change. Internal module boundaries shift.
 ### Phase C: Update MCP
 
 1. Add `OAuthEnv` field to `AppEnv`
-2. Create `mkOAuthEnv :: HTTPServerConfig -> OAuthEnv`
+2. Create `mkOAuthEnv :: HTTPServerConfig -> OAuthEnv` (constructs `ProtectedResourceMetadata` from HTTPServerConfig fields or uses override if present, per R-006)
 3. Create `mkOAuthTracer :: IOTracer HTTPTrace -> IOTracer OAuthTrace`
 4. Update handler call sites to pass OAuthEnv
 

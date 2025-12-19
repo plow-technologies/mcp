@@ -63,6 +63,14 @@ data OAuthEnv = OAuthEnv
 
     , oauthSupportedCodeChallengeMethods :: [CodeChallengeMethod]
     -- ^ PKCE methods supported (typically [S256], Plain discouraged)
+
+    , oauthResourceServerBaseUrl :: URI
+    -- ^ Base URL for protected resource server (RFC 9728) (R-006)
+    -- Used to construct resource metadata for /.well-known/oauth-protected-resource
+
+    , oauthResourceServerMetadata :: ProtectedResourceMetadata
+    -- ^ Complete RFC 9728 protected resource metadata (R-006)
+    -- Handlers return this directly without conditional logic
     }
     deriving (Generic)
 ```
@@ -513,4 +521,32 @@ data OAuthEnv = OAuthEnv
     , oauthAuthCodeExpiry :: NominalDiffTime
     -- ... rest unchanged
     }
+```
+
+### Resource Server Metadata (R-006)
+
+Add protected resource server configuration to OAuthEnv (2025-12-19 clarification):
+
+```haskell
+data OAuthEnv = OAuthEnv
+    { -- ... existing fields ...
+    , oauthResourceServerBaseUrl :: URI              -- NEW: Resource server base URL (R-006)
+    , oauthResourceServerMetadata :: ProtectedResourceMetadata  -- NEW: RFC 9728 metadata (R-006)
+    }
+```
+
+**Rationale**: Eliminates `handleProtectedResourceMetadata` dependency on `HTTPServerConfig` (MCP namespace). Handler becomes trivial field accessor. Construction logic moves to MCP layer (`mkOAuthEnv`).
+
+**Handler change**:
+```haskell
+-- Before: conditional logic with HTTPServerConfig dependency
+handleProtectedResourceMetadata :: (HasType HTTPServerConfig env) => m ProtectedResourceMetadata
+handleProtectedResourceMetadata = do
+    config <- asks (getTyped @HTTPServerConfig)
+    return $ fromMaybe (defaultProtectedResourceMetadata (httpBaseUrl config))
+                       (httpProtectedResourceMetadata config)
+
+-- After: simple field access with OAuthEnv
+handleProtectedResourceMetadata :: (HasType OAuthEnv env) => m ProtectedResourceMetadata
+handleProtectedResourceMetadata = asks (oauthResourceServerMetadata . getTyped @OAuthEnv)
 ```

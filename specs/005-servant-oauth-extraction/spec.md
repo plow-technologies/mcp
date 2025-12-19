@@ -31,6 +31,9 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - Q: Which types violate smart constructor hygiene (export raw constructors despite having validation)? → A: 9 types in Types.hs and Auth/Backend.hs export `(..)` but have smart constructors with validation. Fix by changing exports from `Type(..)` to `Type` (type only). Critical: RedirectUri (bypasses SSRF protection), SessionId (bypasses UUID validation), Scope (bypasses RFC compliance), Username (bypasses auth validation). Standard: AuthCodeId, ClientId, RefreshTokenId, UserId, ClientName.
 - Q: Should ClientInfo.clientName use the ClientName newtype? → A: Yes, change `clientName :: Text` to `clientName :: ClientName` - the newtype already exists with validation.
 - Q: How should MalformedRequest carry error context? → A: Create specific MalformedReason ADT enumerating causes (exhaustive pattern matching, no Text escape hatch)
+- Q: How should handleProtectedResourceMetadata get resource server config without depending on HTTPServerConfig? → A: Add `resourceServerBaseUrl :: URI` and `resourceServerMetadata :: ProtectedResourceMetadata` fields to OAuthEnv (not optional override - direct config). Handler becomes trivial (just returns config value). MCP constructs ProtectedResourceMetadata when building OAuthEnv.
+- Q: How should handlers access OAuthTrace tracer without importing MCP.Trace.HTTP? → A: Handlers use `HasType (IOTracer OAuthTrace) env` constraint. MCP's AppEnv provides `IOTracer OAuthTrace` field (constructed via `contramap HTTPOAuth` from main HTTPTrace tracer). Servant modules never import HTTPTrace.
+- Q: How should "MCP Server" branding in HTML templates be handled? → A: Add `oauthServerName :: Text` field to OAuthEnv. HTML templates use this config value for titles ("Sign In - {serverName}"). MCP sets it to "MCP Server"; other users can customize. Scope descriptions (mcp:read etc.) also become configurable via `oauthScopeDescriptions :: Map Scope Text` or similar.
 
 ## Goals
 
@@ -98,6 +101,10 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - `supportedGrantTypes :: NonEmpty OAuthGrantType` (RFC requires ≥1)
 - `supportedAuthMethods :: NonEmpty TokenAuthMethod` (RFC requires ≥1)
 - `supportedCodeChallengeMethods :: NonEmpty CodeChallengeMethod` (RFC requires ≥1)
+- `resourceServerBaseUrl :: URI` (base URL for protected resource metadata)
+- `resourceServerMetadata :: ProtectedResourceMetadata` (RFC 9728 metadata for resource server)
+- `oauthServerName :: Text` (branding for HTML templates, e.g., "MCP Server", "OAuth Server")
+- `oauthScopeDescriptions :: Map Scope Text` (human-readable scope descriptions for consent page)
 **OAuthEnv Location**: Lives in `AppEnv.envOAuthEnv` (always present when OAuth wired)
 **MCPOAuthConfig** (demo/MCP fields, stays in MCP.Server.Auth, NO mcp prefix):
 - `autoApproveAuth :: Bool` (demo mode auto-approval)
@@ -240,11 +247,12 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 
 #### FR-007: Update MCP.Server.HTTP.AppEnv
 **Priority**: P1 (High)
-**Description**: Embed `OAuthEnv` in `AppEnv` and create tracer adapter
+**Description**: Embed `OAuthEnv` and `IOTracer OAuthTrace` in `AppEnv`
 **Changes**:
 - Add `envOAuthEnv :: OAuthEnv` field
-- Create `mkOAuthEnv :: HTTPServerConfig -> OAuthEnv` function
-- Create `mkOAuthTracer :: IOTracer HTTPTrace -> IOTracer OAuthTrace` via contramap
+- Add `envOAuthTracer :: IOTracer OAuthTrace` field (constructed via `contramap HTTPOAuth` from main tracer)
+- Create `mkOAuthEnv :: HTTPServerConfig -> OAuthEnv` function (constructs ProtectedResourceMetadata from HTTPServerConfig fields)
+- Tracer construction: `contramap HTTPOAuth envTracer` where `HTTPOAuth :: OAuthTrace -> HTTPTrace`
 
 #### FR-008: Remove Types from MCP.Server.Auth
 **Priority**: P2 (Medium)
@@ -309,11 +317,12 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 | `src/Servant/OAuth2/IDP/API.hs` | Metadata import |
 | `src/Servant/OAuth2/IDP/Server.hs` | Config/Trace types, Errors import |
 | `src/Servant/OAuth2/IDP/Handlers/Helpers.hs` | Config record, trace events, Errors import |
-| `src/Servant/OAuth2/IDP/Handlers/Metadata.hs` | Config record, Metadata import |
+| `src/Servant/OAuth2/IDP/Handlers/Metadata.hs` | Switch from HTTPServerConfig to OAuthEnv, simplify handleProtectedResourceMetadata to just return resourceServerMetadata field (no conditional/default logic), remove defaultProtectedResourceMetadata helper (or keep as internal/test utility) |
 | `src/Servant/OAuth2/IDP/Handlers/Registration.hs` | Config/Trace types, Errors import, switch OAuthTrace import to Servant.OAuth2.IDP.Trace |
 | `src/Servant/OAuth2/IDP/Handlers/Authorization.hs` | Config/Trace types, Errors import, MonadTime import |
 | `src/Servant/OAuth2/IDP/Handlers/Login.hs` | Config/Trace types, Errors import, MonadTime import, switch OAuthTrace import to Servant.OAuth2.IDP.Trace |
 | `src/Servant/OAuth2/IDP/Handlers/Token.hs` | Config/Trace types, PKCE import, Errors import, switch OAuthTrace import to Servant.OAuth2.IDP.Trace |
+| `src/Servant/OAuth2/IDP/Handlers/HTML.hs` | Use `oauthServerName` from OAuthEnv for HTML titles, use `oauthScopeDescriptions` for scope text |
 | `src/Servant/OAuth2/IDP/Test/Internal.hs` | MonadTime import, fix doc comment typo |
 | `src/MCP/Server/Auth.hs` | Remove moved types (clean break), create MCPOAuthConfig |
 | `src/MCP/Server/HTTP/AppEnv.hs` | Add OAuthEnv field, tracer adapter, MCPOAuthConfig |
