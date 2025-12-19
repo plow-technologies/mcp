@@ -67,12 +67,14 @@ import GHC.Generics (Generic)
 
 import Servant.OAuth2.IDP.Types (
     ClientAuthMethod (..),
-    CodeChallenge (..),
+    CodeChallenge,
     CodeChallengeMethod (..),
-    CodeVerifier (..),
+    CodeVerifier,
     GrantType (..),
     ResponseType (..),
     Scope (..),
+    unCodeChallenge,
+    unCodeVerifier,
  )
 
 -- | OAuth grant types supported by MCP

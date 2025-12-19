@@ -86,6 +86,7 @@ import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types
+import Servant.OAuth2.IDP.Types.Internal (CodeChallenge (..))
 import Servant.Server (ServerError (..), err401, err500)
 
 -- -----------------------------------------------------------------------------

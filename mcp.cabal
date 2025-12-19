@@ -124,7 +124,8 @@ library
         MCP.Trace.StdIO
 
     -- Modules included in this library but not exported.
-    -- other-modules:
+    other-modules:
+        Servant.OAuth2.IDP.Types.Internal
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

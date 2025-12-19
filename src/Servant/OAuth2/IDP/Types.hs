@@ -41,13 +41,12 @@ module Servant.OAuth2.IDP.Types (
     parseScopes,
     serializeScopeSet,
     Scopes (..),
-    -- TODO(mcp-5wk.27): Remove (..) exports after creating Types.Internal module
-    -- These are temporarily exported for Boundary.hs unsafe constructors
-    -- Per Constitution Principle II, raw constructors should not be in public API
-    CodeChallenge (..),
+    CodeChallenge,
     mkCodeChallenge,
-    CodeVerifier (..),
+    unCodeChallenge,
+    CodeVerifier,
     mkCodeVerifier,
+    unCodeVerifier,
     OAuthState (..),
     ResourceIndicator (..),
     ClientSecret (..),
@@ -97,6 +96,9 @@ import GHC.Generics (Generic)
 import Network.HTTP.Types.Status (Status, status400, status401, status403)
 import Network.URI (URI, parseURI, uriAuthority, uriRegName, uriScheme, uriToString)
 import Web.HttpApiData (FromHttpApiData (..), ToHttpApiData (..))
+
+-- Import PKCE types from Internal module (raw constructors hidden from public API)
+import Servant.OAuth2.IDP.Types.Internal (CodeChallenge (..), CodeVerifier (..))
 
 -- -----------------------------------------------------------------------------
 -- Identity Newtypes
@@ -475,10 +477,9 @@ instance FromJSON Scopes where
         withText "Scopes" $
             either (fail . T.unpack) pure . parseUrlPiece
 
--- | PKCE code challenge
-newtype CodeChallenge = CodeChallenge {unCodeChallenge :: Text}
-    deriving stock (Eq, Ord, Show, Generic)
-    deriving newtype (FromJSON, ToJSON)
+-- -----------------------------------------------------------------------------
+-- PKCE Types (imported from Internal, smart constructors defined here)
+-- -----------------------------------------------------------------------------
 
 -- | Smart constructor for CodeChallenge (base64url charset, 43-128 chars)
 mkCodeChallenge :: Text -> Maybe CodeChallenge
@@ -494,19 +495,6 @@ mkCodeChallenge t
             || isDigit c
             || c == '-'
             || c == '_'
-
-instance FromHttpApiData CodeChallenge where
-    parseUrlPiece t = case mkCodeChallenge t of
-        Just cc -> Right cc
-        Nothing -> Left "CodeChallenge must be base64url (43-128 chars)"
-
-instance ToHttpApiData CodeChallenge where
-    toUrlPiece = unCodeChallenge
-
--- | PKCE code verifier
-newtype CodeVerifier = CodeVerifier {unCodeVerifier :: Text}
-    deriving stock (Eq, Ord, Show, Generic)
-    deriving newtype (FromJSON, ToJSON)
 
 -- | Smart constructor for CodeVerifier (unreserved chars per RFC 7636, 43-128 chars)
 mkCodeVerifier :: Text -> Maybe CodeVerifier
@@ -525,14 +513,6 @@ mkCodeVerifier t
             || c == '.'
             || c == '_'
             || c == '~'
-
-instance FromHttpApiData CodeVerifier where
-    parseUrlPiece t = case mkCodeVerifier t of
-        Just cv -> Right cv
-        Nothing -> Left "CodeVerifier must contain unreserved chars (43-128 chars)"
-
-instance ToHttpApiData CodeVerifier where
-    toUrlPiece = unCodeVerifier
 
 -- | OAuth state parameter (CSRF protection token per RFC 6749 Section 10.12)
 newtype OAuthState = OAuthState {unOAuthState :: Text}

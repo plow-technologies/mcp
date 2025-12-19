@@ -51,7 +51,6 @@ import Servant.OAuth2.IDP.Types (
     AuthCodeId (..),
     AuthorizationCode (..),
     AuthorizationError (..),
-    CodeVerifier (..),
     RefreshToken (..),
     RefreshTokenId (..),
     ResourceIndicator (..),
