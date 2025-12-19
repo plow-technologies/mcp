@@ -83,19 +83,26 @@ import Data.Text.Lazy qualified as TL
 import Data.Time.Clock (UTCTime, addUTCTime)
 import GHC.Generics (Generic)
 import Lucid (renderText, toHtml)
+import Network.HTTP.Types.Status (statusCode)
 import Network.Wai.Handler.Warp (Port)
-import Servant (Handler, ServerError, err400, err401, err500, errBody)
+import Servant (Handler, ServerError (..), err400, err401, err500, errBody)
 import Servant.Auth.Server (JWTSettings)
 
 import MCP.Server (ServerState)
 import MCP.Server.Auth (OAuthConfig, ProtectedResourceMetadata)
-import MCP.Trace.HTTP (HTTPTrace (HTTPOAuthBoundary))
+import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types (Implementation, ServerCapabilities)
 import Plow.Logging (IOTracer)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser, DemoAuthError (..), DemoCredentialEnv)
-import Servant.OAuth2.IDP.Boundary (domainErrorToServerError)
-import Servant.OAuth2.IDP.Errors (LoginFlowError)
+import Servant.OAuth2.IDP.Config (OAuthEnv)
+import Servant.OAuth2.IDP.Errors (
+    AuthorizationError (..),
+    LoginFlowError,
+    ValidationError (..),
+    authorizationErrorToResponse,
+    validationErrorToResponse,
+ )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (
     ExpiryConfig (..),
@@ -103,13 +110,10 @@ import Servant.OAuth2.IDP.Store.InMemory (
     OAuthStoreError (..),
     OAuthTVarEnv (..),
  )
+import Servant.OAuth2.IDP.Trace (OAuthTrace)
 import Servant.OAuth2.IDP.Types (
     AuthorizationCode (..),
-    AuthorizationError (..),
     PendingAuthorization (..),
-    ValidationError (..),
-    authorizationErrorToResponse,
-    validationErrorToResponse,
  )
 
 -- -----------------------------------------------------------------------------
@@ -161,6 +165,10 @@ data AppEnv = AppEnv
     -- ^ HTTP server configuration
     , envTracer :: IOTracer HTTPTrace
     -- ^ Tracer for HTTP and OAuth events
+    , envOAuthEnv :: OAuthEnv
+    -- ^ Protocol-agnostic OAuth configuration (for Servant.OAuth2.IDP handlers)
+    , envOAuthTracer :: IOTracer OAuthTrace
+    -- ^ OAuth-specific tracer (for Servant.OAuth2.IDP handlers)
     , envJWT :: JWTSettings
     -- ^ JWT settings for token signing and validation
     , envServerState :: TVar ServerState
@@ -231,12 +239,10 @@ runAppM env action = do
     result <- runExceptT $ runReaderT (unAppM action) env
     case result of
         Left err -> do
-            -- Use domainErrorToServerError for centralized translation
-            -- Type annotation helps resolve ambiguous associated types
-            mServerErr <- domainErrorToServerError @Handler @AppM (envTracer env) HTTPOAuthBoundary err
-            case mServerErr of
-                Just serverErr -> throwError serverErr
-                Nothing -> throwError err500{errBody = "Internal server error"}
+            -- TODO: Re-enable domainErrorToServerError after ValidationError migration is complete
+            -- The Boundary module needs to be updated to use Servant.OAuth2.IDP.Errors.ValidationError
+            -- For now, use toServerError directly
+            throwError (toServerError err)
         Right a -> pure a
 
 -- -----------------------------------------------------------------------------
@@ -318,8 +324,13 @@ toServerError (ValidationErr validationErr) =
     let (_status, message) = validationErrorToResponse validationErr
      in err400{errBody = toLBS message}
 toServerError (AuthorizationErr authzErr) =
-    let (_status, oauthResp) = authorizationErrorToResponse authzErr
-     in err400{errBody = encode oauthResp}
+    let (status, oauthResp) = authorizationErrorToResponse authzErr
+     in ServerError
+            { errHTTPCode = statusCode status
+            , errReasonPhrase = ""
+            , errBody = encode oauthResp
+            , errHeaders = [("Content-Type", "application/json; charset=utf-8")]
+            }
 toServerError (LoginFlowErr loginErr) =
     -- Render LoginFlowError as HTML using ToHtml instance
     err400{errBody = LBS.fromStrict . TE.encodeUtf8 . TL.toStrict . renderText . toHtml $ loginErr}

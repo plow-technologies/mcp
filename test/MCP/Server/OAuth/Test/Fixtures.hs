@@ -52,7 +52,7 @@ import Servant.Auth.Server (defaultJWTSettings, generateKey)
 import Servant.Server.Internal.Handler (runHandler)
 
 import MCP.Server (MCPServer (..), MCPServerM, initialServerState)
-import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata, mcpAppWithOAuth)
+import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata, mcpAppWithOAuth, mkOAuthEnvFromConfig)
 import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, runAppM)
 import MCP.Server.Time (MonadTime (..))
 import MCP.Types (Implementation (..), ServerCapabilities (..), ToolsCapability (..))
@@ -129,12 +129,17 @@ mkTestEnv timeTVar = do
     -- Create placeholder server state (will be replaced in referenceTestConfig)
     placeholderStateVar <- newTVarIO $ initialServerState (httpCapabilities serverConfig)
 
+    -- Create OAuthEnv from server config
+    let oauthCfgEnv = mkOAuthEnvFromConfig serverConfig
+        oauthTracerNull = IOTracer (Tracer (\_ -> pure ())) -- Null tracer for OAuth events
     return
         AppEnv
             { envOAuth = oauthEnv
             , envAuth = demoEnv
             , envConfig = serverConfig
             , envTracer = tracer
+            , envOAuthEnv = oauthCfgEnv
+            , envOAuthTracer = oauthTracerNull
             , envJWT = jwtSettings
             , envServerState = placeholderStateVar
             , envTimeProvider = Just timeTVar -- Use controllable time for tests

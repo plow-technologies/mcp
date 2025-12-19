@@ -103,6 +103,7 @@ import Servant.OAuth2.IDP.API (
     TokenResponse,
  )
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
+import Servant.OAuth2.IDP.Config (OAuthEnv)
 import Servant.OAuth2.IDP.Handlers (
     handleAuthCodeGrant,
     handleAuthorize,
@@ -113,9 +114,9 @@ import Servant.OAuth2.IDP.Handlers (
     handleRegister,
     handleToken,
  )
-import Servant.OAuth2.IDP.Errors (LoginFlowError)
+import Servant.OAuth2.IDP.Errors (AuthorizationError, LoginFlowError, ValidationError)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
-import Servant.OAuth2.IDP.Types (AuthorizationError, ValidationError)
+import Servant.OAuth2.IDP.Trace (OAuthTrace)
 
 -- -----------------------------------------------------------------------------
 -- Constraint Alias
@@ -202,6 +203,8 @@ oauthServer ::
     , AsType LoginFlowError e
     , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
+    , HasType OAuthEnv env
+    , HasType (IOTracer OAuthTrace) env
     , HasType JWTSettings env
     ) =>
     ServerT OAuthAPI m

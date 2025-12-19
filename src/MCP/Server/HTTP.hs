@@ -55,6 +55,9 @@ module MCP.Server.HTTP (
 
     -- * Handlers (for testing)
     mcpServerAuth,
+
+    -- * Configuration Helpers
+    mkOAuthEnvFromConfig,
 ) where
 
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
@@ -69,12 +72,14 @@ import Data.ByteString.Lazy qualified as LBS
 import Data.Functor.Contravariant (contramap)
 import Data.Generics.Product (HasType, getTyped)
 import Data.Generics.Sum.Typed (AsType, injectTyped)
-import Data.Maybe (isJust)
+import Data.List.NonEmpty (NonEmpty ((:|)))
+import Data.Maybe (isJust, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
 import Network.HTTP.Media ((//), (/:))
+import Network.URI (parseURI)
 import Network.Wai (Application)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
@@ -95,11 +100,14 @@ import MCP.Types
 import Plow.Logging (IOTracer (..), Tracer (..), traceWith)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..), DemoCredentialEnv (..), defaultDemoCredentialStore)
-import Servant.OAuth2.IDP.Errors (LoginFlowError)
+import Servant.OAuth2.IDP.Config (OAuthEnv (..))
+import Servant.OAuth2.IDP.Errors (LoginFlowError, ValidationError (..))
+import Servant.OAuth2.IDP.Errors (AuthorizationError (..), OAuthErrorCode (..), OAuthErrorResponse (..))
 import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI, oauthServer)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
-import Servant.OAuth2.IDP.Types (AuthorizationError (..), ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthErrorResponse (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), ValidationError (..), unUserId)
+import Servant.OAuth2.IDP.Trace (OAuthTrace)
+import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthGrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
 
 -- | HTML content type for Servant
 data HTML
@@ -239,6 +247,8 @@ mcpAppWithOAuth ::
     , AsType LoginFlowError e
     , HasType HTTPServerConfig env
     , HasType (IOTracer HTTPTrace) env
+    , HasType OAuthEnv env
+    , HasType (IOTracer OAuthTrace) env
     , HasType JWTSettings env
     , HasType (TVar ServerState) env
     ) =>
@@ -296,12 +306,18 @@ mcpAppInternal config tracer stateVar oauthEnv jwtSettings =
     oauthServerNew :: HTTPServerConfig -> IOTracer HTTPTrace -> OAuthTVarEnv -> JWTSettings -> Server OAuthAPI
     oauthServerNew cfg httpTracer oauth jwtSet =
         let authEnv = DemoCredentialEnv defaultDemoCredentialStore
+            oauthCfgEnv = mkOAuthEnvFromConfig cfg
+            -- Create a simple OAuthTrace tracer that discards traces for now
+            -- TODO: Convert between MCP.Trace.OAuth.OAuthTrace and Servant.OAuth2.IDP.Trace.OAuthTrace
+            oauthTracer = IOTracer $ Tracer $ \_ -> pure () -- Discard OAuth traces during transition
             appEnv =
                 AppEnv
                     { envOAuth = oauth
                     , envAuth = authEnv
                     , envConfig = cfg
                     , envTracer = httpTracer
+                    , envOAuthEnv = oauthCfgEnv
+                    , envOAuthTracer = oauthTracer
                     , envJWT = jwtSet
                     , envServerState = stateVar
                     , envTimeProvider = Nothing -- Use real IO time for production
@@ -329,7 +345,7 @@ mcpServerAuth httpConfig httpTracer stateTVar authResult requestValue =
             throwError $
                 err401
                     { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
-                    , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
+                    , errBody = encode $ OAuthErrorResponse ErrInvalidClient (Just "Bearer token required")
                     }
         NoSuchUser -> do
             liftIO $ traceWith httpTracer $ HTTPAuthFailure "No such user"
@@ -337,7 +353,7 @@ mcpServerAuth httpConfig httpTracer stateTVar authResult requestValue =
             throwError $
                 err401
                     { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
-                    , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
+                    , errBody = encode $ OAuthErrorResponse ErrInvalidClient (Just "Bearer token required")
                     }
         Indefinite -> do
             liftIO $ traceWith httpTracer $ HTTPAuthFailure "Authentication indefinite"
@@ -345,7 +361,7 @@ mcpServerAuth httpConfig httpTracer stateTVar authResult requestValue =
             throwError $
                 err401
                     { errHeaders = [("WWW-Authenticate", wwwAuthenticateValue)]
-                    , errBody = encode $ OAuthErrorResponse "invalid_client" (Just "Bearer token required")
+                    , errBody = encode $ OAuthErrorResponse ErrInvalidClient (Just "Bearer token required")
                     }
   where
     metadataUrl = httpBaseUrl httpConfig <> "/.well-known/oauth-protected-resource"
@@ -696,6 +712,74 @@ defaultProtectedResourceMetadata baseUrl =
         , resourceDocumentation = Nothing
         }
 
+{- | Convert GrantType to OAuthGrantType
+
+Maps between MCP.Server.Auth.GrantType and Servant.OAuth2.IDP.Types.OAuthGrantType.
+Note: GrantRefreshToken has no equivalent in OAuthGrantType (it's not a grant type in OAuth 2.0 metadata).
+-}
+convertGrantType :: GrantType -> Maybe OAuthGrantType
+convertGrantType GrantAuthorizationCode = Just OAuthAuthorizationCode
+convertGrantType GrantClientCredentials = Just OAuthClientCredentials
+convertGrantType GrantRefreshToken = Nothing -- Not a metadata grant type
+
+{- | Build OAuthEnv from HTTPServerConfig
+
+Extracts protocol-agnostic OAuth configuration from HTTPServerConfig.
+Uses default values when OAuth is not configured.
+-}
+mkOAuthEnvFromConfig :: HTTPServerConfig -> OAuthEnv
+mkOAuthEnvFromConfig cfg =
+    case httpOAuthConfig cfg of
+        Just oauthCfg ->
+            let baseUri = case parseURI (T.unpack (httpBaseUrl cfg)) of
+                    Just uri -> uri
+                    Nothing -> Prelude.error $ "Invalid base URL in HTTPServerConfig: " <> T.unpack (httpBaseUrl cfg)
+                -- Convert GrantType list to OAuthGrantType NonEmpty, filtering out GrantRefreshToken
+                convertedGrants = case mapMaybe convertGrantType (supportedGrantTypes oauthCfg) of
+                    [] -> OAuthAuthorizationCode :| [] -- Default if all filtered out
+                    (x : xs) -> x :| xs
+             in OAuthEnv
+                    { oauthRequireHTTPS = requireHTTPS oauthCfg
+                    , oauthBaseUrl = baseUri
+                    , oauthAuthCodeExpiry = fromIntegral (authCodeExpirySeconds oauthCfg)
+                    , oauthAccessTokenExpiry = fromIntegral (accessTokenExpirySeconds oauthCfg)
+                    , oauthLoginSessionExpiry = fromIntegral (loginSessionExpirySeconds oauthCfg)
+                    , oauthAuthCodePrefix = authCodePrefix oauthCfg
+                    , oauthRefreshTokenPrefix = refreshTokenPrefix oauthCfg
+                    , oauthClientIdPrefix = clientIdPrefix oauthCfg
+                    , oauthSupportedScopes = supportedScopes oauthCfg
+                    , oauthSupportedResponseTypes = case supportedResponseTypes oauthCfg of
+                        [] -> Prelude.error "supportedResponseTypes cannot be empty"
+                        (x : xs) -> x :| xs
+                    , oauthSupportedGrantTypes = convertedGrants
+                    , oauthSupportedAuthMethods = case supportedAuthMethods oauthCfg of
+                        [] -> Prelude.error "supportedAuthMethods cannot be empty"
+                        (x : xs) -> x :| xs
+                    , oauthSupportedCodeChallengeMethods = case supportedCodeChallengeMethods oauthCfg of
+                        [] -> Prelude.error "supportedCodeChallengeMethods cannot be empty"
+                        (x : xs) -> x :| xs
+                    }
+        Nothing ->
+            -- Default OAuthEnv when OAuth is not configured
+            let defaultUri = case parseURI "http://localhost:8080" of
+                    Just uri -> uri
+                    Nothing -> Prelude.error "Failed to parse default URI"
+             in OAuthEnv
+                    { oauthRequireHTTPS = False
+                    , oauthBaseUrl = defaultUri
+                    , oauthAuthCodeExpiry = 600
+                    , oauthAccessTokenExpiry = 3600
+                    , oauthLoginSessionExpiry = 600
+                    , oauthAuthCodePrefix = "code_"
+                    , oauthRefreshTokenPrefix = "rt_"
+                    , oauthClientIdPrefix = "client_"
+                    , oauthSupportedScopes = []
+                    , oauthSupportedResponseTypes = ResponseCode :| []
+                    , oauthSupportedGrantTypes = OAuthAuthorizationCode :| []
+                    , oauthSupportedAuthMethods = AuthNone :| []
+                    , oauthSupportedCodeChallengeMethods = S256 :| []
+                    }
+
 -- | Map scope to human-readable description
 scopeToDescription :: Text -> Text
 scopeToDescription "mcp:read" = "Read MCP resources"
@@ -762,6 +846,11 @@ demoMcpApp = do
     -- Initialize server state
     stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
 
+    -- Create OAuthEnv from config
+    let oauthCfgEnv = mkOAuthEnvFromConfig config
+        -- Create a simple OAuthTrace tracer that discards traces for now
+        oauthTracer = IOTracer $ Tracer $ \_ -> pure ()
+
     -- Create AppEnv with all fields including stateVar
     let appEnv =
             AppEnv
@@ -769,6 +858,8 @@ demoMcpApp = do
                 , envAuth = authEnv
                 , envConfig = config
                 , envTracer = tracer
+                , envOAuthEnv = oauthCfgEnv
+                , envOAuthTracer = oauthTracer
                 , envJWT = jwtSettings
                 , envServerState = stateVar
                 , envTimeProvider = Nothing -- Use real IO time

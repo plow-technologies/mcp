@@ -76,13 +76,6 @@ module Servant.OAuth2.IDP.Types (
     AuthorizationCode (..),
     ClientInfo (..),
     PendingAuthorization (..),
-
-    -- * Error Types
-    AuthorizationError (..),
-    authorizationErrorToResponse,
-    ValidationError (..),
-    validationErrorToResponse,
-    OAuthErrorResponse (..),
 ) where
 
 import Control.Monad (forM_, guard, when)
@@ -98,7 +91,6 @@ import Data.Text qualified as T
 import Data.Time.Clock (NominalDiffTime, UTCTime)
 import Data.Word (Word8)
 import GHC.Generics (Generic)
-import Network.HTTP.Types.Status (Status, status400, status401, status403)
 import Network.URI (URI, parseURI, uriAuthority, uriRegName, uriScheme, uriToString)
 import Web.HttpApiData (FromHttpApiData (..), ToHttpApiData (..))
 
@@ -924,110 +916,3 @@ instance ToJSON PendingAuthorization where
             , "pending_resource" .= fmap (T.pack . show) pendingResource
             , "pending_created_at" .= pendingCreatedAt
             ]
-
--- -----------------------------------------------------------------------------
--- Error Types
--- -----------------------------------------------------------------------------
-
--- | OAuth 2.0 error response per RFC 6749 Section 5.2
-data OAuthErrorResponse = OAuthErrorResponse
-    { oauthErrorCode :: Text
-    , oauthErrorDescription :: Maybe Text
-    }
-    deriving stock (Eq, Show, Generic)
-
-instance ToJSON OAuthErrorResponse where
-    toJSON OAuthErrorResponse{..} =
-        object $
-            ("error" .= oauthErrorCode)
-                : case oauthErrorDescription of
-                    Just desc -> ["error_description" .= desc]
-                    Nothing -> []
-
-instance FromJSON OAuthErrorResponse where
-    parseJSON = withObject "OAuthErrorResponse" $ \v ->
-        OAuthErrorResponse
-            <$> v .: "error"
-            <*> v .:? "error_description"
-
-{- | OAuth 2.0 authorization errors per RFC 6749 Section 4.1.2.1 and 5.2.
-Fixed type (protocol-defined), NOT an associated type.
-Safe to expose to clients in OAuth error response format.
--}
-data AuthorizationError
-    = -- | 400: Missing/invalid parameter
-      InvalidRequest Text
-    | -- | 401: Client authentication failed
-      InvalidClient Text
-    | -- | 400: Invalid authorization code/refresh token
-      InvalidGrant Text
-    | -- | 401: Client not authorized for grant type
-      UnauthorizedClient Text
-    | -- | 400: Grant type not supported
-      UnsupportedGrantType Text
-    | -- | 400: Invalid/unknown scope
-      InvalidScope Text
-    | -- | 403: Resource owner denied request
-      AccessDenied Text
-    | -- | 400: Authorization code expired
-      ExpiredCode
-    | -- | 400: Redirect URI doesn't match registered
-      InvalidRedirectUri
-    | -- | 400: Code verifier doesn't match challenge
-      PKCEVerificationFailed
-    deriving stock (Eq, Show, Generic)
-
-{- | Map AuthorizationError to HTTP status and OAuth error response.
-Per RFC 6749 Section 4.1.2.1 (authorization endpoint errors) and Section 5.2 (token endpoint errors).
--}
-authorizationErrorToResponse :: AuthorizationError -> (Status, OAuthErrorResponse)
-authorizationErrorToResponse = \case
-    InvalidRequest msg -> (status400, OAuthErrorResponse "invalid_request" (Just msg))
-    InvalidClient msg -> (status401, OAuthErrorResponse "invalid_client" (Just msg))
-    InvalidGrant msg -> (status400, OAuthErrorResponse "invalid_grant" (Just msg))
-    UnauthorizedClient msg -> (status401, OAuthErrorResponse "unauthorized_client" (Just msg))
-    UnsupportedGrantType msg -> (status400, OAuthErrorResponse "unsupported_grant_type" (Just msg))
-    InvalidScope msg -> (status400, OAuthErrorResponse "invalid_scope" (Just msg))
-    AccessDenied msg -> (status403, OAuthErrorResponse "access_denied" (Just msg))
-    ExpiredCode -> (status400, OAuthErrorResponse "invalid_grant" (Just "Authorization code has expired"))
-    InvalidRedirectUri -> (status400, OAuthErrorResponse "invalid_request" (Just "Invalid redirect_uri"))
-    PKCEVerificationFailed -> (status400, OAuthErrorResponse "invalid_grant" (Just "PKCE verification failed"))
-
-{- | Semantic validation errors for OAuth handler logic.
-Fixed type (not an associated type) - safe to expose to clients.
-These are validation failures that pass parsing but violate business rules.
--}
-data ValidationError
-    = -- | redirect_uri doesn't match registered client
-      RedirectUriMismatch ClientId RedirectUri
-    | -- | response_type not supported
-      UnsupportedResponseType Text
-    | -- | client_id not found in registry
-      ClientNotRegistered ClientId
-    | -- | required scope not present
-      MissingRequiredScope Scope
-    | -- | state parameter validation failed
-      InvalidStateParameter Text
-    deriving stock (Eq, Show, Generic)
-
-{- | Map ValidationError to HTTP 400 status with descriptive message.
-All validation errors are semantic failures (not parse errors) and map to 400.
--}
-validationErrorToResponse :: ValidationError -> (Status, Text)
-validationErrorToResponse = \case
-    RedirectUriMismatch clientId redirectUri ->
-        ( status400
-        , "redirect_uri does not match registered URIs for client_id: "
-            <> unClientId clientId
-            <> " (provided: "
-            <> toUrlPiece redirectUri
-            <> ")"
-        )
-    UnsupportedResponseType responseType ->
-        (status400, "response_type not supported: " <> responseType)
-    ClientNotRegistered clientId ->
-        (status400, "client_id not registered: " <> unClientId clientId)
-    MissingRequiredScope scope ->
-        (status400, "Missing required scope: " <> unScope scope)
-    InvalidStateParameter stateValue ->
-        (status400, "Invalid state parameter: " <> stateValue)

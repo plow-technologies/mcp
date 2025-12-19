@@ -83,7 +83,14 @@ import Lucid (renderText, toHtml)
 import Network.HTTP.Types.Status (Status, statusCode)
 import Plow.Logging (IOTracer (..), traceWith)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
-import Servant.OAuth2.IDP.Errors (LoginFlowError)
+import Servant.OAuth2.IDP.Errors (
+    AuthorizationError (..),
+    LoginFlowError,
+    OAuthErrorResponse (..),
+    ValidationError (..),
+    authorizationErrorToResponse,
+    validationErrorToResponse,
+ )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types
 import Servant.OAuth2.IDP.Types.Internal (CodeChallenge (..))

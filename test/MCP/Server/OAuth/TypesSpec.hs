@@ -6,12 +6,23 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Network.HTTP.Types.Status (statusCode)
 import Network.URI (parseURI)
+import Servant.OAuth2.IDP.Errors
 import Servant.OAuth2.IDP.Types
 import Test.Hspec
 
 -- Helper functions to extract fields from OAuthErrorResponse
 errorCode :: OAuthErrorResponse -> Text
-errorCode = oauthErrorCode
+errorCode resp = case oauthErrorCode resp of
+    ErrInvalidRequest -> "invalid_request"
+    ErrInvalidClient -> "invalid_client"
+    ErrInvalidGrant -> "invalid_grant"
+    ErrUnauthorizedClient -> "unauthorized_client"
+    ErrUnsupportedGrantType -> "unsupported_grant_type"
+    ErrInvalidScope -> "invalid_scope"
+    ErrAccessDenied -> "access_denied"
+    ErrUnsupportedResponseType -> "unsupported_response_type"
+    ErrServerError -> "server_error"
+    ErrTemporarilyUnavailable -> "temporarily_unavailable"
 
 errorDescription :: OAuthErrorResponse -> Maybe Text
 errorDescription = oauthErrorDescription

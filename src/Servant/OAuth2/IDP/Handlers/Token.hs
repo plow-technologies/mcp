@@ -43,6 +43,7 @@ import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import Plow.Logging (IOTracer, traceWith)
 import Servant.OAuth2.IDP.API (TokenRequest (..), TokenResponse (..))
+import Servant.OAuth2.IDP.Errors (AuthorizationError (..))
 import Servant.OAuth2.IDP.Handlers.Helpers (generateJWTAccessToken, generateRefreshTokenWithConfig)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
@@ -50,7 +51,6 @@ import Servant.OAuth2.IDP.Types (
     AccessTokenId (..),
     AuthCodeId (..),
     AuthorizationCode (..),
-    AuthorizationError (..),
     RefreshToken (..),
     RefreshTokenId (..),
     ResourceIndicator (..),
@@ -274,6 +274,7 @@ handleRefreshTokenGrant ::
     , HasType (IOTracer HTTPTrace) env
     , HasType JWTSettings env
     ) =>
+    -- FIXME: Must use a precise ADT instead of Map Text Text
     Map Text Text ->
     m TokenResponse
 handleRefreshTokenGrant params = do

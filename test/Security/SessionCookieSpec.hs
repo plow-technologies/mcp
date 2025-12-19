@@ -21,7 +21,7 @@ import Test.Hspec.Wai (get, liftIO, with)
 import Control.Concurrent.STM (newTVarIO)
 import MCP.Server (MCPServer (..), MCPServerM, initialServerState)
 import MCP.Server.Auth (OAuthConfig (..))
-import MCP.Server.HTTP (defaultDemoOAuthConfig, mcpAppWithOAuth)
+import MCP.Server.HTTP (defaultDemoOAuthConfig, mcpAppWithOAuth, mkOAuthEnvFromConfig)
 import MCP.Server.HTTP.AppEnv (AppEnv (..), HTTPServerConfig (..), runAppM)
 import MCP.Server.OAuth.Test.Fixtures (defaultTestTime, mkTestEnv)
 import Servant.Auth.Server (defaultJWTSettings, generateKey)
@@ -46,7 +46,9 @@ mkTestConfigWith oauthConfig = do
 
     -- Update the OAuth config in the environment
     let config = (envConfig baseEnv){httpOAuthConfig = Just oauthConfig}
-        env = baseEnv{envConfig = config}
+        -- IMPORTANT: Rebuild OAuthEnv from the updated config so requireHTTPS is reflected
+        oauthEnv = mkOAuthEnvFromConfig config
+        env = baseEnv{envConfig = config, envOAuthEnv = oauthEnv}
 
     -- Create fresh server state
     stateVar <- newTVarIO $ initialServerState (httpCapabilities config)

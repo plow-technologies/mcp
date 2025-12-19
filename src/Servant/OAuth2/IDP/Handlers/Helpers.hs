@@ -32,9 +32,9 @@ import Servant.Auth.Server (JWTSettings, ToJWT, makeJWT)
 import Data.UUID qualified as UUID
 import MCP.Server.Auth (OAuthConfig (..), authCodePrefix, refreshTokenPrefix)
 import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
+import Servant.OAuth2.IDP.Errors (AuthorizationError (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
-    AuthorizationError (..),
     SessionId (..),
     mkSessionId,
  )

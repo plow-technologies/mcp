@@ -47,7 +47,7 @@ import System.IO (hFlush, stdout)
 import MCP.Protocol
 import MCP.Server
 import MCP.Server.Auth
-import MCP.Server.HTTP
+import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, mcpAppWithOAuth, mkOAuthEnvFromConfig, runServerHTTP)
 import MCP.Server.HTTP.AppEnv (AppEnv (..), runAppM)
 import MCP.Trace.Types (MCPTrace (..), isOAuthTrace, renderMCPTrace)
 import MCP.Types
@@ -312,12 +312,16 @@ main = do
                 stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
 
                 -- Create AppEnv with configured settings (including stateVar)
-                let appEnv =
+                let oauthCfgEnv = mkOAuthEnvFromConfig config
+                    oauthTracerNull = IOTracer $ Tracer $ \_ -> pure () -- Null tracer for OAuth events
+                    appEnv =
                         AppEnv
                             { envOAuth = oauthEnv
                             , envAuth = authEnv
                             , envConfig = config
                             , envTracer = httpTracer
+                            , envOAuthEnv = oauthCfgEnv
+                            , envOAuthTracer = oauthTracerNull
                             , envJWT = jwtSettings
                             , envServerState = stateVar
                             , envTimeProvider = Nothing -- Use real IO time

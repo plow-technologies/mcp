@@ -39,9 +39,9 @@ import Servant.OAuth2.IDP.API (
     ClientRegistrationRequest (..),
     ClientRegistrationResponse (..),
  )
+import Servant.OAuth2.IDP.Errors (AuthorizationError (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
-    AuthorizationError (..),
     ClientId (..),
     ClientInfo (..),
     mkClientSecret,
