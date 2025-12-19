@@ -67,6 +67,7 @@ import Servant.OAuth2.IDP.Types (
     SessionCookie (..),
     mkSessionId,
     serializeScopeSet,
+    unClientName,
  )
 
 {- | Authorization endpoint handler (polymorphic).
@@ -147,7 +148,7 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
         liftIO $ traceWith tracer $ TraceValidationError $ RedirectUriMismatch clientId redirectUri
         throwError $ injectTyped @ValidationError $ RedirectUriMismatch clientId redirectUri
 
-    let displayName = clientName clientInfo
+    let displayName = unClientName $ clientName clientInfo
         -- Convert Scopes to [Scope] for tracing
         scopeList = case mScope of
             Nothing -> []

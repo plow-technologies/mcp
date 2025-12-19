@@ -869,7 +869,7 @@ instance (ToJSON userId) => ToJSON (AuthorizationCode userId) where
 
 -- | Registered OAuth client information
 data ClientInfo = ClientInfo
-    { clientName :: Text
+    { clientName :: ClientName
     , clientRedirectUris :: NonEmpty RedirectUri
     , clientGrantTypes :: Set GrantType
     , clientResponseTypes :: Set ResponseType
@@ -879,7 +879,10 @@ data ClientInfo = ClientInfo
 
 instance FromJSON ClientInfo where
     parseJSON = withObject "ClientInfo" $ \v -> do
-        name <- v .: "client_name"
+        nameText <- v .: "client_name"
+        name <- case mkClientName nameText of
+            Just n -> pure n
+            Nothing -> fail "client_name must not be empty"
 
         uriList <- v .: "client_redirect_uris"
         uris <- case nonEmpty uriList of
@@ -901,7 +904,7 @@ instance FromJSON ClientInfo where
 instance ToJSON ClientInfo where
     toJSON ClientInfo{..} =
         object
-            [ "client_name" .= clientName
+            [ "client_name" .= unClientName clientName
             , "client_redirect_uris" .= clientRedirectUris
             , "client_grant_types" .= clientGrantTypes
             , "client_response_types" .= clientResponseTypes

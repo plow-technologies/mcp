@@ -82,6 +82,7 @@ import Servant.OAuth2.IDP.Types (
     Scope,
     SessionId,
     UserId,
+    mkClientName,
     mkCodeChallenge,
     mkCodeVerifier,
     mkScope,
@@ -272,7 +273,10 @@ instance (Arbitrary userId) => Arbitrary (AuthorizationCode userId) where
 
 instance Arbitrary ClientInfo where
     arbitrary = do
-        clientName <- T.pack . getNonEmpty <$> arbitrary
+        clientNameText <- T.pack . getNonEmpty <$> arbitrary
+        let clientName = case mkClientName clientNameText of
+                Just cn -> cn
+                Nothing -> error "Generator.hs: generated invalid ClientName (should never happen)"
         -- NonEmpty RedirectUris
         headUri <- arbitrary
         tailUris <- listOf arbitrary `suchThat` (\xs -> length xs <= 3)
@@ -300,9 +304,7 @@ instance Arbitrary PendingAuthorization where
         pure PendingAuthorization{..}
       where
         genResourceURI :: Gen URI
-        genResourceURI = do
-            redirectUri <- arbitrary
-            pure (unRedirectUri redirectUri)
+        genResourceURI = unRedirectUri <$> arbitrary
 
 instance Arbitrary AuthUser where
     arbitrary = do

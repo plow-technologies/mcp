@@ -115,7 +115,7 @@ handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqR
         responsesSet = Set.fromList (NE.toList reqResponses)
         clientInfo =
             ClientInfo
-                { clientName = unClientName clientName
+                { clientName = clientName
                 , clientRedirectUris = redirectsNE
                 , clientGrantTypes = grantsSet
                 , clientResponseTypes = responsesSet

@@ -26,10 +26,7 @@ import Control.Monad.Reader (MonadReader, asks)
 import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
 import Data.Generics.Sum.Typed (AsType, injectTyped)
-import Data.Map.Strict (Map)
-import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
-import Data.Text (Text)
 import Plow.Logging (IOTracer, traceWith)
 import Servant.Auth.Server (JWTSettings, ToJWT)
 import Servant.OAuth2.IDP.API (TokenRequest (..), TokenResponse (..))
@@ -37,8 +34,6 @@ import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Errors (
     AuthorizationError (..),
     InvalidGrantReason (..),
-    InvalidRequestReason (..),
-    TokenParameter (..),
  )
 import Servant.OAuth2.IDP.Handlers.Helpers (generateJWTAccessToken, generateRefreshTokenWithConfig)
 import Servant.OAuth2.IDP.PKCE (validateCodeVerifier)
@@ -47,9 +42,12 @@ import Servant.OAuth2.IDP.Trace (OAuthTrace (..), OperationResult (..))
 import Servant.OAuth2.IDP.Types (
     AccessToken (..),
     AccessTokenId (..),
+    AuthCodeId,
     AuthorizationCode (..),
+    CodeVerifier,
     OAuthGrantType (..),
     RefreshToken (..),
+    RefreshTokenId,
     ResourceIndicator (..),
     Scopes (..),
     TokenType (..),
@@ -58,13 +56,9 @@ import Servant.OAuth2.IDP.Types (
     authScopes,
     authUserId,
     mkTokenValidity,
-    unAuthCodeId,
-    unCodeVerifier,
     unRefreshTokenId,
-    unResourceIndicator,
  )
 import Servant.OAuth2.IDP.Types.Internal (unsafeRefreshTokenId)
-import Web.HttpApiData (parseUrlPiece)
 
 {- | Token endpoint handler (polymorphic).
 
@@ -111,22 +105,10 @@ handleToken ::
     TokenRequest ->
     m TokenResponse
 handleToken tokenRequest = case tokenRequest of
-    AuthorizationCodeGrant code verifier mResource -> do
-        -- Build param map for existing handler
-        let paramMap =
-                Map.fromList $
-                    [ ("code", unAuthCodeId code)
-                    , ("code_verifier", unCodeVerifier verifier)
-                    ]
-                        ++ maybe [] (\r -> [("resource", unResourceIndicator r)]) mResource
-        handleAuthCodeGrant paramMap
-    RefreshTokenGrant refreshToken mResource -> do
-        -- Build param map for existing handler
-        let paramMap =
-                Map.fromList $
-                    ("refresh_token", unRefreshTokenId refreshToken)
-                        : maybe [] (\r -> [("resource", unResourceIndicator r)]) mResource
-        handleRefreshTokenGrant paramMap
+    AuthorizationCodeGrant code verifier mResource ->
+        handleAuthCodeGrant code verifier mResource
+    RefreshTokenGrant refreshToken mResource ->
+        handleRefreshTokenGrant refreshToken mResource
 
 {- | Authorization code grant handler (polymorphic).
 
@@ -137,7 +119,7 @@ as 'handleToken'.
 
 The handler:
 
-1. Extracts and validates the authorization code
+1. Validates the authorization code
 2. Verifies the code hasn't expired
 3. Validates PKCE code_verifier against stored challenge
 4. Generates JWT access token and refresh token
@@ -148,7 +130,7 @@ The handler:
 
 @
 -- In AppM (with AppEnv)
-response <- handleAuthCodeGrant paramMap
+response <- handleAuthCodeGrant code verifier mResource
 @
 -}
 handleAuthCodeGrant ::
@@ -162,30 +144,14 @@ handleAuthCodeGrant ::
     , HasType (IOTracer OAuthTrace) env
     , HasType JWTSettings env
     ) =>
-    Map Text Text ->
+    AuthCodeId ->
+    CodeVerifier ->
+    Maybe ResourceIndicator ->
     m TokenResponse
-handleAuthCodeGrant params = do
+handleAuthCodeGrant code codeVerifier _mResource = do
     config <- asks (getTyped @OAuthEnv)
     tracer <- asks (getTyped @(IOTracer OAuthTrace))
     jwtSettings <- asks (getTyped @JWTSettings)
-
-    -- Parse code from Text to AuthCodeId
-    code <- case Map.lookup "code" params of
-        Nothing -> do
-            throwError $ injectTyped @AuthorizationError $ InvalidRequest (MissingParameter TokenParamCode)
-        Just codeText -> case parseUrlPiece codeText of
-            Left _err -> do
-                throwError $ injectTyped @AuthorizationError $ InvalidRequest (InvalidParameterFormat TokenParamCode)
-            Right authCodeId -> return authCodeId
-
-    -- Parse code_verifier from Text to CodeVerifier
-    codeVerifier <- case Map.lookup "code_verifier" params of
-        Nothing -> do
-            throwError $ injectTyped @AuthorizationError $ InvalidRequest (MissingParameter TokenParamCodeVerifier)
-        Just verifierText -> case parseUrlPiece verifierText of
-            Left _err -> do
-                throwError $ injectTyped @AuthorizationError $ InvalidRequest (InvalidParameterFormat TokenParamCodeVerifier)
-            Right verifier -> return verifier
 
     -- Atomically consume authorization code (lookup + delete, prevents replay attacks)
     mAuthCode <- consumeAuthCode code
@@ -239,7 +205,7 @@ as 'handleToken'.
 
 The handler:
 
-1. Extracts and validates the refresh token
+1. Validates the refresh token
 2. Looks up the associated user and client
 3. Generates a new JWT access token
 4. Updates the access token mapping
@@ -249,7 +215,7 @@ The handler:
 
 @
 -- In AppM (with AppEnv)
-response <- handleRefreshTokenGrant paramMap
+response <- handleRefreshTokenGrant refreshToken mResource
 @
 -}
 handleRefreshTokenGrant ::
@@ -263,22 +229,13 @@ handleRefreshTokenGrant ::
     , HasType (IOTracer OAuthTrace) env
     , HasType JWTSettings env
     ) =>
-    -- FIXME: Must use a precise ADT instead of Map Text Text
-    Map Text Text ->
+    RefreshTokenId ->
+    Maybe ResourceIndicator ->
     m TokenResponse
-handleRefreshTokenGrant params = do
+handleRefreshTokenGrant refreshTokenId _mResource = do
     config <- asks (getTyped @OAuthEnv)
     tracer <- asks (getTyped @(IOTracer OAuthTrace))
     jwtSettings <- asks (getTyped @JWTSettings)
-
-    -- Parse refresh_token from Text to RefreshTokenId
-    refreshTokenId <- case Map.lookup "refresh_token" params of
-        Nothing -> do
-            throwError $ injectTyped @AuthorizationError $ InvalidRequest (MissingParameter TokenParamRefreshToken)
-        Just tokenText -> case parseUrlPiece tokenText of
-            Left _err -> do
-                throwError $ injectTyped @AuthorizationError $ InvalidRequest (InvalidParameterFormat TokenParamRefreshToken)
-            Right rtId -> return rtId
 
     -- Look up refresh token
     mTokenInfo <- lookupRefreshToken refreshTokenId
