@@ -233,6 +233,53 @@ spec = do
                     Nothing -> expectationFailure "Failed to decode RFC 8414 JSON"
 
     describe "ProtectedResourceMetadata" $ do
+        context "Smart constructor validation" $ do
+            it "rejects non-HTTPS resource URI" $ do
+                let result =
+                        mkProtectedResourceMetadata
+                            "http://api.example.com" -- HTTP not HTTPS
+                            ["https://auth.example.com"]
+                            Nothing
+                            Nothing
+                            Nothing
+                            Nothing
+                result `shouldBe` Nothing
+
+            it "rejects relative resource URI" $ do
+                let result =
+                        mkProtectedResourceMetadata
+                            "/api" -- Relative URI
+                            ["https://auth.example.com"]
+                            Nothing
+                            Nothing
+                            Nothing
+                            Nothing
+                result `shouldBe` Nothing
+
+            it "rejects non-HTTPS documentation URI when provided" $ do
+                let result =
+                        mkProtectedResourceMetadata
+                            "https://api.example.com"
+                            ["https://auth.example.com"]
+                            Nothing
+                            Nothing
+                            Nothing
+                            (Just "http://docs.example.com") -- HTTP not HTTPS
+                result `shouldBe` Nothing
+
+            it "accepts valid HTTPS URIs" $ do
+                let result =
+                        mkProtectedResourceMetadata
+                            "https://api.example.com"
+                            ["https://auth.example.com"]
+                            Nothing
+                            Nothing
+                            Nothing
+                            (Just "https://docs.example.com")
+                case result of
+                    Just _ -> pure ()
+                    Nothing -> expectationFailure "Valid HTTPS URIs should be accepted"
+
         context "RFC 9728: Snake_case JSON serialization" $ do
             it "serializes required fields with snake_case keys" $ do
                 case mkProtectedResourceMetadata
