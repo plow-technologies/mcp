@@ -48,10 +48,11 @@ Dependency graph (no cycles):
 ```
 Types.hs          <- (no internal deps)
 Config.hs         <- Types
-Trace.hs          <- Types
+Errors.hs         <- Types
+Trace.hs          <- Types, Errors, Auth/Backend
 Metadata.hs       <- Types
 PKCE.hs           <- Types
-Store.hs          <- Types
+Store.hs          <- Types, Errors
 Store/InMemory.hs <- Store, Types
 Boundary.hs       <- Types
 Auth/Backend.hs   <- Types
@@ -70,14 +71,17 @@ API.hs            <- Types, Metadata
 
 ## MCP.* Module Dependencies
 
-MCP modules MAY import from Servant:
+MCP modules MAY import from Servant.
+
+**Note**: `MCP.Trace.OAuth` is DELETED. `MCP.Trace.HTTP` imports `OAuthTrace` and `renderOAuthTrace` directly from `Servant.OAuth2.IDP.Trace`.
 
 ```haskell
--- Allowed
+-- Allowed (MCP imports FROM Servant)
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
-import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
+import Servant.OAuth2.IDP.Trace (OAuthTrace (..), renderOAuthTrace)
 import Servant.OAuth2.IDP.Metadata (OAuthMetadata (..), ProtectedResourceMetadata (..))
 import Servant.OAuth2.IDP.PKCE (validateCodeVerifier, generateCodeChallenge)
+import Servant.OAuth2.IDP.Errors (ValidationError (..), AuthorizationError (..), LoginFlowError (..))
 ```
 
 ## Verification Script

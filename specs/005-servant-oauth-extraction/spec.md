@@ -12,6 +12,8 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 
 ### Session 2025-12-19
 
+- Q: How should OAuthTrace duplication be resolved? → A: Delete MCP.Trace.OAuth entirely; MCP.Trace.HTTP imports OAuthTrace directly from Servant.OAuth2.IDP.Trace (clean break, no re-exports)
+- Q: Where should renderOAuthTrace live? → A: Add renderOAuthTrace to Servant.OAuth2.IDP.Trace alongside the ADT (cohesion principle). Old version in MCP.Trace.OAuth is deleted with the module. New version must be adapted to unwrap domain newtypes (unClientId, unSessionId, unUsername, unScope, etc.) when rendering to Text
 - Q: Where should generateCodeVerifier be located? → A: Move to Servant.OAuth2.IDP.PKCE (module boundaries are domain-based, not IO vs pure)
 - Q: Where should OAuthGrantType be located? → A: Move to Servant.OAuth2.IDP.Types (alongside other OAuth protocol types)
 - Q: How should OAuthTrace constructors use domain types? → A: Use existing domain newtypes (Username, UserId, RedirectUri) + minimal new ADTs (OperationResult, DenialReason) - balanced approach
@@ -204,7 +206,13 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 
 #### FR-005: Create Servant.OAuth2.IDP.Trace Module
 **Priority**: P1 (High)
-**Description**: Define `OAuthTrace` ADT for OAuth-specific trace events using domain newtypes and minimal trace-specific ADTs
+**Description**: Define `OAuthTrace` ADT for OAuth-specific trace events using domain newtypes and minimal trace-specific ADTs. Include `renderOAuthTrace :: OAuthTrace -> Text` for human-readable rendering.
+**renderOAuthTrace Implementation**:
+- Adapted from `MCP.Trace.OAuth.renderOAuthTrace` (old version deleted with module)
+- Must unwrap domain newtypes: `unClientId`, `unSessionId`, `unUsername`, `unScope`, `unRedirectUri` (via `show` or custom URI rendering)
+- Must render `OperationResult` as "SUCCESS"/"FAILED"
+- Must render `DenialReason` constructors to human-readable text
+- Must render `OAuthGrantType` and `ValidationError` appropriately
 **Supporting Types**:
 - `data OperationResult = Success | Failure` (for boolean success/failure without primitives)
 - `data DenialReason = UserDenied | InvalidRequest | UnauthorizedClient | ServerError Text` (for authorization denial reasons)
@@ -279,15 +287,15 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - `network-uri` package for URI type in OAuthEnv
 - `base` package for NonEmpty from Data.List.NonEmpty (used in OAuthEnv supported* fields)
 
-## Files to Create
+## Files Created (WIP - already exist)
 
-| File | Purpose |
-|------|---------|
-| `src/Servant/OAuth2/IDP/Trace.hs` | OAuthTrace ADT with domain types |
-| `src/Servant/OAuth2/IDP/Config.hs` | OAuthEnv record (protocol config) |
-| `src/Servant/OAuth2/IDP/Metadata.hs` | OAuthMetadata, ProtectedResourceMetadata |
-| `src/Servant/OAuth2/IDP/PKCE.hs` | PKCE functions (generate/validate, domain newtypes) |
-| `src/Servant/OAuth2/IDP/Errors.hs` | All error types (ValidationError, AuthorizationError, LoginFlowError) |
+| File | Purpose | Remaining Work |
+|------|---------|----------------|
+| `src/Servant/OAuth2/IDP/Trace.hs` | OAuthTrace ADT with domain types | Add `renderOAuthTrace` function (adapted from deleted MCP.Trace.OAuth, unwraps domain newtypes) |
+| `src/Servant/OAuth2/IDP/Config.hs` | OAuthEnv record (protocol config) | Complete |
+| `src/Servant/OAuth2/IDP/Metadata.hs` | OAuthMetadata, ProtectedResourceMetadata | Complete |
+| `src/Servant/OAuth2/IDP/PKCE.hs` | PKCE functions (generate/validate, domain newtypes) | Complete |
+| `src/Servant/OAuth2/IDP/Errors.hs` | All error types (ValidationError, AuthorizationError, LoginFlowError) | Complete |
 
 ## Files to Modify
 
@@ -300,20 +308,27 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 | `src/Servant/OAuth2/IDP/Server.hs` | Config/Trace types, Errors import |
 | `src/Servant/OAuth2/IDP/Handlers/Helpers.hs` | Config record, trace events, Errors import |
 | `src/Servant/OAuth2/IDP/Handlers/Metadata.hs` | Config record, Metadata import |
-| `src/Servant/OAuth2/IDP/Handlers/Registration.hs` | Config/Trace types, Errors import |
+| `src/Servant/OAuth2/IDP/Handlers/Registration.hs` | Config/Trace types, Errors import, switch OAuthTrace import to Servant.OAuth2.IDP.Trace |
 | `src/Servant/OAuth2/IDP/Handlers/Authorization.hs` | Config/Trace types, Errors import, MonadTime import |
-| `src/Servant/OAuth2/IDP/Handlers/Login.hs` | Config/Trace types, Errors import, MonadTime import |
-| `src/Servant/OAuth2/IDP/Handlers/Token.hs` | Config/Trace types, PKCE import, Errors import |
+| `src/Servant/OAuth2/IDP/Handlers/Login.hs` | Config/Trace types, Errors import, MonadTime import, switch OAuthTrace import to Servant.OAuth2.IDP.Trace |
+| `src/Servant/OAuth2/IDP/Handlers/Token.hs` | Config/Trace types, PKCE import, Errors import, switch OAuthTrace import to Servant.OAuth2.IDP.Trace |
 | `src/Servant/OAuth2/IDP/Test/Internal.hs` | MonadTime import, fix doc comment typo |
 | `src/MCP/Server/Auth.hs` | Remove moved types (clean break), create MCPOAuthConfig |
 | `src/MCP/Server/HTTP/AppEnv.hs` | Add OAuthEnv field, tracer adapter, MCPOAuthConfig |
-| `mcp-haskell.cabal` | Add new modules, remove LoginFlowError module |
+| `src/MCP/Trace/HTTP.hs` | Import OAuthTrace from Servant.OAuth2.IDP.Trace instead of MCP.Trace.OAuth |
+| `src/MCP/Trace/Types.hs` | Import OAuthTrace from Servant.OAuth2.IDP.Trace instead of MCP.Trace.OAuth |
+| `test/Trace/FilterSpec.hs` | Import OAuthTrace from Servant.OAuth2.IDP.Trace |
+| `test/Trace/GoldenSpec.hs` | Import OAuthTrace and renderOAuthTrace from Servant.OAuth2.IDP.Trace |
+| `test/Trace/RenderSpec.hs` | Import OAuthTrace from Servant.OAuth2.IDP.Trace |
+| `test/Trace/OAuthSpec.hs` | Import OAuthTrace and renderOAuthTrace from Servant.OAuth2.IDP.Trace |
+| `mcp-haskell.cabal` | Add new modules, remove LoginFlowError module, remove MCP.Trace.OAuth module |
 
 ## Files to Delete
 
 | File | Reason |
 |------|--------|
 | `src/Servant/OAuth2/IDP/LoginFlowError.hs` | LoginFlowError moved to Errors module |
+| `src/MCP/Trace/OAuth.hs` | OAuthTrace moved to Servant.OAuth2.IDP.Trace; MCP.Trace.HTTP imports directly from Servant |
 
 ## Risks
 
