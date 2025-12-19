@@ -270,3 +270,33 @@ spec = do
             it "unwraps to Text correctly" $
                 let token = RefreshToken "rt_refresh_123"
                  in unRefreshToken token `shouldBe` "rt_refresh_123"
+
+    describe "FR-002b: OAuthGrantType enum (moved from MCP.Server.Auth)" $ do
+        context "JSON serialization" $ do
+            it "serializes AuthorizationCode to JSON" $
+                let grantType = AuthorizationCode
+                    encoded = encode grantType
+                    decoded = decode encoded
+                 in decoded `shouldBe` Just grantType
+
+            it "serializes ClientCredentials to JSON" $
+                let grantType = ClientCredentials
+                    encoded = encode grantType
+                    decoded = decode encoded
+                 in decoded `shouldBe` Just grantType
+
+            it "deserializes from JSON string representation" $
+                decode "\"authorization_code\"" `shouldBe` Just AuthorizationCode
+
+            it "deserializes client_credentials from JSON" $
+                decode "\"client_credentials\"" `shouldBe` Just ClientCredentials
+
+        context "Equality and Show" $ do
+            it "distinguishes between constructors" $
+                AuthorizationCode `shouldNotBe` ClientCredentials
+
+            it "has readable Show output for AuthorizationCode" $
+                show AuthorizationCode `shouldContain` "Authorization"
+
+            it "has readable Show output for ClientCredentials" $
+                show ClientCredentials `shouldContain` "Client"
