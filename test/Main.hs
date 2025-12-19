@@ -49,6 +49,7 @@ import MCP.Server.OAuth.TypesSpec qualified as TypesSpec
 import MCP.Server.OAuth.AppSpec qualified as AppSpec
 
 -- HTTP endpoint tests
+import MCP.Server.HTTP.AppEnvSpec qualified as AppEnvSpec
 import MCP.Server.HTTP.McpAuthSpec qualified as McpAuthSpec
 
 -- MCP.Server.Auth tests
@@ -126,6 +127,7 @@ spec = do
     AppSpec.spec
 
     -- HTTP endpoint tests
+    AppEnvSpec.spec
     McpAuthSpec.spec
 
     -- MCP.Server.Auth tests

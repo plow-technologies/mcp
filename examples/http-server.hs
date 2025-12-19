@@ -49,6 +49,7 @@ import MCP.Server
 import MCP.Server.Auth
 import MCP.Server.HTTP (DemoOAuthBundle (..), HTTPServerConfig (..), defaultDemoOAuthBundle, mcpAppWithOAuth, runServerHTTP)
 import MCP.Server.HTTP.AppEnv (AppEnv (..), runAppM)
+import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Types (MCPTrace (..), isOAuthTrace, renderMCPTrace)
 import MCP.Types
 import Servant.Auth.Server (defaultJWTSettings, generateKey)
@@ -313,7 +314,7 @@ main = do
                 -- Create AppEnv with configured settings (including stateVar)
                 let bundle = defaultDemoOAuthBundle
                     oauthCfgEnv = bundleEnv bundle -- Use OAuthEnv from bundle
-                    oauthTracerNull = IOTracer $ Tracer $ \_ -> pure () -- Null tracer for OAuth events
+                    oauthTracer = contramap HTTPOAuth httpTracer -- Route OAuth traces through HTTP tracer
                     appEnv =
                         AppEnv
                             { envOAuth = oauthEnv
@@ -321,7 +322,7 @@ main = do
                             , envConfig = config
                             , envTracer = httpTracer
                             , envOAuthEnv = oauthCfgEnv
-                            , envOAuthTracer = oauthTracerNull
+                            , envOAuthTracer = oauthTracer
                             , envJWT = jwtSettings
                             , envServerState = stateVar
                             , envTimeProvider = Nothing -- Use real IO time

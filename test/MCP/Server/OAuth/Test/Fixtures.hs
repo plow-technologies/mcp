@@ -45,9 +45,12 @@ module MCP.Server.OAuth.Test.Fixtures (
 import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVarIO)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, ReaderT, ask)
+import Data.Functor.Contravariant (contramap)
 import Data.Time.Clock (UTCTime, addUTCTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeOrError)
 import Plow.Logging (IOTracer (..), Tracer (..))
+
+import MCP.Trace.HTTP (HTTPTrace (..))
 import Servant.Auth.Server (defaultJWTSettings, generateKey)
 import Servant.Server.Internal.Handler (runHandler)
 
@@ -134,7 +137,8 @@ mkTestEnv timeTVar = do
 
     -- Use OAuthEnv from bundle
     let oauthCfgEnv = bundleEnv bundle
-        oauthTracerNull = IOTracer (Tracer (\_ -> pure ())) -- Null tracer for OAuth events
+        -- Create OAuth tracer by mapping HTTPOAuth constructor over HTTP tracer
+        oauthTracer = contramap HTTPOAuth tracer
     return
         AppEnv
             { envOAuth = oauthEnv
@@ -142,7 +146,7 @@ mkTestEnv timeTVar = do
             , envConfig = serverConfig
             , envTracer = tracer
             , envOAuthEnv = oauthCfgEnv
-            , envOAuthTracer = oauthTracerNull
+            , envOAuthTracer = oauthTracer
             , envJWT = jwtSettings
             , envServerState = placeholderStateVar
             , envTimeProvider = Just timeTVar -- Use controllable time for tests

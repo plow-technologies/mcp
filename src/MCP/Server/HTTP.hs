@@ -312,9 +312,8 @@ mcpAppInternal config tracer stateVar oauthEnv jwtSettings =
     oauthServerNew cfg httpTracer oauth jwtSet =
         let authEnv = DemoCredentialEnv defaultDemoCredentialStore
             oauthCfgEnv = bundleEnv defaultDemoOAuthBundle
-            -- Create a simple OAuthTrace tracer that discards traces for now
-            -- TODO: Convert between MCP.Trace.OAuth.OAuthTrace and Servant.OAuth2.IDP.Trace.OAuthTrace
-            oauthTracer = IOTracer $ Tracer $ \_ -> pure () -- Discard OAuth traces during transition
+            -- Create OAuth tracer by mapping HTTPOAuth constructor over HTTP tracer
+            oauthTracer = contramap HTTPOAuth httpTracer
             appEnv =
                 AppEnv
                     { envOAuth = oauth
@@ -809,8 +808,8 @@ demoMcpApp = do
 
     -- Get OAuthEnv from bundle
     let oauthCfgEnv = bundleEnv bundle
-        -- Create a simple OAuthTrace tracer that discards traces for now
-        oauthTracer = IOTracer $ Tracer $ \_ -> pure ()
+        -- Create OAuth tracer by mapping HTTPOAuth constructor over HTTP tracer
+        oauthTracer = contramap HTTPOAuth tracer
 
     -- Create AppEnv with all fields including stateVar
     let appEnv =
