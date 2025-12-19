@@ -1,6 +1,15 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+{- |
+Module      : Servant.OAuth2.IDP.APISpec
+Description : Tests for OAuth API request/response types
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
+License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
+-}
 module Servant.OAuth2.IDP.APISpec (spec) where
 
 import Data.Aeson (decode, encode)

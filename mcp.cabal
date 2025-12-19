@@ -50,13 +50,13 @@ license:            MIT
 license-file:       LICENSE
 
 -- The package author(s).
-author:             Matthias Pall Gissurarson
+author:             Matthias Pall Gissurarson, PakSCADA LLC
 
 -- An email address to which users can send suggestions, bug reports, and patches.
-maintainer:         mpg@mpg.is
+maintainer:         mpg@mpg.is, alberto.valverde@pakenergy.com
 
 -- A copyright notice.
--- copyright:
+copyright:          (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 category:           Network
 build-type:         Simple
 

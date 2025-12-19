@@ -4,7 +4,7 @@
 {- |
 Module      : Security.SessionCookieSpec
 Description : Tests for session cookie Secure flag behavior
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
 
 Tests that session cookies include the Secure flag when requireHTTPS is enabled,

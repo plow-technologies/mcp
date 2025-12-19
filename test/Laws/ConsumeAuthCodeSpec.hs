@@ -6,7 +6,7 @@ Module      : Laws.ConsumeAuthCodeSpec
 Description : Tests for atomic consumeAuthCode operation
 Copyright   : (C) 2025
 License     : MIT
-Maintainer  : maintainer@example.com
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
 
 This module tests the atomic consumeAuthCode operation which combines
 lookup and delete to prevent race conditions per RFC 6749 §4.1.2

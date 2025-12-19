@@ -3,9 +3,9 @@
 {- |
 Module      : Servant.OAuth2.IDP.Store.InMemory
 Description : TVar-based in-memory implementation of OAuthStateStore
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
-Maintainer  : maintainer@example.com
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
 
 This module provides an in-memory TVar-based implementation of the 'OAuthStateStore'
 typeclass suitable for development, testing, and single-instance deployments.

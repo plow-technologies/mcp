@@ -1,5 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{- |
+Module      : Servant.OAuth2.IDP.LucidRenderingSpec
+Description : Tests for Lucid HTML rendering
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
+License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
+-}
 module Servant.OAuth2.IDP.LucidRenderingSpec (spec) where
 
 import Data.Text qualified as T

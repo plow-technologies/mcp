@@ -1,6 +1,14 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
--- | test/Functional/OAuthFlowSpec.hs
+{- |
+Module      : Functional.OAuthFlowSpec
+Description : Functional tests for OAuth flow
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
+License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
+-}
 module Functional.OAuthFlowSpec (spec) where
 
 import Test.Hspec

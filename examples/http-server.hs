@@ -3,15 +3,22 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 {- |
-Example HTTP MCP Server
+Module      : Main
+Description : Example HTTP MCP Server
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
+License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
 
 This example demonstrates how to run the MCP server over HTTP transport.
 The server will expose the MCP API at POST /mcp
 
 To test:
+
 1. Compile: cabal build mcp-http
 2. Run: cabal run mcp-http
-3. Send JSON-RPC requests to: http://localhost:<port>/mcp
+3. Send JSON-RPC requests to: http://localhost:\<port\>/mcp
 
 Example request:
 curl -X POST http://localhost:8080/mcp \

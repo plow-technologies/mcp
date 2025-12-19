@@ -3,9 +3,9 @@
 {- |
 Module      : Servant.OAuth2.IDP.LoginFlowError
 Description : Semantic errors for OAuth login flow
-Copyright   : (C) 2025 Matthias Pall Gissurarson
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
-Maintainer  : mpg@mpg.is
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
 Stability   : experimental
 Portability : GHC
 

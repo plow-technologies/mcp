@@ -1,5 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{- |
+Module      : Main
+Description : Test suite entry point
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
+License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
+-}
 module Main (main) where
 
 import Data.ByteArray qualified as BA

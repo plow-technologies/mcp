@@ -1,5 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{- |
+Module      : Servant.OAuth2.IDP.TypesSpec
+Description : Tests for OAuth type newtypes and validation
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
+License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
+-}
 module Servant.OAuth2.IDP.TypesSpec (spec) where
 
 import Data.Aeson (decode, encode)

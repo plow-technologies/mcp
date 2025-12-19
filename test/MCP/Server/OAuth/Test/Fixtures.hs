@@ -6,9 +6,9 @@
 {- |
 Module      : MCP.Server.OAuth.Test.Fixtures
 Description : Test fixtures for OAuth HTTP-level testing
-Copyright   : (C) 2025 Matthias Pall Gissurarson
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
-Maintainer  : mpg@mpg.is
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
 Stability   : experimental
 Portability : GHC
 

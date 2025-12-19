@@ -8,9 +8,11 @@
 {- |
 Module      : MCP.Server.HTTP.AppEnv
 Description : Composite environment and error types for OAuth HTTP server
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
-Maintainer  : maintainer@example.com
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
 
 This module provides composite environment and error types that unify
 OAuth state storage, credential authentication, server configuration,

@@ -5,9 +5,9 @@
 {- |
 Module      : Laws.OAuthUserTypeSpec
 Description : Tests for OAuthUser/OAuthUserId associated types
-Copyright   : (C) 2025 Matthias Pall Gissurarson
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
-Maintainer  : mpg@mpg.is
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
 Stability   : experimental
 Portability : GHC
 

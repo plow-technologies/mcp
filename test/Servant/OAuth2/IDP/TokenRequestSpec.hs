@@ -1,5 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{- |
+Module      : Servant.OAuth2.IDP.TokenRequestSpec
+Description : Tests for OAuth token request types
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
+License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
+-}
 module Servant.OAuth2.IDP.TokenRequestSpec (spec) where
 
 import Data.Text (Text)

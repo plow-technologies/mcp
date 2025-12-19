@@ -1,5 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{- |
+Module      : Laws.AuthCodeFunctorSpec
+Description : Property tests for AuthorizationCode Functor laws
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
+License     : MIT
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
+Stability   : experimental
+Portability : GHC
+-}
 module Laws.AuthCodeFunctorSpec (spec) where
 
 import Data.Set qualified as Set

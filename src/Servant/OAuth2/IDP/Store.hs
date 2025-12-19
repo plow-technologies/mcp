@@ -3,9 +3,9 @@
 {- |
 Module      : Servant.OAuth2.IDP.Store
 Description : OAuth state storage typeclass with algebraic laws
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
-Maintainer  : maintainer@example.com
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
 
 This module defines the 'OAuthStateStore' typeclass for managing OAuth 2.1 server state,
 including authorization codes, access tokens, refresh tokens, registered clients, and

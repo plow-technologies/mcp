@@ -3,7 +3,7 @@
 {- |
 Module      : Trace.GoldenSpec
 Description : Golden tests for trace rendering output format
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
 
 Tests for SC-005: Golden tests for render output.

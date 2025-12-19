@@ -7,7 +7,7 @@
 {- |
 Module      : MCP.Server.OAuth.AppSpec
 Description : Test specification for polymorphic OAuth application entry points
-Copyright   : (c) 2025
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
 
 This module tests the polymorphic OAuth application entry point functions.

@@ -1,9 +1,9 @@
 {- |
 Module      : Servant.OAuth2.IDP.Handlers
 Description : Polymorphic OAuth 2.1 handler implementations
-Copyright   : (C) 2025 Matthias Pall Gissurarson
+Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
-Maintainer  : mpg@mpg.is
+Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
 Stability   : experimental
 Portability : GHC
 
