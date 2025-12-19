@@ -102,6 +102,7 @@ library
         Servant.OAuth2.IDP.Store.InMemory
         Servant.OAuth2.IDP.Boundary
         Servant.OAuth2.IDP.Errors
+        Servant.OAuth2.IDP.Trace
         Servant.OAuth2.IDP.Server
         Servant.OAuth2.IDP.Handlers
         Servant.OAuth2.IDP.Handlers.HTML
@@ -301,6 +302,7 @@ test-suite mcp-test
         Servant.OAuth2.IDP.ErrorsSpec
         Servant.OAuth2.IDP.MetadataSpec
         Servant.OAuth2.IDP.PKCESpec
+        Servant.OAuth2.IDP.TraceSpec
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

@@ -70,6 +70,7 @@ import Servant.OAuth2.IDP.LucidRenderingSpec qualified as LucidRenderingSpec
 import Servant.OAuth2.IDP.MetadataSpec qualified as MetadataSpec
 import Servant.OAuth2.IDP.PKCESpec qualified as PKCESpec
 import Servant.OAuth2.IDP.TokenRequestSpec qualified as TokenRequestSpec
+import Servant.OAuth2.IDP.TraceSpec qualified as TraceSpec
 import Servant.OAuth2.IDP.TypesSpec qualified as IDPTypesSpec
 
 main :: IO ()
@@ -146,6 +147,7 @@ spec = do
         ErrorsSpec.spec
         MetadataSpec.spec
         PKCESpec.spec
+        TraceSpec.spec
 
     -- Typeclass law tests (using TestM with controlled time)
     describe "TestM OAuthStateStore" $ do
