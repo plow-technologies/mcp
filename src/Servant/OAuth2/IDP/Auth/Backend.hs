@@ -59,8 +59,9 @@ module Servant.OAuth2.IDP.Auth.Backend (
     AuthBackend (..),
 
     -- * Identity Newtypes
-    Username (..),
+    Username,
     mkUsername,
+    usernameText,
 
     -- * Credential Newtypes (ScrubbedBytes-based)
     PlaintextPassword (..),
@@ -107,6 +108,17 @@ mkUsername :: Text -> Maybe Username
 mkUsername t
     | T.null t = Nothing
     | otherwise = Just (Username t)
+
+{- | Extract the Text from a Username.
+
+@
+case mkUsername "alice" of
+  Just u -> usernameText u  -- "alice"
+  Nothing -> error "empty username"
+@
+-}
+usernameText :: Username -> Text
+usernameText (Username t) = t
 
 -- ============================================================================
 -- Credential Types (using ScrubbedBytes for security)

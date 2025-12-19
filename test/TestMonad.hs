@@ -88,7 +88,16 @@ import Data.Map.Strict qualified as Map
 import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (UTCTime, addUTCTime)
 import MCP.Server.Time
-import Servant.OAuth2.IDP.Auth.Backend
+import Servant.OAuth2.IDP.Auth.Backend (
+    AuthBackend (..),
+    CredentialStore (..),
+    HashedPassword,
+    PlaintextPassword,
+    Salt (..),
+    Username,
+    mkHashedPassword,
+    usernameText,
+ )
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..))
 import Servant.OAuth2.IDP.Store
 import Servant.OAuth2.IDP.Types hiding (OAuthState)
@@ -320,12 +329,12 @@ instance AuthBackend TestM where
                 let candidateHash = mkHashedPassword (storeSalt store) password
                 if storedHash == candidateHash -- Constant-time via ScrubbedBytes Eq
                     then do
-                        let userId = UserId (unUsername username)
+                        let userId = UserId (usernameText username)
                         let authUser =
                                 AuthUser
                                     { userUserId = userId
-                                    , userUserEmail = Just (unUsername username <> "@test.local")
-                                    , userUserName = Just (unUsername username)
+                                    , userUserEmail = Just (usernameText username <> "@test.local")
+                                    , userUserName = Just (usernameText username)
                                     }
                         pure $ Just authUser
                     else pure Nothing

@@ -55,10 +55,11 @@ import Servant.OAuth2.IDP.Auth.Backend (
     HashedPassword,
     PlaintextPassword (..),
     Salt (..),
-    Username (..),
+    Username,
     mkHashedPassword,
     mkPlaintextPassword,
     mkUsername,
+    usernameText,
  )
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..))
 import Servant.OAuth2.IDP.Types (
@@ -135,7 +136,7 @@ instance Arbitrary Username where
         len <- chooseInt (1, 20) -- Reasonable username length
         username <- T.pack <$> vectorOf len (elements validChars)
         maybe arbitrary pure (mkUsername username) -- Retry if validation fails (shouldn't happen)
-    shrink (Username t) = [u | s <- shrink (T.unpack t), not (null s), Just u <- [mkUsername (T.pack s)]]
+    shrink u = [u' | s <- shrink (T.unpack (usernameText u)), not (null s), Just u' <- [mkUsername (T.pack s)]]
 
 -- ============================================================================
 -- Value Newtypes

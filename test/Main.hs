@@ -19,7 +19,7 @@ import Data.Time.Clock (UTCTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeM)
 
 -- Auth typeclass modules
-import Servant.OAuth2.IDP.Auth.Backend (Salt (..), Username (..), mkHashedPassword, mkPlaintextPassword)
+import Servant.OAuth2.IDP.Auth.Backend (Salt (..), mkHashedPassword, mkPlaintextPassword, mkUsername)
 
 import Test.Hspec
 
@@ -103,8 +103,14 @@ runTestMWithDemoCreds action = do
     env <- mkTestEnv baseTestTime Map.empty
     runTestM env $ do
         -- Add demo credentials
-        addTestCredential (Username "demo") (mkPlaintextPassword "demo123")
-        addTestCredential (Username "admin") (mkPlaintextPassword "admin456")
+        let demoUser = case mkUsername "demo" of
+                Just u -> u
+                Nothing -> error "Test fixture: invalid username 'demo'"
+        let adminUser = case mkUsername "admin" of
+                Just u -> u
+                Nothing -> error "Test fixture: invalid username 'admin'"
+        addTestCredential demoUser (mkPlaintextPassword "demo123")
+        addTestCredential adminUser (mkPlaintextPassword "admin456")
         action
 
 spec :: Spec
@@ -165,9 +171,12 @@ spec = do
         AuthBackendAssociatedTypesSpec.spec
         AuthBackendSignatureSpec.spec
         authBackendLaws runTestMWithDemoCreds
+        let demoUser = case mkUsername "demo" of
+                Just u -> u
+                Nothing -> error "Test fixture: invalid username 'demo'"
         authBackendKnownCredentials
             runTestMWithDemoCreds
-            (Username "demo")
+            demoUser
             (mkPlaintextPassword "demo123")
             (mkPlaintextPassword "wrongpassword")
 

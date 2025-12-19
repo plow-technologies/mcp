@@ -78,9 +78,11 @@ import Servant.OAuth2.IDP.Auth.Backend (
     AuthBackend (..),
     CredentialStore (..),
     Salt (..),
-    Username (..),
+    Username,
     mkHashedPassword,
     mkPlaintextPassword,
+    mkUsername,
+    usernameText,
  )
 import Servant.OAuth2.IDP.Types (UserId (..))
 
@@ -167,12 +169,12 @@ instance (MonadIO m) => AuthBackend (ReaderT DemoCredentialEnv m) where
                 -- ScrubbedBytes Eq is constant-time
                 if hash == candidateHash
                     then do
-                        let userId = UserId (unUsername username)
+                        let userId = UserId (usernameText username)
                         let authUser =
                                 AuthUser
                                     { userUserId = userId
-                                    , userUserEmail = Just (unUsername username <> "@demo.local")
-                                    , userUserName = Just (unUsername username)
+                                    , userUserEmail = Just (usernameText username <> "@demo.local")
+                                    , userUserName = Just (usernameText username)
                                     }
                         pure $ Just authUser
                     else pure Nothing
@@ -208,11 +210,19 @@ defaultDemoCredentialStore =
         salt = Salt saltBytes
         demoHash = mkHashedPassword salt (mkPlaintextPassword "demo123")
         adminHash = mkHashedPassword salt (mkPlaintextPassword "admin456")
+        -- These should never fail since the strings are non-empty literals
+        -- Using error is acceptable here since these are compile-time constants
+        demoUser = case mkUsername "demo" of
+            Just u -> u
+            Nothing -> error "BUG: mkUsername failed for non-empty literal 'demo'"
+        adminUser = case mkUsername "admin" of
+            Just u -> u
+            Nothing -> error "BUG: mkUsername failed for non-empty literal 'admin'"
      in CredentialStore
             { storeCredentials =
                 Map.fromList
-                    [ (Username "demo", demoHash)
-                    , (Username "admin", adminHash)
+                    [ (demoUser, demoHash)
+                    , (adminUser, adminHash)
                     ]
             , storeSalt = salt
             }

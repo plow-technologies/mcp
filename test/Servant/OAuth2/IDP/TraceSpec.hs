@@ -14,7 +14,7 @@ Per TDD protocol: these tests are written FIRST and will fail until implementati
 -}
 module Servant.OAuth2.IDP.TraceSpec (spec) where
 
-import Servant.OAuth2.IDP.Auth.Backend (Username (..))
+import Servant.OAuth2.IDP.Auth.Backend (Username, mkUsername)
 import Servant.OAuth2.IDP.Errors (ValidationError (..))
 import Servant.OAuth2.IDP.Trace
 import Servant.OAuth2.IDP.Types (
@@ -46,7 +46,9 @@ testSessionId :: SessionId
 testSessionId = SessionId "12345678-1234-1234-1234-123456789abc"
 
 testUsername :: Username
-testUsername = Username "testuser"
+testUsername = case mkUsername "testuser" of
+    Just u -> u
+    Nothing -> error "Test fixture: invalid username"
 
 spec :: Spec
 spec = do

@@ -46,7 +46,7 @@ import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.OAuth qualified as OAuthTrace
 import Plow.Logging (IOTracer, traceWith)
 import Servant.OAuth2.IDP.API (LoginForm (..))
-import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..), Username (..), unUsername)
+import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..), usernameText)
 import Servant.OAuth2.IDP.Errors (AuthorizationError (..), LoginFlowError (..))
 import Servant.OAuth2.IDP.Handlers.Helpers (extractSessionFromCookie, generateAuthCode)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
@@ -182,11 +182,11 @@ handleLogin mCookie loginForm = do
                 password = formPassword loginForm
 
             validationResult <- validateCredentials username password
-            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt (unUsername username) (isJust validationResult)
+            liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthLoginAttempt (usernameText username) (isJust validationResult)
             case validationResult of
                 Just authUser -> do
                     -- Emit authorization granted trace
-                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (unClientId $ pendingClientId pending) (unUsername username)
+                    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationGranted (unClientId $ pendingClientId pending) (usernameText username)
 
                     -- Generate authorization code
                     code <- liftIO $ generateAuthCode config
