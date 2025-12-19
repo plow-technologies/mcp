@@ -56,6 +56,9 @@ module Servant.OAuth2.IDP.Types (
     AccessToken (..),
     TokenType (..),
     RefreshToken (..),
+    TokenValidity,
+    mkTokenValidity,
+    unTokenValidity,
 
     -- * HTTP Response Newtypes
     RedirectTarget (..),
@@ -67,6 +70,7 @@ module Servant.OAuth2.IDP.Types (
     ResponseType (..),
     ClientAuthMethod (..),
     OAuthGrantType (..),
+    LoginAction (..),
 
     -- * Domain Entities
     AuthorizationCode (..),
@@ -91,7 +95,7 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Time.Clock (UTCTime)
+import Data.Time.Clock (NominalDiffTime, UTCTime)
 import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Network.HTTP.Types.Status (Status, status400, status401, status403)
@@ -576,6 +580,20 @@ newtype RefreshToken = RefreshToken {unRefreshToken :: Text}
     deriving stock (Eq, Show, Generic)
     deriving newtype (FromJSON, ToJSON)
 
+{- | Token validity duration (FR-004c)
+Denotes what it IS (token validity duration), not field name
+-}
+newtype TokenValidity = TokenValidity {unTokenValidity :: NominalDiffTime}
+    deriving stock (Eq, Show, Generic)
+
+-- | Smart constructor for TokenValidity
+mkTokenValidity :: NominalDiffTime -> TokenValidity
+mkTokenValidity = TokenValidity
+
+-- Custom ToJSON: outputs integer seconds for OAuth wire format compliance
+instance ToJSON TokenValidity where
+    toJSON (TokenValidity t) = toJSON (floor t :: Int)
+
 -- -----------------------------------------------------------------------------
 -- HTTP Response Newtypes
 -- -----------------------------------------------------------------------------
@@ -710,8 +728,10 @@ instance ToHttpApiData ClientAuthMethod where
 
 -- | OAuth grant types (MCP-specific subset)
 data OAuthGrantType
-    = OAuthAuthorizationCode -- ^ Authorization code flow for user-based scenarios
-    | OAuthClientCredentials -- ^ Client credentials flow for application-to-application
+    = -- | Authorization code flow for user-based scenarios
+      OAuthAuthorizationCode
+    | -- | Client credentials flow for application-to-application
+      OAuthClientCredentials
     deriving stock (Eq, Ord, Show, Generic)
 
 instance FromJSON OAuthGrantType where
@@ -723,6 +743,21 @@ instance FromJSON OAuthGrantType where
 instance ToJSON OAuthGrantType where
     toJSON OAuthAuthorizationCode = toJSON ("authorization_code" :: Text)
     toJSON OAuthClientCredentials = toJSON ("client_credentials" :: Text)
+
+-- | Login form action (approve or deny authorization)
+data LoginAction
+    = ActionApprove
+    | ActionDeny
+    deriving stock (Eq, Show, Generic)
+
+instance FromHttpApiData LoginAction where
+    parseUrlPiece "approve" = Right ActionApprove
+    parseUrlPiece "deny" = Right ActionDeny
+    parseUrlPiece x = Left ("Invalid action: " <> x)
+
+instance ToHttpApiData LoginAction where
+    toUrlPiece ActionApprove = "approve"
+    toUrlPiece ActionDeny = "deny"
 
 -- -----------------------------------------------------------------------------
 -- Domain Entities

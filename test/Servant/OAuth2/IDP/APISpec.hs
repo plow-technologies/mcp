@@ -32,6 +32,7 @@ import Servant.OAuth2.IDP.Types (
     mkClientSecret,
     mkRedirectUri,
     mkScope,
+    mkTokenValidity,
  )
 import Test.Hspec
 
@@ -156,7 +157,7 @@ spec = do
             it "serializes access_token as unwrapped Text" $ do
                 let accessToken = AccessToken "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test"
                     tokenType = TokenType "Bearer"
-                    response = TokenResponse accessToken tokenType (Just 3600) Nothing Nothing
+                    response = TokenResponse accessToken tokenType (Just (mkTokenValidity 3600)) Nothing Nothing
                     encoded = encode response
                     decoded = decode encoded :: Maybe Value
 
@@ -182,7 +183,7 @@ spec = do
                 let accessToken = AccessToken "access_xyz"
                     tokenType = TokenType "Bearer"
                     refreshToken = RefreshToken "rt_refresh_token_123"
-                    response = TokenResponse accessToken tokenType (Just 3600) (Just refreshToken) Nothing
+                    response = TokenResponse accessToken tokenType (Just (mkTokenValidity 3600)) (Just refreshToken) Nothing
                     encoded = encode response
                     decoded = decode encoded :: Maybe Value
 
@@ -194,7 +195,7 @@ spec = do
             it "omits refresh_token field when Nothing" $ do
                 let accessToken = AccessToken "access_only"
                     tokenType = TokenType "Bearer"
-                    response = TokenResponse accessToken tokenType (Just 3600) Nothing Nothing
+                    response = TokenResponse accessToken tokenType (Just (mkTokenValidity 3600)) Nothing Nothing
                     encoded = encode response
                     decoded = decode encoded :: Maybe Value
 
@@ -209,7 +210,7 @@ spec = do
                     scope1 = unsafeMk $ mkScope "mcp:read"
                     scope2 = unsafeMk $ mkScope "mcp:write"
                     scopes = Set.fromList [scope1, scope2]
-                    response = TokenResponse accessToken tokenType (Just 3600) Nothing (Just (Scopes scopes))
+                    response = TokenResponse accessToken tokenType (Just (mkTokenValidity 3600)) Nothing (Just (Scopes scopes))
                     encoded = encode response
                     decoded = decode encoded :: Maybe Value
 

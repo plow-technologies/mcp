@@ -60,6 +60,7 @@ import Servant.OAuth2.IDP.Types (
     authCodeChallenge,
     authScopes,
     authUserId,
+    mkTokenValidity,
     unAuthCodeId,
     unCodeChallenge,
     unCodeVerifier,
@@ -235,7 +236,7 @@ handleAuthCodeGrant params = do
         TokenResponse
             { access_token = AccessToken accessTokenText
             , token_type = TokenType "Bearer"
-            , expires_in = Just $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
+            , expires_in = Just $ mkTokenValidity $ fromIntegral $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
             , refresh_token = Just (RefreshToken refreshTokenText)
             , scope = if Set.null (authScopes authCode) then Nothing else Just (Scopes (authScopes authCode))
             }
@@ -319,7 +320,7 @@ handleRefreshTokenGrant params = do
         TokenResponse
             { access_token = AccessToken newAccessTokenText
             , token_type = TokenType "Bearer"
-            , expires_in = Just $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
+            , expires_in = Just $ mkTokenValidity $ fromIntegral $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
             , refresh_token = Just (RefreshToken (unRefreshTokenId refreshTokenId))
             , scope = Nothing
             }

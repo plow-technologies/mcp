@@ -16,7 +16,7 @@ import Data.Either (isLeft)
 import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import Data.Text (Text)
-import Servant.OAuth2.IDP.Types (AccessToken (..), ClientName (..), ClientSecret (..), OAuthGrantType (..), RefreshToken (..), Scope (..), Scopes (..), TokenType (..), mkClientName, mkClientSecret, mkRedirectUri, parseScopes, serializeScopeSet)
+import Servant.OAuth2.IDP.Types (AccessToken (..), ClientName (..), ClientSecret (..), LoginAction (..), OAuthGrantType (..), RefreshToken (..), Scope (..), Scopes (..), TokenType (..), mkClientName, mkClientSecret, mkRedirectUri, mkTokenValidity, parseScopes, serializeScopeSet)
 import Test.Hspec
 import Web.HttpApiData (parseUrlPiece, toUrlPiece)
 
@@ -300,3 +300,63 @@ spec = do
 
             it "has readable Show output for OAuthClientCredentials" $
                 show OAuthClientCredentials `shouldContain` "Client"
+
+    describe "FR-004c: LoginAction ADT" $ do
+        context "FromHttpApiData instance (parsing form input)" $ do
+            it "parses 'approve' to ActionApprove" $
+                parseUrlPiece "approve" `shouldBe` Right ActionApprove
+
+            it "parses 'deny' to ActionDeny" $
+                parseUrlPiece "deny" `shouldBe` Right ActionDeny
+
+            it "rejects invalid action 'other'" $
+                (parseUrlPiece "other" :: Either Text LoginAction) `shouldSatisfy` isLeft
+
+            it "rejects empty string" $
+                (parseUrlPiece "" :: Either Text LoginAction) `shouldSatisfy` isLeft
+
+        context "ToHttpApiData instance (rendering in forms)" $ do
+            it "renders ActionApprove as 'approve'" $
+                toUrlPiece ActionApprove `shouldBe` "approve"
+
+            it "renders ActionDeny as 'deny'" $
+                toUrlPiece ActionDeny `shouldBe` "deny"
+
+        context "Round-trip" $ do
+            it "round-trips ActionApprove through FromHttpApiData and ToHttpApiData" $
+                let original = ActionApprove
+                    serialized = toUrlPiece original
+                    parsed = parseUrlPiece serialized
+                 in parsed `shouldBe` Right original
+
+            it "round-trips ActionDeny through FromHttpApiData and ToHttpApiData" $
+                let original = ActionDeny
+                    serialized = toUrlPiece original
+                    parsed = parseUrlPiece serialized
+                 in parsed `shouldBe` Right original
+
+    describe "FR-004c: TokenValidity newtype" $ do
+        context "ToJSON instance (OAuth wire format compliance)" $ do
+            it "serializes 3600 seconds as integer 3600" $
+                let validity = mkTokenValidity 3600
+                    encoded = encode validity
+                    decoded = decode encoded :: Maybe Int
+                 in decoded `shouldBe` Just 3600
+
+            it "serializes 1.5 seconds as integer 1 (floor, not round)" $
+                let validity = mkTokenValidity 1.5
+                    encoded = encode validity
+                    decoded = decode encoded :: Maybe Int
+                 in decoded `shouldBe` Just 1
+
+            it "serializes 7199.9 seconds as integer 7199" $
+                let validity = mkTokenValidity 7199.9
+                    encoded = encode validity
+                    decoded = decode encoded :: Maybe Int
+                 in decoded `shouldBe` Just 7199
+
+            it "serializes 0 seconds as integer 0" $
+                let validity = mkTokenValidity 0
+                    encoded = encode validity
+                    decoded = decode encoded :: Maybe Int
+                 in decoded `shouldBe` Just 0

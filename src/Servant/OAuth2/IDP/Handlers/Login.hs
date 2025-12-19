@@ -54,6 +54,7 @@ import Servant.OAuth2.IDP.Types (
     AuthCodeId (..),
     AuthorizationCode (..),
     AuthorizationError (..),
+    LoginAction (..),
     PendingAuthorization (..),
     RedirectTarget (..),
     SessionCookie (..),
@@ -155,7 +156,7 @@ handleLogin mCookie loginForm = do
         throwError $ injectTyped @LoginFlowError $ SessionExpired sessionId
 
     -- Check if user denied access
-    if formAction loginForm == "deny"
+    if formAction loginForm == ActionDeny
         then do
             -- Emit denial trace
             liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationDenied (unClientId $ pendingClientId pending) "User denied authorization"
