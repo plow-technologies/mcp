@@ -4,7 +4,7 @@
 {-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 {- |
-Module      : MCP.Server.OAuth.Test.Internal
+Module      : Servant.OAuth2.IDP.Test.Internal
 Description : Internal test utilities for OAuth testing
 Copyright   : (C) 2025 Matthias Pall Gissurarson, PakSCADA LLC
 License     : MIT
@@ -90,7 +90,7 @@ import Network.Wai.Test (SResponse, simpleBody, simpleHeaders, simpleStatus)
 import Test.Hspec (Spec, describe, expectationFailure, it, runIO, shouldSatisfy)
 import Test.Hspec.Wai (WaiSession, get, liftIO, postHtmlForm, request, shouldRespondWith, with)
 
-import MCP.Server.Time (MonadTime)
+import Control.Monad.Time (MonadTime)
 import Servant.Auth.Server (ToJWT)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
