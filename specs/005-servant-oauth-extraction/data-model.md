@@ -19,7 +19,11 @@ This refactoring introduces 4 new types and moves 4 existing types to new module
 
 ```haskell
 data OAuthEnv = OAuthEnv
-    { oauthBaseUrl :: Text
+    { oauthRequireHTTPS :: Bool
+    -- ^ Security flag: require HTTPS for OAuth redirects (R-005)
+    -- Should be True in production, False only for local development
+
+    , oauthBaseUrl :: Text
     -- ^ Base URL for OAuth endpoints (e.g., "https://api.example.com")
     -- Used to construct authorization_endpoint, token_endpoint in metadata
 
@@ -64,11 +68,12 @@ data OAuthEnv = OAuthEnv
 ```
 
 **Validation Rules**:
+- `oauthRequireHTTPS` should be `True` in production (R-005)
 - `oauthBaseUrl` must be non-empty
 - `oauthAuthCodeExpiry` must be positive
 - `oauthAccessTokenExpiry` must be positive
 - `oauthLoginSessionExpiry` must be positive
-- At least one entry in each supported* list
+- At least one entry in each supported* list (NonEmpty per R-005)
 
 **Smart Constructor**:
 ```haskell
@@ -310,14 +315,15 @@ generateCodeChallenge verifier =
 │  ┌─────────────────────┐                                       │
 │  │ MCP.Server.Auth     │                                       │
 │  │                     │                                       │
-│  │ OAuthConfig (demo   │                                       │
-│  │   mode, providers)  │                                       │
-│  │ generateCodeVerifier│                                       │
-│  │   (IO action)       │                                       │
+│  │ MCPOAuthConfig      │  ← R-005: OAuthConfig REMOVED,        │
+│  │   (demo mode,       │    replaced by MCPOAuthConfig         │
+│  │    providers)       │    with unprefixed fields             │
 │  └─────────────────────┘                                       │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+*Note: R-005 refinement (2025-12-19) removes OAuthConfig entirely. See "MCPOAuthConfig (R-005 Refinement)" section below.*
 
 ---
 
@@ -378,4 +384,133 @@ mkOAuthEnv HTTPServerConfig{..} =
 -- Adapt trace types
 mkOAuthTracer :: IOTracer HTTPTrace -> IOTracer OAuthTrace
 mkOAuthTracer = contramap HTTPOAuth
+```
+
+---
+
+## MCPOAuthConfig (R-005 Refinement)
+
+*Added 2025-12-19 per spec clarification. OAuthConfig is REMOVED and replaced by this type.*
+
+### MCPOAuthConfig
+
+**Module**: `MCP.Server.Auth`
+
+**Purpose**: MCP-specific OAuth configuration containing demo mode settings and external IdP configuration. These fields are NOT used by Servant OAuth handlers - only by MCP application layer.
+
+**Key Change**: Field names are **unprefixed** (no `mcp` prefix) because `OAuthConfig` no longer exists to cause collision.
+
+```haskell
+data MCPOAuthConfig = MCPOAuthConfig
+    { autoApproveAuth :: Bool
+    -- ^ Demo mode: bypass interactive login (auto-approve all auth requests)
+    -- SECURITY: Only enable for testing/demo environments
+
+    , oauthProviders :: [OAuthProvider]
+    -- ^ External OAuth providers for federated login (Google, GitHub, etc.)
+    -- Empty list means local authentication only
+
+    , demoUserIdTemplate :: Maybe Text
+    -- ^ Template for demo user IDs (e.g., "demo-user-{uuid}")
+    -- Nothing means demo mode is disabled
+
+    , demoEmailDomain :: Text
+    -- ^ Domain for demo user emails (e.g., "example.com")
+    -- Used when generating demo user credentials
+
+    , demoUserName :: Text
+    -- ^ Display name for demo users (e.g., "Test User")
+
+    , publicClientSecret :: Maybe Text
+    -- ^ Secret returned for public clients during registration
+    -- Usually empty string "" for public clients per OAuth spec
+
+    , authorizationSuccessTemplate :: Maybe Text
+    -- ^ Custom HTML template for authorization success page
+    -- Nothing uses default template
+    }
+    deriving (Show, Eq, Generic)
+```
+
+**Location Change**:
+- **Before**: `HTTPServerConfig.httpOAuthConfig :: Maybe OAuthConfig`
+- **After**: `HTTPServerConfig.httpMCPOAuthConfig :: Maybe MCPOAuthConfig`
+
+**Semantic Change**: Presence of `httpMCPOAuthConfig` implies OAuth is enabled (replaces `oauthEnabled :: Bool` field).
+
+### DemoOAuthBundle
+
+**Module**: `MCP.Server.HTTP`
+
+**Purpose**: Convenience type for tests and demos that need both `OAuthEnv` and `MCPOAuthConfig` together.
+
+```haskell
+data DemoOAuthBundle = DemoOAuthBundle
+    { bundleEnv :: OAuthEnv
+    , bundleMCPConfig :: MCPOAuthConfig
+    }
+
+-- | Default demo bundle (replaces defaultDemoOAuthConfig)
+defaultDemoOAuthBundle :: DemoOAuthBundle
+defaultDemoOAuthBundle = DemoOAuthBundle
+    { bundleEnv = defaultOAuthEnv { oauthRequireHTTPS = False }
+    , bundleMCPConfig = defaultDemoMCPOAuthConfig
+    }
+
+-- | Default demo MCP config
+defaultDemoMCPOAuthConfig :: MCPOAuthConfig
+defaultDemoMCPOAuthConfig = MCPOAuthConfig
+    { autoApproveAuth = False  -- Require interactive login
+    , oauthProviders = []      -- Local auth only
+    , demoUserIdTemplate = Nothing
+    , demoEmailDomain = "example.com"
+    , demoUserName = "Test User"
+    , publicClientSecret = Just ""
+    , authorizationSuccessTemplate = Nothing
+    }
+```
+
+### Updated Migration Example
+
+**Before** (with OAuthConfig):
+```haskell
+import MCP.Server.Auth (OAuthConfig (..))
+import MCP.Server.HTTP (defaultDemoOAuthConfig)
+
+config = HTTPServerConfig
+    { ...
+    , httpOAuthConfig = Just defaultDemoOAuthConfig
+    }
+```
+
+**After** (with MCPOAuthConfig + OAuthEnv):
+```haskell
+import Servant.OAuth2.IDP.Config (OAuthEnv (..))
+import MCP.Server.Auth (MCPOAuthConfig (..))
+import MCP.Server.HTTP (defaultDemoOAuthBundle, DemoOAuthBundle (..))
+
+let DemoOAuthBundle{bundleEnv, bundleMCPConfig} = defaultDemoOAuthBundle
+
+config = HTTPServerConfig
+    { ...
+    , httpMCPOAuthConfig = Just bundleMCPConfig
+    }
+
+appEnv = AppEnv
+    { ...
+    , envOAuthEnv = bundleEnv
+    }
+```
+
+### OAuthEnv Update (R-005)
+
+Add `oauthRequireHTTPS` field to OAuthEnv (moved from OAuthConfig):
+
+```haskell
+data OAuthEnv = OAuthEnv
+    { oauthRequireHTTPS :: Bool        -- NEW: Security flag (R-005)
+    , oauthBaseUrl :: Text
+    , oauthAuthCodeExpiry :: NominalDiffTime
+    -- ... rest unchanged
+    }
 ```

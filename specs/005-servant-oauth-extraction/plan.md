@@ -164,6 +164,32 @@ import Control.Monad.Time (MonadTime (..))
 
 The handlers should be parameterized to work without demo mode fields. Demo mode logic stays in MCP.
 
+### R-005: OAuthConfig Removal Strategy (Spec Refinement 2025-12-19)
+
+**Question**: MCPOAuthConfig field names (autoApproveAuth, demoUserIdTemplate, etc.) collide with existing OAuthConfig fields. What naming strategy?
+
+**Finding**: Analysis of handler usage revealed:
+- **Protocol fields used by Servant handlers**: `requireHTTPS`, `authCodeExpirySeconds`, `accessTokenExpirySeconds`, `loginSessionExpirySeconds`, `supportedScopes/ResponseTypes/GrantTypes/AuthMethods/CodeChallengeMethods`, `authCodePrefix`, `refreshTokenPrefix`, `clientIdPrefix`
+- **Demo fields NOT used by Servant handlers**: `autoApproveAuth`, `demoUserIdTemplate`, `demoEmailDomain`, `demoUserName`, `publicClientSecret`, `authorizationSuccessTemplate`, `oauthProviders`
+
+**Decision**: Remove `OAuthConfig` entirely (Option B from spec clarification).
+- `OAuthConfig` → **REMOVED** (replaced by split types)
+- Protocol fields → `OAuthEnv` (Servant.OAuth2.IDP.Config)
+- Demo/MCP fields → `MCPOAuthConfig` (MCP.Server.Auth, **unprefixed** field names)
+- `oauthEnabled` → **ELIMINATED** (presence of MCPOAuthConfig implies enabled)
+- `credentialStore` → Already handled via AuthBackend typeclass
+
+**Architecture After Split**:
+```
+HTTPServerConfig
+  └── httpMCPOAuthConfig :: Maybe MCPOAuthConfig  -- OAuth enable flag + MCP-specific
+
+AppEnv
+  └── envOAuthEnv :: OAuthEnv  -- Protocol config, always present when OAuth wired
+```
+
+**Migration Aid**: Create `DemoOAuthBundle` convenience type + `defaultDemoOAuthBundle` for test migration (replaces `defaultDemoOAuthConfig`).
+
 ---
 
 ## Phase 1: Design
@@ -178,7 +204,8 @@ See [data-model.md](./data-model.md).
 
 ```haskell
 data OAuthEnv = OAuthEnv
-    { oauthBaseUrl :: URI                                              -- URI from Network.URI
+    { oauthRequireHTTPS :: Bool                                        -- Security flag (R-005)
+    , oauthBaseUrl :: URI                                              -- URI from Network.URI
     , oauthAuthCodeExpiry :: NominalDiffTime
     , oauthAccessTokenExpiry :: NominalDiffTime
     , oauthLoginSessionExpiry :: NominalDiffTime
@@ -268,6 +295,8 @@ No external API contracts change. Internal module boundaries shift.
 3. Create `mkOAuthTracer :: IOTracer HTTPTrace -> IOTracer OAuthTrace`
 4. Update handler call sites to pass OAuthEnv
 
+*See also Phase E below for OAuthConfig removal tasks (R-005 refinement).*
+
 ### Phase D: Clean Break
 
 1. Remove `OAuthMetadata` from `MCP.Server.Auth` exports
@@ -277,3 +306,93 @@ No external API contracts change. Internal module boundaries shift.
 5. Verify: `rg "^import MCP\." src/Servant/` returns empty
 6. Verify: `cabal build` succeeds
 7. Verify: `cabal test` passes
+
+*See also Phase E below for OAuthConfig removal tasks (R-005 refinement).*
+
+---
+
+### Phase E: OAuthConfig Removal (R-005 Refinement)
+
+*Added 2025-12-19 per spec clarification. Depends on Phases C and D.*
+
+#### E.1: Update MCPOAuthConfig (MCP.Server.Auth)
+
+1. Remove `mcp` prefix from all MCPOAuthConfig fields:
+   - `mcpAutoApproveAuth` → `autoApproveAuth`
+   - `mcpDemoUserIdTemplate` → `demoUserIdTemplate`
+   - `mcpDemoEmailDomain` → `demoEmailDomain`
+   - `mcpAuthorizationSuccessTemplate` → `authorizationSuccessTemplate`
+
+2. Add missing fields to MCPOAuthConfig:
+   - `oauthProviders :: [OAuthProvider]`
+   - `demoUserName :: Text`
+   - `publicClientSecret :: Maybe Text`
+
+3. Create `defaultDemoMCPOAuthConfig :: MCPOAuthConfig`
+
+#### E.2: Remove OAuthConfig (MCP.Server.Auth)
+
+1. Delete `OAuthConfig` data type entirely
+2. Delete `defaultDemoOAuthConfig` function
+3. Update all imports that reference `OAuthConfig`
+
+#### E.3: Update HTTPServerConfig (MCP.Server.HTTP.AppEnv)
+
+1. Replace `httpOAuthConfig :: Maybe OAuthConfig` with `httpMCPOAuthConfig :: Maybe MCPOAuthConfig`
+2. Presence of `httpMCPOAuthConfig` implies OAuth enabled (replaces `oauthEnabled` field)
+
+#### E.4: Create DemoOAuthBundle (MCP.Server.HTTP)
+
+1. Create convenience type:
+   ```haskell
+   data DemoOAuthBundle = DemoOAuthBundle
+       { bundleEnv :: OAuthEnv
+       , bundleMCPConfig :: MCPOAuthConfig
+       }
+   ```
+
+2. Create default bundle:
+   ```haskell
+   defaultDemoOAuthBundle :: DemoOAuthBundle
+   defaultDemoOAuthBundle = DemoOAuthBundle
+       { bundleEnv = defaultOAuthEnv { oauthRequireHTTPS = False }
+       , bundleMCPConfig = defaultDemoMCPOAuthConfig
+       }
+   ```
+
+3. Export from MCP.Server.HTTP for test convenience
+
+#### E.5: Update Tests
+
+1. Update `test/Security/SessionCookieSpec.hs`:
+   - Replace `OAuthConfig` imports with `OAuthEnv` + `MCPOAuthConfig`
+   - Replace `defaultDemoOAuthConfig` usage with `defaultDemoOAuthBundle`
+
+2. Update `test/MCP/Server/HTTP/McpAuthSpec.hs`:
+   - Replace `httpOAuthConfig = Just defaultDemoOAuthConfig` with bundle pattern
+
+3. Update `test/MCP/Server/OAuth/Test/Fixtures.hs`:
+   - Replace `defaultDemoOAuthConfig` usage with bundle pattern
+
+4. Update `test/MCP/Server/AuthSpec.hs`:
+   - Update MCPOAuthConfig tests to use unprefixed field names
+
+#### E.6: Update Examples and Documentation
+
+1. Update `examples/http-server.hs`:
+   - Replace `defaultDemoOAuthConfig` with bundle pattern
+   - Update OAuth configuration construction
+
+2. Update `CLAUDE.md`:
+   - Replace `OAuthConfig` references with `OAuthEnv` + `MCPOAuthConfig`
+   - Update `defaultDemoOAuthConfig` references to bundle pattern
+
+3. Update `README.md`:
+   - Replace `httpOAuthConfig` references with `httpMCPOAuthConfig`
+
+#### E.7: Verification
+
+1. Verify: `rg "OAuthConfig" src/` shows only `MCPOAuthConfig` references
+2. Verify: `rg "defaultDemoOAuthConfig" .` returns empty (all replaced)
+3. Verify: `cabal build` succeeds
+4. Verify: `cabal test` passes

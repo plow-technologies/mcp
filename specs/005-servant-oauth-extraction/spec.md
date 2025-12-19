@@ -23,6 +23,7 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - Q: Should generator functions return domain types? → A: Yes, all generators return domain types (IO AuthCodeId, m AccessTokenId, IO RefreshTokenId). CRITICAL: Domain types must be threaded throughout (no Text conversions mid-flow), and smart constructor hygiene enforced (export only smart constructors, NOT type constructors) to prove correct construction
 - Q: How should LoginForm.formAction be typed? → A: Create LoginAction ADT (ActionApprove | ActionDeny) with FromHttpApiData/ToHttpApiData - enables exhaustiveness checking, prevents typos
 - Q: How should TokenResponse.expires_in be typed? → A: Create newtype over NominalDiffTime (e.g., `newtype TokenValidity = TokenValidity NominalDiffTime`) with custom ToJSON instance outputting integer seconds for OAuth wire format compliance. Name denotes what it IS (token validity duration), not the field name.
+- Q: MCPOAuthConfig field name collision with OAuthConfig - how to resolve? → A: Remove OAuthConfig entirely (Option B). OAuthConfig is replaced by OAuthEnv (Servant) + MCPOAuthConfig (MCP). With OAuthConfig gone, MCPOAuthConfig uses unprefixed field names (autoApproveAuth, demoUserIdTemplate, etc.). OAuthEnv lives in AppEnv.envOAuthEnv; MCPOAuthConfig lives in HTTPServerConfig.httpMCPOAuthConfig (presence = OAuth enabled). Provide DemoOAuthBundle convenience type for test migration.
 
 ## Goals
 
@@ -75,8 +76,9 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 
 #### FR-004: Create Servant.OAuth2.IDP.Config Module
 **Priority**: P1 (High)
-**Description**: Define `OAuthEnv` record containing protocol-agnostic OAuth configuration (split from MCP.Server.Auth.OAuthConfig)
+**Description**: Define `OAuthEnv` record containing protocol-agnostic OAuth configuration. OAuthConfig is REMOVED entirely and replaced by OAuthEnv (Servant) + MCPOAuthConfig (MCP).
 **OAuthEnv Fields** (protocol config, moves to Servant):
+- `requireHTTPS :: Bool` (security flag checked by handlers)
 - `baseUrl :: URI`
 - `authCodeExpiry :: NominalDiffTime`
 - `accessTokenExpiry :: NominalDiffTime`
@@ -89,12 +91,18 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - `supportedGrantTypes :: NonEmpty OAuthGrantType` (RFC requires ≥1)
 - `supportedAuthMethods :: NonEmpty TokenAuthMethod` (RFC requires ≥1)
 - `supportedCodeChallengeMethods :: NonEmpty CodeChallengeMethod` (RFC requires ≥1)
-**MCPOAuthConfig** (demo fields, stays in MCP.Server.Auth):
+**OAuthEnv Location**: Lives in `AppEnv.envOAuthEnv` (always present when OAuth wired)
+**MCPOAuthConfig** (demo/MCP fields, stays in MCP.Server.Auth, NO mcp prefix):
 - `autoApproveAuth :: Bool` (demo mode auto-approval)
-- `demoUserIdTemplate :: Text` (template for demo user IDs)
+- `oauthProviders :: [OAuthProvider]` (external IdP list for federated login)
+- `demoUserIdTemplate :: Maybe Text` (template for demo user IDs, Nothing = no demo)
 - `demoEmailDomain :: Text` (domain for demo emails)
-- `authorizationSuccessTemplate :: Text` (HTML template for success page)
-**Note**: MCPOAuthConfig will be created/updated in MCP.Server.Auth to hold demo-specific fields extracted from old OAuthConfig
+- `demoUserName :: Text` (display name for demo users)
+- `publicClientSecret :: Maybe Text` (secret returned for public clients)
+- `authorizationSuccessTemplate :: Maybe Text` (HTML template for success page)
+**MCPOAuthConfig Location**: Lives in `HTTPServerConfig.httpMCPOAuthConfig :: Maybe MCPOAuthConfig` (presence = OAuth enabled)
+**Eliminated Fields**: `oauthEnabled` (redundant - MCPOAuthConfig presence implies enabled), `credentialStore` (via AuthBackend typeclass)
+**Migration Aid**: Create `DemoOAuthBundle` convenience type combining OAuthEnv + MCPOAuthConfig for test/demo setups
 
 #### FR-004b: Create Servant.OAuth2.IDP.Errors Module
 **Priority**: P0 (Critical)
@@ -195,8 +203,11 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 
 #### FR-008: Remove Types from MCP.Server.Auth
 **Priority**: P2 (Medium)
-**Description**: Clean break - remove moved types from MCP.Server.Auth exports, create MCPOAuthConfig for demo fields
-**Types to Remove** (moved to Servant.OAuth2.IDP.*):
+**Description**: Clean break - remove OAuthConfig entirely, remove moved types, update MCPOAuthConfig to use unprefixed fields
+**Types to Remove Entirely**:
+- `OAuthConfig` (REMOVED - replaced by OAuthEnv in Servant + MCPOAuthConfig in MCP)
+- `defaultDemoOAuthConfig` (replaced by `defaultOAuthEnv` + `defaultDemoMCPOAuthConfig` + `DemoOAuthBundle`)
+**Types to Move** (to Servant.OAuth2.IDP.*):
 - `OAuthMetadata` (→ Metadata)
 - `ProtectedResourceMetadata` (→ Metadata)
 - `OAuthGrantType` (→ Types)
@@ -205,8 +216,8 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - `generateCodeChallenge` (→ PKCE)
 - `ValidationError` (→ Errors)
 - `AuthorizationError` (→ Errors)
-**Types to Create**:
-- `MCPOAuthConfig` record with demo-specific fields (autoApproveAuth, demoUserIdTemplate, demoEmailDomain, authorizationSuccessTemplate)
+**Types to Update**:
+- `MCPOAuthConfig` - remove `mcp` prefix from all fields (no collision after OAuthConfig removed), add missing fields (oauthProviders, demoUserName, publicClientSecret)
 **Types Staying in MCP.Server.Auth**:
 - `OAuthProvider` (MCP-specific provider configuration)
 - `TokenInfo` (token introspection response, MCP-specific)
@@ -214,6 +225,11 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - `PKCEChallenge` (if still needed - contains both CodeChallenge and CodeVerifier for convenience)
 - `ProtectedResourceAuth` (type-level auth tag for MCP)
 - `ProtectedResourceAuthConfig` (config for above)
+- `MCPOAuthConfig` (updated with unprefixed fields)
+**New Functions in MCP.Server.HTTP**:
+- `defaultOAuthEnv :: OAuthEnv` (production defaults)
+- `defaultDemoMCPOAuthConfig :: MCPOAuthConfig` (demo defaults)
+- `DemoOAuthBundle` type and `defaultDemoOAuthBundle :: DemoOAuthBundle` (test convenience)
 
 ## Acceptance Criteria
 
