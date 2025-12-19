@@ -101,9 +101,10 @@ main = do
         , httpServerInfo = serverInfo
         , httpCapabilities = capabilities
         , httpEnableLogging = False
-        , httpOAuthConfig = Nothing  -- No OAuth
+        , httpMCPOAuthConfig = Nothing  -- No OAuth
         , httpJWK = Nothing  -- Auto-generated
         , httpProtocolVersion = "2025-06-18"  -- MCP protocol version
+        , httpProtectedResourceMetadata = Nothing
         }
   runServerHTTP config
 ```
@@ -247,10 +248,14 @@ runHTTP :: IO ()
 runHTTP = do
   let config = HTTPServerConfig
         { httpPort = 8080
+        , httpBaseUrl = "http://localhost:8080"
         , httpServerInfo = Implementation "my-server" "1.0.0"
         , httpCapabilities = serverCapabilities
         , httpEnableLogging = False
-        , httpOAuthConfig = Nothing  -- or Just oauthConfig for OAuth
+        , httpMCPOAuthConfig = Nothing  -- or Just mcpOAuthConfig for OAuth
+        , httpJWK = Nothing
+        , httpProtocolVersion = "2025-06-18"
+        , httpProtectedResourceMetadata = Nothing
         }
   runServerHTTP config
 ```

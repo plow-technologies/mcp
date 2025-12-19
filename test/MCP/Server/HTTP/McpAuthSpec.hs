@@ -30,7 +30,7 @@ import Servant.Server.Internal.Handler (runHandler)
 import Test.Hspec
 
 import MCP.Server (MCPServer (..), MCPServerM, initialServerState)
-import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata)
+import MCP.Server.HTTP (DemoOAuthBundle (..), HTTPServerConfig (..), defaultDemoOAuthBundle, defaultProtectedResourceMetadata)
 import MCP.Server.HTTP qualified as HTTP
 import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types (Implementation (..), ServerCapabilities (..))
@@ -43,17 +43,18 @@ instance MCPServer MCPServerM
 -- | Minimal test HTTP server configuration
 testConfig :: HTTPServerConfig
 testConfig =
-    HTTPServerConfig
-        { httpPort = 8080
-        , httpBaseUrl = "http://localhost:8080"
-        , httpServerInfo = Implementation "test-server" (Just "1.0.0") ""
-        , httpCapabilities = ServerCapabilities Nothing Nothing Nothing Nothing Nothing Nothing
-        , httpEnableLogging = False
-        , httpOAuthConfig = Just defaultDemoOAuthConfig
-        , httpJWK = Nothing
-        , httpProtocolVersion = "2025-06-18"
-        , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata "http://localhost:8080")
-        }
+    let bundle = defaultDemoOAuthBundle
+     in HTTPServerConfig
+            { httpPort = 8080
+            , httpBaseUrl = "http://localhost:8080"
+            , httpServerInfo = Implementation "test-server" (Just "1.0.0") ""
+            , httpCapabilities = ServerCapabilities Nothing Nothing Nothing Nothing Nothing Nothing
+            , httpEnableLogging = False
+            , httpMCPOAuthConfig = Just (bundleMCPConfig bundle)
+            , httpJWK = Nothing
+            , httpProtocolVersion = "2025-06-18"
+            , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata "http://localhost:8080")
+            }
 
 -- | Null tracer for tests (discards all traces)
 testTracer :: IOTracer HTTPTrace

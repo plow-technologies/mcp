@@ -52,7 +52,7 @@ import Servant.Auth.Server (defaultJWTSettings, generateKey)
 import Servant.Server.Internal.Handler (runHandler)
 
 import MCP.Server (MCPServer (..), MCPServerM, initialServerState)
-import MCP.Server.HTTP (HTTPServerConfig (..), defaultDemoOAuthConfig, defaultProtectedResourceMetadata, mcpAppWithOAuth, mkOAuthEnvFromConfig)
+import MCP.Server.HTTP (DemoOAuthBundle (..), HTTPServerConfig (..), defaultDemoOAuthBundle, defaultProtectedResourceMetadata, mcpAppWithOAuth)
 import MCP.Server.HTTP.AppEnv (AppEnv (..), AppM, runAppM)
 import MCP.Server.Time (MonadTime (..))
 import MCP.Types (Implementation (..), ServerCapabilities (..), ToolsCapability (..))
@@ -96,6 +96,9 @@ mkTestEnv timeTVar = do
     -- Demo credentials environment
     let demoEnv = DemoCredentialEnv defaultDemoCredentialStore
 
+    -- Get bundle for default config
+    let bundle = defaultDemoOAuthBundle
+
     -- Minimal HTTP server config
     let serverConfig =
             HTTPServerConfig
@@ -112,7 +115,7 @@ mkTestEnv timeTVar = do
                         , experimental = Nothing
                         }
                 , httpEnableLogging = False
-                , httpOAuthConfig = Just defaultDemoOAuthConfig
+                , httpMCPOAuthConfig = Just (bundleMCPConfig bundle)
                 , httpJWK = Nothing -- Will be generated
                 , httpProtocolVersion = "2025-06-18"
                 , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata "http://localhost:8080")
@@ -129,8 +132,8 @@ mkTestEnv timeTVar = do
     -- Create placeholder server state (will be replaced in referenceTestConfig)
     placeholderStateVar <- newTVarIO $ initialServerState (httpCapabilities serverConfig)
 
-    -- Create OAuthEnv from server config
-    let oauthCfgEnv = mkOAuthEnvFromConfig serverConfig
+    -- Use OAuthEnv from bundle
+    let oauthCfgEnv = bundleEnv bundle
         oauthTracerNull = IOTracer (Tracer (\_ -> pure ())) -- Null tracer for OAuth events
     return
         AppEnv

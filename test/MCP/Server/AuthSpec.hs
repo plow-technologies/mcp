@@ -27,7 +27,7 @@ spec = do
                         MCPOAuthConfig
                             { autoApproveAuth = False
                             , oauthProviders = []
-                            , demoUserIdTemplate = "user-{id}"
+                            , demoUserIdTemplate = Just "user-{id}"
                             , demoEmailDomain = "example.com"
                             , demoUserName = "Demo User"
                             , publicClientSecret = Nothing
@@ -36,7 +36,7 @@ spec = do
                 autoApproveAuth config `shouldBe` False
 
             it "creates config with demo user ID template (unprefixed)" $ do
-                let template = "demo-user-{id}" :: Text
+                let template = Just "demo-user-{id}" :: Maybe Text
                     config =
                         MCPOAuthConfig
                             { autoApproveAuth = True
@@ -55,7 +55,7 @@ spec = do
                         MCPOAuthConfig
                             { autoApproveAuth = True
                             , oauthProviders = []
-                            , demoUserIdTemplate = "user-{id}"
+                            , demoUserIdTemplate = Just "user-{id}"
                             , demoEmailDomain = domain
                             , demoUserName = "Demo User"
                             , publicClientSecret = Nothing
@@ -69,7 +69,7 @@ spec = do
                         MCPOAuthConfig
                             { autoApproveAuth = False
                             , oauthProviders = []
-                            , demoUserIdTemplate = "user-{id}"
+                            , demoUserIdTemplate = Just "user-{id}"
                             , demoEmailDomain = "example.com"
                             , demoUserName = "Demo User"
                             , publicClientSecret = Nothing
@@ -82,7 +82,7 @@ spec = do
                         MCPOAuthConfig
                             { autoApproveAuth = False
                             , oauthProviders = [] -- Empty list for simplicity in tests
-                            , demoUserIdTemplate = "user-{id}"
+                            , demoUserIdTemplate = Just "user-{id}"
                             , demoEmailDomain = "example.com"
                             , demoUserName = "Demo User"
                             , publicClientSecret = Nothing
@@ -97,7 +97,7 @@ spec = do
                         MCPOAuthConfig
                             { autoApproveAuth = True
                             , oauthProviders = []
-                            , demoUserIdTemplate = "user-{id}"
+                            , demoUserIdTemplate = Just "user-{id}"
                             , demoEmailDomain = "example.com"
                             , demoUserName = name
                             , publicClientSecret = Nothing
@@ -111,7 +111,7 @@ spec = do
                         MCPOAuthConfig
                             { autoApproveAuth = True
                             , oauthProviders = []
-                            , demoUserIdTemplate = "user-{id}"
+                            , demoUserIdTemplate = Just "user-{id}"
                             , demoEmailDomain = "example.com"
                             , demoUserName = "Demo User"
                             , publicClientSecret = secret

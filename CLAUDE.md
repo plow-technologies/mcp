@@ -179,8 +179,10 @@ data AppError
 Uses `generic-lens` with `HasType` constraints for composable environment/error access.
 
 ### Key Data Types:
-- **HTTPServerConfig** - Server config with httpBaseUrl, httpProtocolVersion
-- **OAuthConfig** - OAuth settings (timing, demo settings, parameters)
+- **HTTPServerConfig** - Server config with httpBaseUrl, httpProtocolVersion, httpMCPOAuthConfig
+- **OAuthEnv** - Protocol-level OAuth settings (timing, PKCE, token parameters) in Servant.OAuth2.IDP.Config
+- **MCPOAuthConfig** - MCP-specific OAuth settings (demo mode, providers, user templates) in MCP.Server.Auth
+- **DemoOAuthBundle** - Convenience type bundling OAuthEnv + MCPOAuthConfig for test/demo code
 - **AuthorizationCode user** - PKCE code with expiry, client, user, scopes (parameterized by user type)
 - **ClientInfo** - Registered client metadata (redirect URIs, grant types)
 - **PendingAuthorization** - OAuth params awaiting login approval
@@ -221,30 +223,36 @@ handleLogin :: (AuthBackend m, OAuthStateStore m,
 1. **Client Registration**: Returns configurable client_secret (default empty string for public clients)
 2. **PKCE Validation**: Uses validateCodeVerifier from Servant.OAuth2.IDP.Auth
 3. **Token Generation**:
-   - Authorization codes: UUID v4 with configurable prefix (default "code_")
+   - Authorization codes: UUID v4 with configurable prefix (from OAuthEnv)
    - Access tokens: JWT tokens using servant-auth-server's makeJWT
-   - Refresh tokens: UUID v4 with configurable prefix (default "rt_")
-4. **Expiry Times**: Configurable auth code and access token expiry (defaults: 10 min, 1 hour)
-5. **Demo Mode**: Configurable auto-approval and demo user generation
+   - Refresh tokens: UUID v4 with configurable prefix (from OAuthEnv)
+4. **Expiry Times**: Configurable auth code and access token expiry (in OAuthEnv)
+5. **Demo Mode**: Configurable auto-approval and demo user generation (in MCPOAuthConfig)
 6. **JWT Integration**: Proper JWT tokens fix authentication loops with MCP clients
 7. **Production Ready**: All hardcoded values extracted to configuration parameters
 8. **Thread Safety**: In-memory implementation uses STM transactions
 
 ### Configuration Options:
 
-**HTTPServerConfig** now includes:
+**HTTPServerConfig** includes:
 - `httpBaseUrl`: Base URL for OAuth endpoints (e.g., "https://api.example.com")
 - `httpProtocolVersion`: MCP protocol version (default "2025-06-18")
+- `httpMCPOAuthConfig`: Optional MCPOAuthConfig for MCP-specific OAuth settings
 
-**OAuthConfig** includes comprehensive settings:
-- Timing: `authCodeExpirySeconds`, `accessTokenExpirySeconds`
-- OAuth parameters: `supportedScopes`, `supportedResponseTypes`, etc.
-- Demo mode: `autoApproveAuth`, `demoUserIdTemplate`, `demoEmailDomain`
-- Token prefixes: `authCodePrefix`, `refreshTokenPrefix`, `clientIdPrefix`
+**OAuthEnv** (Servant.OAuth2.IDP.Config) includes protocol-level settings:
+- Timing: `oauthAuthCodeExpiry`, `oauthAccessTokenExpiry`, `oauthLoginSessionExpiry`
+- OAuth parameters: `oauthSupportedScopes`, `oauthSupportedResponseTypes`, etc.
+- Token prefixes: `oauthAuthCodePrefix`, `oauthRefreshTokenPrefix`, `oauthClientIdPrefix`
+- Security: `oauthRequireHTTPS`, `oauthBaseUrl`
+
+**MCPOAuthConfig** (MCP.Server.Auth) includes MCP-specific settings:
+- Demo mode: `autoApproveAuth`, `demoUserIdTemplate`, `demoEmailDomain`, `demoUserName`
+- Providers: `oauthProviders` list of external OAuth identity providers
 - Templates: `authorizationSuccessTemplate` for custom responses
+- Client secrets: `publicClientSecret` configuration
 
-**For demo/testing**, use `defaultDemoOAuthConfig` and override specific fields.
-**For production**, configure all parameters according to your security requirements.
+**For demo/testing**, use `defaultDemoOAuthBundle` which provides both OAuthEnv and MCPOAuthConfig.
+**For production**, configure OAuthEnv and MCPOAuthConfig separately according to your security requirements.
 
 ### Interactive Login Flow (002-login-auth-page):
 
