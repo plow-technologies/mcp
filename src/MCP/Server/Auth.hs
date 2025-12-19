@@ -71,17 +71,12 @@ import Servant.OAuth2.IDP.Types (
     CodeChallengeMethod (..),
     CodeVerifier,
     GrantType (..),
+    OAuthGrantType (..),
     ResponseType (..),
     Scope (..),
     unCodeChallenge,
     unCodeVerifier,
  )
-
--- | OAuth grant types supported by MCP
-data OAuthGrantType
-    = AuthorizationCode -- For user-based scenarios
-    | ClientCredentials -- For application-to-application
-    deriving (Show, Eq, Generic)
 
 -- | OAuth provider configuration (MCP-compliant)
 data OAuthProvider = OAuthProvider

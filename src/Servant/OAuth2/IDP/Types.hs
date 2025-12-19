@@ -66,6 +66,7 @@ module Servant.OAuth2.IDP.Types (
     GrantType (..),
     ResponseType (..),
     ClientAuthMethod (..),
+    OAuthGrantType (..),
 
     -- * Domain Entities
     AuthorizationCode (..),
@@ -706,6 +707,22 @@ instance ToHttpApiData ClientAuthMethod where
     toUrlPiece AuthNone = "none"
     toUrlPiece AuthClientSecretPost = "client_secret_post"
     toUrlPiece AuthClientSecretBasic = "client_secret_basic"
+
+-- | OAuth grant types (MCP-specific subset)
+data OAuthGrantType
+    = OAuthAuthorizationCode -- ^ Authorization code flow for user-based scenarios
+    | OAuthClientCredentials -- ^ Client credentials flow for application-to-application
+    deriving stock (Eq, Ord, Show, Generic)
+
+instance FromJSON OAuthGrantType where
+    parseJSON = withText "OAuthGrantType" $ \case
+        "authorization_code" -> pure OAuthAuthorizationCode
+        "client_credentials" -> pure OAuthClientCredentials
+        other -> fail $ "Invalid grant type: " ++ T.unpack other
+
+instance ToJSON OAuthGrantType where
+    toJSON OAuthAuthorizationCode = toJSON ("authorization_code" :: Text)
+    toJSON OAuthClientCredentials = toJSON ("client_credentials" :: Text)
 
 -- -----------------------------------------------------------------------------
 -- Domain Entities

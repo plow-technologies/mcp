@@ -16,7 +16,7 @@ import Data.Either (isLeft)
 import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import Data.Text (Text)
-import Servant.OAuth2.IDP.Types (AccessToken (..), ClientName (..), ClientSecret (..), RefreshToken (..), Scope (..), Scopes (..), TokenType (..), mkClientName, mkClientSecret, mkRedirectUri, parseScopes, serializeScopeSet)
+import Servant.OAuth2.IDP.Types (AccessToken (..), ClientName (..), ClientSecret (..), OAuthGrantType (..), RefreshToken (..), Scope (..), Scopes (..), TokenType (..), mkClientName, mkClientSecret, mkRedirectUri, parseScopes, serializeScopeSet)
 import Test.Hspec
 import Web.HttpApiData (parseUrlPiece, toUrlPiece)
 
@@ -273,30 +273,30 @@ spec = do
 
     describe "FR-002b: OAuthGrantType enum (moved from MCP.Server.Auth)" $ do
         context "JSON serialization" $ do
-            it "serializes AuthorizationCode to JSON" $
-                let grantType = AuthorizationCode
+            it "serializes OAuthAuthorizationCode to JSON" $
+                let grantType = OAuthAuthorizationCode
                     encoded = encode grantType
                     decoded = decode encoded
                  in decoded `shouldBe` Just grantType
 
-            it "serializes ClientCredentials to JSON" $
-                let grantType = ClientCredentials
+            it "serializes OAuthClientCredentials to JSON" $
+                let grantType = OAuthClientCredentials
                     encoded = encode grantType
                     decoded = decode encoded
                  in decoded `shouldBe` Just grantType
 
             it "deserializes from JSON string representation" $
-                decode "\"authorization_code\"" `shouldBe` Just AuthorizationCode
+                decode "\"authorization_code\"" `shouldBe` Just OAuthAuthorizationCode
 
             it "deserializes client_credentials from JSON" $
-                decode "\"client_credentials\"" `shouldBe` Just ClientCredentials
+                decode "\"client_credentials\"" `shouldBe` Just OAuthClientCredentials
 
         context "Equality and Show" $ do
             it "distinguishes between constructors" $
-                AuthorizationCode `shouldNotBe` ClientCredentials
+                OAuthAuthorizationCode `shouldNotBe` OAuthClientCredentials
 
-            it "has readable Show output for AuthorizationCode" $
-                show AuthorizationCode `shouldContain` "Authorization"
+            it "has readable Show output for OAuthAuthorizationCode" $
+                show OAuthAuthorizationCode `shouldContain` "Authorization"
 
-            it "has readable Show output for ClientCredentials" $
-                show ClientCredentials `shouldContain` "Client"
+            it "has readable Show output for OAuthClientCredentials" $
+                show OAuthClientCredentials `shouldContain` "Client"

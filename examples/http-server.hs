@@ -218,7 +218,7 @@ main = do
                                     , tokenEndpoint = baseUrl <> "/token"
                                     , userInfoEndpoint = Nothing
                                     , scopes = ["mcp:read", "mcp:write"]
-                                    , grantTypes = [AuthorizationCode]
+                                    , grantTypes = [OAuthAuthorizationCode]
                                     , requiresPKCE = True -- MCP requires PKCE
                                     , metadataEndpoint = Nothing
                                     }
