@@ -1,7 +1,4 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 {- |
 Module      : Servant.OAuth2.IDP.Types.Internal
@@ -28,6 +25,7 @@ constructors exposed. This ensures there is only one definition of each type.
 -}
 module Servant.OAuth2.IDP.Types.Internal (
     -- * Unsafe constructor functions
+
     -- These are the ONLY exports - no raw constructors exported
     unsafeAuthCodeId,
     unsafeClientId,
@@ -44,19 +42,19 @@ module Servant.OAuth2.IDP.Types.Internal (
 
 -- Import types WITH constructors so coerce can work
 -- These constructors are NOT re-exported by this module
-import Servant.OAuth2.IDP.Types
-    ( AuthCodeId (..)
-    , ClientId (..)
-    , ClientName (..)
-    , ClientSecret (..)
-    , CodeChallenge (..)
-    , CodeVerifier (..)
-    , RedirectUri (..)
-    , RefreshTokenId (..)
-    , Scope (..)
-    , SessionId (..)
-    , UserId (..)
-    )
+import Servant.OAuth2.IDP.Types (
+    AuthCodeId (..),
+    ClientId (..),
+    ClientName (..),
+    ClientSecret (..),
+    CodeChallenge (..),
+    CodeVerifier (..),
+    RedirectUri (..),
+    RefreshTokenId (..),
+    Scope (..),
+    SessionId (..),
+    UserId (..),
+ )
 
 import Data.Text (Text)
 import Network.URI (URI)
@@ -72,39 +70,54 @@ This is safe in this specific case because:
 2. We're only changing the compile-time type, not the runtime value
 3. This is ONLY used at HTTP boundaries where validation has already occurred
 
+We use unsafeCoerce instead of coerce because the newtype constructors are
+intentionally not exported by Servant.OAuth2.IDP.Types (smart constructor pattern).
+HLint suggests using coerce, but that would require exporting the constructors,
+which would violate the module's design principle.
+
 WARNING: These bypass all validation logic. Use ONLY at HTTP boundaries where
 data has already been validated by the HTTP layer (e.g., in Boundary.hs).
 -}
-
+{-# ANN unsafeAuthCodeId ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
 unsafeAuthCodeId :: Text -> AuthCodeId
 unsafeAuthCodeId = unsafeCoerce
 
+{-# ANN unsafeClientId ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
 unsafeClientId :: Text -> ClientId
 unsafeClientId = unsafeCoerce
 
+{-# ANN unsafeSessionId ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
 unsafeSessionId :: Text -> SessionId
 unsafeSessionId = unsafeCoerce
 
+{-# ANN unsafeRefreshTokenId ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
 unsafeRefreshTokenId :: Text -> RefreshTokenId
 unsafeRefreshTokenId = unsafeCoerce
 
+{-# ANN unsafeUserId ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
 unsafeUserId :: Text -> UserId
 unsafeUserId = unsafeCoerce
 
+{-# ANN unsafeRedirectUri ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
 unsafeRedirectUri :: URI -> RedirectUri
 unsafeRedirectUri = unsafeCoerce
 
+{-# ANN unsafeScope ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
 unsafeScope :: Text -> Scope
 unsafeScope = unsafeCoerce
 
+{-# ANN unsafeCodeChallenge ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
 unsafeCodeChallenge :: Text -> CodeChallenge
 unsafeCodeChallenge = unsafeCoerce
 
+{-# ANN unsafeCodeVerifier ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
 unsafeCodeVerifier :: Text -> CodeVerifier
 unsafeCodeVerifier = unsafeCoerce
 
+{-# ANN unsafeClientSecret ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
 unsafeClientSecret :: Text -> ClientSecret
 unsafeClientSecret = unsafeCoerce
 
+{-# ANN unsafeClientName ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
 unsafeClientName :: Text -> ClientName
 unsafeClientName = unsafeCoerce

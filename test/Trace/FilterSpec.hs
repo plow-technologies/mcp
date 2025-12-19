@@ -15,7 +15,7 @@ module Trace.FilterSpec (spec) where
 import Control.Monad.IO.Class (liftIO)
 import Data.Functor.Contravariant (contramap)
 import Data.IORef (modifyIORef', newIORef, readIORef)
-import Data.Maybe (fromJust)
+import Data.Text (Text)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Protocol (ProtocolTrace (..))
 import MCP.Trace.Server (ServerTrace (..))
@@ -29,21 +29,37 @@ import MCP.Trace.Types (
     isServerTrace,
     isStdIOTrace,
  )
-import Network.URI (parseURI)
+import Network.URI (URI, parseURI)
 import Plow.Logging (IOTracer (..), Tracer (..), filterTracer, traceWith)
-import Servant.OAuth2.IDP.Auth.Backend (mkUsername)
+import Servant.OAuth2.IDP.Auth.Backend (Username, mkUsername)
 import Servant.OAuth2.IDP.Errors (ValidationError (..))
 import Servant.OAuth2.IDP.Trace (DenialReason (..), OAuthTrace (..), OperationResult (..))
 import Servant.OAuth2.IDP.Types (OAuthGrantType (..))
 import Servant.OAuth2.IDP.Types.Internal (unsafeClientId, unsafeRedirectUri)
 import Test.Hspec
 
+{- | Test helper: parse URI or fail with descriptive error
+This is safe for test cases with hardcoded valid URIs
+-}
+parseURIOrFail :: String -> URI
+parseURIOrFail s = case parseURI s of
+    Just uri -> uri
+    Nothing -> error $ "Test setup failed: invalid URI: " ++ s
+
+{- | Test helper: create username or fail with descriptive error
+This is safe for test cases with hardcoded valid usernames
+-}
+mkUsernameOrFail :: Text -> Username
+mkUsernameOrFail t = case mkUsername t of
+    Just u -> u
+    Nothing -> error $ "Test setup failed: invalid username: " ++ show t
+
 spec :: Spec
 spec = do
     describe "MCP.Trace.Types Filter Predicates" $ do
         describe "isOAuthTrace" $ do
             it "matches OAuth traces nested in HTTP" $ do
-                let uri = fromJust $ parseURI "http://localhost/callback"
+                let uri = parseURIOrFail "http://localhost/callback"
                     trace = MCPHttp $ HTTPOAuth $ TraceClientRegistration (unsafeClientId "test") (unsafeRedirectUri uri)
                 isOAuthTrace trace `shouldBe` True
 
@@ -114,7 +130,7 @@ spec = do
 
             it "matches OAuth error traces" $ do
                 isErrorTrace (MCPHttp (HTTPOAuth (TraceAuthorizationDenied (unsafeClientId "client-1") UserDenied))) `shouldBe` True
-                let uri = fromJust $ parseURI "http://wrong.com/callback"
+                let uri = parseURIOrFail "http://wrong.com/callback"
                 isErrorTrace (MCPHttp (HTTPOAuth (TraceValidationError (RedirectUriMismatch (unsafeClientId "client-1") (unsafeRedirectUri uri))))) `shouldBe` True
 
             it "does not match non-error traces" $ do
@@ -122,7 +138,7 @@ spec = do
                 isErrorTrace (MCPProtocol (ProtocolRequestReceived{requestId = "req-1", method = "tools/list"})) `shouldBe` False
                 isErrorTrace (MCPStdIO (StdIOMessageReceived{messageSize = 100})) `shouldBe` False
                 isErrorTrace (MCPHttp (HTTPRequestReceived{tracePath = "/mcp", traceMethod = "POST", traceHasAuth = False})) `shouldBe` False
-                let uri = fromJust $ parseURI "http://localhost/callback"
+                let uri = parseURIOrFail "http://localhost/callback"
                 isErrorTrace (MCPHttp (HTTPOAuth (TraceClientRegistration (unsafeClientId "test") (unsafeRedirectUri uri)))) `shouldBe` False
 
     describe "filterTracer integration (SC-006)" $ do
@@ -136,10 +152,10 @@ spec = do
                 unIOTracer (IOTracer t) = t
 
             -- Emit mixed events (OAuth + HTTP + Protocol + Server)
-            let uri1 = fromJust $ parseURI "http://localhost/callback"
+            let uri1 = parseURIOrFail "http://localhost/callback"
             traceWith oauthOnlyTracer $ MCPHttp $ HTTPOAuth $ TraceClientRegistration (unsafeClientId "client-1") (unsafeRedirectUri uri1)
             traceWith oauthOnlyTracer $ MCPHttp $ HTTPRequestReceived{tracePath = "/mcp", traceMethod = "POST", traceHasAuth = False}
-            traceWith oauthOnlyTracer $ MCPHttp $ HTTPOAuth $ TraceLoginAttempt (fromJust $ mkUsername "demo") Success
+            traceWith oauthOnlyTracer $ MCPHttp $ HTTPOAuth $ TraceLoginAttempt (mkUsernameOrFail "demo") Success
             traceWith oauthOnlyTracer $ MCPProtocol $ ProtocolRequestReceived{requestId = "req-1", method = "tools/list"}
             traceWith oauthOnlyTracer $ MCPServer (ServerInit{serverName = "test", serverVersion = "1.0"})
             traceWith oauthOnlyTracer $ MCPHttp $ HTTPOAuth $ TraceTokenExchange OAuthAuthorizationCode Success
@@ -176,7 +192,7 @@ spec = do
             -- Emit mixed events
             traceWith httpOnlyTracer $ MCPHttp $ HTTPRequestReceived{tracePath = "/mcp", traceMethod = "POST", traceHasAuth = False}
             traceWith httpOnlyTracer $ MCPServer (ServerInit{serverName = "test", serverVersion = "1.0"})
-            let uri = fromJust $ parseURI "http://localhost/callback"
+            let uri = parseURIOrFail "http://localhost/callback"
             traceWith httpOnlyTracer $ MCPHttp $ HTTPOAuth $ TraceClientRegistration (unsafeClientId "client-1") (unsafeRedirectUri uri)
             traceWith httpOnlyTracer $ MCPProtocol $ ProtocolRequestReceived{requestId = "req-1", method = "tools/list"}
             traceWith httpOnlyTracer $ MCPHttp $ HTTPAuthFailure{traceAuthReason = "Invalid token"}
@@ -227,7 +243,7 @@ spec = do
             -- Emit mixed events
             traceWith mcpTracer $ MCPHttp $ HTTPRequestReceived{tracePath = "/mcp", traceMethod = "POST", traceHasAuth = False}
             traceWith mcpTracer $ MCPServer (ServerInit{serverName = "test", serverVersion = "1.0"})
-            let uri = fromJust $ parseURI "http://localhost/callback"
+            let uri = parseURIOrFail "http://localhost/callback"
             traceWith mcpTracer $ MCPHttp $ HTTPOAuth $ TraceClientRegistration (unsafeClientId "test") (unsafeRedirectUri uri)
 
             -- Verify only HTTP traces were captured (and converted)

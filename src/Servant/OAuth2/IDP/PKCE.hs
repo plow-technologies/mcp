@@ -54,7 +54,7 @@ generateCodeVerifier = do
     case TE.decodeUtf8' $ B64URL.encodeUnpadded bytes of
         Right encoded -> case mkCodeVerifier encoded of
             Just cv -> pure cv
-            Nothing -> error $ "Impossible: 32-byte base64url encoding produced invalid CodeVerifier"
+            Nothing -> error "Impossible: 32-byte base64url encoding produced invalid CodeVerifier"
         Left err -> error $ "Impossible: base64url encoding produced invalid UTF-8: " ++ show err
 
 {- | Generate code challenge from verifier using SHA256 (S256 method).
@@ -76,7 +76,7 @@ generateCodeChallenge verifier =
             Left err -> error $ "Impossible: base64url encoding produced invalid UTF-8: " ++ show err
      in case mkCodeChallenge encoded of
             Just cc -> cc
-            Nothing -> error $ "Impossible: SHA256 base64url encoding produced invalid CodeChallenge"
+            Nothing -> error "Impossible: SHA256 base64url encoding produced invalid CodeChallenge"
 
 {- | Validate PKCE code verifier against challenge.
 
