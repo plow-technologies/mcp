@@ -17,8 +17,19 @@ import Data.Aeson (decode, encode)
 import Data.Text qualified as T
 import Network.HTTP.Types.Status (status400, status401, status403)
 import Servant.OAuth2.IDP.Errors
-import Servant.OAuth2.IDP.Types (ClientId, CodeChallengeMethod (..), RedirectUri, Scope, SessionId, mkRedirectUri, mkScope)
-import Servant.OAuth2.IDP.Types.Internal (unsafeClientId, unsafeSessionId)
+import Servant.OAuth2.IDP.Types (
+    AuthCodeId,
+    ClientId,
+    CodeChallengeMethod (..),
+    OAuthGrantType (..),
+    RedirectUri,
+    RefreshTokenId,
+    Scope,
+    SessionId,
+    mkRedirectUri,
+    mkScope,
+ )
+import Servant.OAuth2.IDP.Types.Internal (unsafeAuthCodeId, unsafeClientId, unsafeRefreshTokenId, unsafeSessionId)
 import Test.Hspec
 
 -- Test fixture helpers
@@ -341,6 +352,218 @@ spec = do
 
             it "PKCEVerificationFailed can be pattern matched" $ do
                 PKCEVerificationFailed `shouldBe` PKCEVerificationFailed
+
+    describe "AuthorizationError with ADT payloads (Phase F.3)" $ do
+        describe "InvalidRequestReason" $ do
+            it "MissingParameter with TokenParamCode constructs correctly" $ do
+                let reason = MissingParameter TokenParamCode
+                    err = InvalidRequest reason
+                case err of
+                    InvalidRequest (MissingParameter param) -> param `shouldBe` TokenParamCode
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "InvalidParameterFormat with details constructs correctly" $ do
+                let reason = InvalidParameterFormat TokenParamCodeVerifier
+                    err = InvalidRequest reason
+                case err of
+                    InvalidRequest (InvalidParameterFormat param) -> param `shouldBe` TokenParamCodeVerifier
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "MalformedRequest constructs correctly" $ do
+                let reason = MalformedRequest
+                    err = InvalidRequest reason
+                case err of
+                    InvalidRequest MalformedRequest -> return ()
+                    _ -> expectationFailure "Pattern match failed"
+
+        describe "InvalidClientReason" $ do
+            it "ClientNotFound constructs correctly" $ do
+                let reason = ClientNotFound testClientId
+                    err = InvalidClient reason
+                case err of
+                    InvalidClient (ClientNotFound cid) -> cid `shouldBe` testClientId
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "InvalidClientCredentials constructs correctly" $ do
+                let reason = InvalidClientCredentials
+                    err = InvalidClient reason
+                case err of
+                    InvalidClient InvalidClientCredentials -> return ()
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "ClientSecretMismatch constructs correctly" $ do
+                let reason = ClientSecretMismatch
+                    err = InvalidClient reason
+                case err of
+                    InvalidClient ClientSecretMismatch -> return ()
+                    _ -> expectationFailure "Pattern match failed"
+
+        describe "InvalidGrantReason" $ do
+            it "CodeNotFound constructs correctly" $ do
+                let codeId = unsafeAuthCodeId "code_123"
+                    reason = CodeNotFound codeId
+                    err = InvalidGrant reason
+                case err of
+                    InvalidGrant (CodeNotFound aid) -> aid `shouldBe` codeId
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "CodeExpired constructs correctly" $ do
+                let codeId = unsafeAuthCodeId "code_123"
+                    reason = CodeExpired codeId
+                    err = InvalidGrant reason
+                case err of
+                    InvalidGrant (CodeExpired aid) -> aid `shouldBe` codeId
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "CodeAlreadyUsed constructs correctly" $ do
+                let codeId = unsafeAuthCodeId "code_123"
+                    reason = CodeAlreadyUsed codeId
+                    err = InvalidGrant reason
+                case err of
+                    InvalidGrant (CodeAlreadyUsed aid) -> aid `shouldBe` codeId
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "RefreshTokenNotFound constructs correctly" $ do
+                let rtId = unsafeRefreshTokenId "rt_123"
+                    reason = RefreshTokenNotFound rtId
+                    err = InvalidGrant reason
+                case err of
+                    InvalidGrant (RefreshTokenNotFound rid) -> rid `shouldBe` rtId
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "RefreshTokenExpired constructs correctly" $ do
+                let rtId = unsafeRefreshTokenId "rt_123"
+                    reason = RefreshTokenExpired rtId
+                    err = InvalidGrant reason
+                case err of
+                    InvalidGrant (RefreshTokenExpired rid) -> rid `shouldBe` rtId
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "RefreshTokenRevoked constructs correctly" $ do
+                let rtId = unsafeRefreshTokenId "rt_123"
+                    reason = RefreshTokenRevoked rtId
+                    err = InvalidGrant reason
+                case err of
+                    InvalidGrant (RefreshTokenRevoked rid) -> rid `shouldBe` rtId
+                    _ -> expectationFailure "Pattern match failed"
+
+        describe "UnauthorizedClientReason" $ do
+            it "GrantTypeNotAllowed constructs correctly" $ do
+                let reason = GrantTypeNotAllowed OAuthAuthorizationCode
+                    err = UnauthorizedClient reason
+                case err of
+                    UnauthorizedClient (GrantTypeNotAllowed gt) -> gt `shouldBe` OAuthAuthorizationCode
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "ScopeNotAllowed constructs correctly" $ do
+                let reason = ScopeNotAllowed testScope
+                    err = UnauthorizedClient reason
+                case err of
+                    UnauthorizedClient (ScopeNotAllowed s) -> s `shouldBe` testScope
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "RedirectUriNotRegistered constructs correctly" $ do
+                let reason = RedirectUriNotRegistered testRedirectUri
+                    err = UnauthorizedClient reason
+                case err of
+                    UnauthorizedClient (RedirectUriNotRegistered uri) -> uri `shouldBe` testRedirectUri
+                    _ -> expectationFailure "Pattern match failed"
+
+        describe "UnsupportedGrantTypeReason" $ do
+            it "UnknownGrantType constructs correctly" $ do
+                let reason = UnknownGrantType "password"
+                    err = UnsupportedGrantType reason
+                case err of
+                    UnsupportedGrantType (UnknownGrantType gt) -> gt `shouldBe` "password"
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "GrantTypeDisabled constructs correctly" $ do
+                let reason = GrantTypeDisabled OAuthClientCredentials
+                    err = UnsupportedGrantType reason
+                case err of
+                    UnsupportedGrantType (GrantTypeDisabled gt) -> gt `shouldBe` OAuthClientCredentials
+                    _ -> expectationFailure "Pattern match failed"
+
+        describe "InvalidScopeReason" $ do
+            it "UnknownScope constructs correctly" $ do
+                let reason = UnknownScope "undefined_scope"
+                    err = InvalidScope reason
+                case err of
+                    InvalidScope (UnknownScope s) -> s `shouldBe` "undefined_scope"
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "ScopeNotPermitted constructs correctly" $ do
+                let reason = ScopeNotPermitted testScope
+                    err = InvalidScope reason
+                case err of
+                    InvalidScope (ScopeNotPermitted s) -> s `shouldBe` testScope
+                    _ -> expectationFailure "Pattern match failed"
+
+        describe "AccessDeniedReason" $ do
+            it "UserDenied constructs correctly" $ do
+                let reason = UserDenied
+                    err = AccessDenied reason
+                case err of
+                    AccessDenied UserDenied -> return ()
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "ResourceOwnerDenied constructs correctly" $ do
+                let reason = ResourceOwnerDenied
+                    err = AccessDenied reason
+                case err of
+                    AccessDenied ResourceOwnerDenied -> return ()
+                    _ -> expectationFailure "Pattern match failed"
+
+            it "ConsentRequired constructs correctly" $ do
+                let reason = ConsentRequired
+                    err = AccessDenied reason
+                case err of
+                    AccessDenied ConsentRequired -> return ()
+                    _ -> expectationFailure "Pattern match failed"
+
+        describe "renderAuthorizationError" $ do
+            it "renders InvalidRequest with MissingParameter" $ do
+                let err = InvalidRequest (MissingParameter TokenParamCode)
+                    rendered = renderAuthorizationError err
+                T.unpack rendered `shouldContain` "code"
+                T.unpack rendered `shouldContain` "missing"
+
+            it "renders InvalidClient with ClientNotFound" $ do
+                let err = InvalidClient (ClientNotFound testClientId)
+                    rendered = renderAuthorizationError err
+                T.unpack rendered `shouldContain` "test_client_123"
+                T.unpack rendered `shouldContain` "not found"
+
+            it "renders InvalidGrant with CodeExpired" $ do
+                let codeId = unsafeAuthCodeId "code_123"
+                    err = InvalidGrant (CodeExpired codeId)
+                    rendered = renderAuthorizationError err
+                T.unpack rendered `shouldContain` "code_123"
+                T.unpack rendered `shouldContain` "expired"
+
+            it "renders UnauthorizedClient with GrantTypeNotAllowed" $ do
+                let err = UnauthorizedClient (GrantTypeNotAllowed OAuthAuthorizationCode)
+                    rendered = renderAuthorizationError err
+                T.unpack rendered `shouldContain` "authorization_code"
+                T.unpack rendered `shouldContain` "not allowed"
+
+            it "renders UnsupportedGrantType with UnknownGrantType" $ do
+                let err = UnsupportedGrantType (UnknownGrantType "password")
+                    rendered = renderAuthorizationError err
+                T.unpack rendered `shouldContain` "password"
+                T.unpack rendered `shouldContain` "unknown"
+
+            it "renders InvalidScope with ScopeNotPermitted" $ do
+                let err = InvalidScope (ScopeNotPermitted testScope)
+                    rendered = renderAuthorizationError err
+                T.unpack rendered `shouldContain` "read"
+                T.unpack rendered `shouldContain` "not permitted"
+
+            it "renders AccessDenied with UserDenied" $ do
+                let err = AccessDenied UserDenied
+                    rendered = renderAuthorizationError err
+                T.unpack rendered `shouldContain` "user"
+                T.unpack rendered `shouldContain` "denied"
 
     describe "LoginFlowError" $ do
         it "CookiesRequired can be constructed" $ do

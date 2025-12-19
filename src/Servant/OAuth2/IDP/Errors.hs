@@ -38,6 +38,16 @@ module Servant.OAuth2.IDP.Errors (
     -- * Authorization Errors
     AuthorizationError (..),
     authorizationErrorToResponse,
+    renderAuthorizationError,
+
+    -- * Authorization Error Reason ADTs (FR-004c)
+    InvalidRequestReason (..),
+    InvalidClientReason (..),
+    InvalidGrantReason (..),
+    UnauthorizedClientReason (..),
+    UnsupportedGrantTypeReason (..),
+    InvalidScopeReason (..),
+    AccessDeniedReason (..),
 
     -- * Login Flow Errors
     LoginFlowError (..),
@@ -65,7 +75,20 @@ import Lucid (
     title_,
  )
 import Network.HTTP.Types.Status (Status, status400, status401, status403)
-import Servant.OAuth2.IDP.Types (ClientId (..), CodeChallengeMethod, RedirectUri, Scope (..), SessionId (..), unClientId, unScope)
+import Servant.OAuth2.IDP.Types (
+    AuthCodeId,
+    ClientId (..),
+    CodeChallengeMethod,
+    OAuthGrantType (..),
+    RedirectUri,
+    RefreshTokenId,
+    Scope (..),
+    SessionId (..),
+    unAuthCodeId,
+    unClientId,
+    unRefreshTokenId,
+    unScope,
+ )
 import Web.HttpApiData (ToHttpApiData (..))
 
 -- -----------------------------------------------------------------------------
@@ -236,28 +259,98 @@ validationErrorToResponse = \case
         (status400, "Client registration must include at least one redirect_uri")
 
 -- -----------------------------------------------------------------------------
+-- Authorization Error Reason ADTs (FR-004c)
+-- -----------------------------------------------------------------------------
+
+{- | Reasons for InvalidRequest errors.
+Replaces Text payload with precise ADT for exhaustive pattern matching.
+-}
+data InvalidRequestReason
+    = MissingParameter TokenParameter
+    | InvalidParameterFormat TokenParameter
+    | MalformedRequest
+    deriving stock (Eq, Show, Generic)
+
+{- | Reasons for InvalidClient errors.
+Replaces Text payload with precise ADT for exhaustive pattern matching.
+-}
+data InvalidClientReason
+    = ClientNotFound ClientId
+    | InvalidClientCredentials
+    | ClientSecretMismatch
+    deriving stock (Eq, Show, Generic)
+
+{- | Reasons for InvalidGrant errors.
+Replaces Text payload with precise ADT for exhaustive pattern matching.
+-}
+data InvalidGrantReason
+    = CodeNotFound AuthCodeId
+    | CodeExpired AuthCodeId
+    | CodeAlreadyUsed AuthCodeId
+    | RefreshTokenNotFound RefreshTokenId
+    | RefreshTokenExpired RefreshTokenId
+    | RefreshTokenRevoked RefreshTokenId
+    deriving stock (Eq, Show, Generic)
+
+{- | Reasons for UnauthorizedClient errors.
+Replaces Text payload with precise ADT for exhaustive pattern matching.
+-}
+data UnauthorizedClientReason
+    = GrantTypeNotAllowed OAuthGrantType
+    | ScopeNotAllowed Scope
+    | RedirectUriNotRegistered RedirectUri
+    deriving stock (Eq, Show, Generic)
+
+{- | Reasons for UnsupportedGrantType errors.
+Replaces Text payload with precise ADT for exhaustive pattern matching.
+-}
+data UnsupportedGrantTypeReason
+    = UnknownGrantType Text
+    | GrantTypeDisabled OAuthGrantType
+    deriving stock (Eq, Show, Generic)
+
+{- | Reasons for InvalidScope errors.
+Replaces Text payload with precise ADT for exhaustive pattern matching.
+-}
+data InvalidScopeReason
+    = UnknownScope Text
+    | ScopeNotPermitted Scope
+    deriving stock (Eq, Show, Generic)
+
+{- | Reasons for AccessDenied errors.
+Replaces Text payload with precise ADT for exhaustive pattern matching.
+-}
+data AccessDeniedReason
+    = UserDenied
+    | ResourceOwnerDenied
+    | ConsentRequired
+    deriving stock (Eq, Show, Generic)
+
+-- -----------------------------------------------------------------------------
 -- Authorization Errors
 -- -----------------------------------------------------------------------------
 
 {- | OAuth 2.0 authorization errors per RFC 6749 Section 4.1.2.1 and 5.2.
 Fixed type (protocol-defined), NOT an associated type.
 Safe to expose to clients in OAuth error response format.
+
+Updated in FR-004c to use ADT payloads instead of Text for exhaustive pattern matching.
 -}
 data AuthorizationError
     = -- | 400: Missing/invalid parameter
-      InvalidRequest Text
+      InvalidRequest InvalidRequestReason
     | -- | 401: Client authentication failed
-      InvalidClient Text
+      InvalidClient InvalidClientReason
     | -- | 400: Invalid authorization code/refresh token
-      InvalidGrant Text
+      InvalidGrant InvalidGrantReason
     | -- | 401: Client not authorized for grant type
-      UnauthorizedClient Text
+      UnauthorizedClient UnauthorizedClientReason
     | -- | 400: Grant type not supported
-      UnsupportedGrantType Text
+      UnsupportedGrantType UnsupportedGrantTypeReason
     | -- | 400: Invalid/unknown scope
-      InvalidScope Text
+      InvalidScope InvalidScopeReason
     | -- | 403: Resource owner denied request
-      AccessDenied Text
+      AccessDenied AccessDeniedReason
     | -- | 400: Authorization code expired
       ExpiredCode
     | -- | 400: Redirect URI doesn't match registered
@@ -266,22 +359,72 @@ data AuthorizationError
       PKCEVerificationFailed
     deriving stock (Eq, Show, Generic)
 
+{- | Render AuthorizationError to human-readable error description (FR-004c).
+Converts ADT payloads to Text for UI layer.
+-}
+renderAuthorizationError :: AuthorizationError -> Text
+renderAuthorizationError = \case
+    InvalidRequest reason -> case reason of
+        MissingParameter param -> "Missing required parameter: " <> renderTokenParam param
+        InvalidParameterFormat param -> "Invalid parameter format: " <> renderTokenParam param
+        MalformedRequest -> "Malformed request"
+    InvalidClient reason -> case reason of
+        ClientNotFound clientId -> "Client not found: " <> unClientId clientId
+        InvalidClientCredentials -> "Invalid client credentials"
+        ClientSecretMismatch -> "Client secret mismatch"
+    InvalidGrant reason -> case reason of
+        CodeNotFound codeId -> "Authorization code not found: " <> unAuthCodeId codeId
+        CodeExpired codeId -> "Authorization code expired: " <> unAuthCodeId codeId
+        CodeAlreadyUsed codeId -> "Authorization code already used: " <> unAuthCodeId codeId
+        RefreshTokenNotFound rtId -> "Refresh token not found: " <> unRefreshTokenId rtId
+        RefreshTokenExpired rtId -> "Refresh token expired: " <> unRefreshTokenId rtId
+        RefreshTokenRevoked rtId -> "Refresh token revoked: " <> unRefreshTokenId rtId
+    UnauthorizedClient reason -> case reason of
+        GrantTypeNotAllowed grantType -> "Grant type not allowed: " <> renderGrantType grantType
+        ScopeNotAllowed scope -> "Scope not allowed: " <> unScope scope
+        RedirectUriNotRegistered _uri -> "Redirect URI not registered"
+    UnsupportedGrantType reason -> case reason of
+        UnknownGrantType gt -> "Unknown grant type: " <> gt
+        GrantTypeDisabled gt -> "Grant type disabled: " <> renderGrantType gt
+    InvalidScope reason -> case reason of
+        UnknownScope s -> "Unknown scope: " <> s
+        ScopeNotPermitted scope -> "Scope not permitted: " <> unScope scope
+    AccessDenied reason -> case reason of
+        UserDenied -> "User denied authorization"
+        ResourceOwnerDenied -> "Resource owner denied authorization"
+        ConsentRequired -> "Consent required"
+    ExpiredCode -> "Authorization code has expired"
+    InvalidRedirectUri -> "Invalid redirect_uri"
+    PKCEVerificationFailed -> "PKCE verification failed"
+  where
+    renderTokenParam :: TokenParameter -> Text
+    renderTokenParam TokenParamCode = "code"
+    renderTokenParam TokenParamCodeVerifier = "code_verifier"
+    renderTokenParam TokenParamRefreshToken = "refresh_token"
+
+    renderGrantType :: OAuthGrantType -> Text
+    renderGrantType OAuthAuthorizationCode = "authorization_code"
+    renderGrantType OAuthClientCredentials = "client_credentials"
+
 {- | Map AuthorizationError to HTTP status and OAuth error response.
 Per RFC 6749 Section 4.1.2.1 (authorization endpoint errors) and Section 5.2 (token endpoint errors).
 Uses OAuthErrorCode ADT for type-safe error codes (FR-004b).
+Uses renderAuthorizationError for human-readable descriptions (FR-004c).
 -}
 authorizationErrorToResponse :: AuthorizationError -> (Status, OAuthErrorResponse)
-authorizationErrorToResponse = \case
-    InvalidRequest msg -> (status400, OAuthErrorResponse ErrInvalidRequest (Just msg))
-    InvalidClient msg -> (status401, OAuthErrorResponse ErrInvalidClient (Just msg))
-    InvalidGrant msg -> (status400, OAuthErrorResponse ErrInvalidGrant (Just msg))
-    UnauthorizedClient msg -> (status401, OAuthErrorResponse ErrUnauthorizedClient (Just msg))
-    UnsupportedGrantType msg -> (status400, OAuthErrorResponse ErrUnsupportedGrantType (Just msg))
-    InvalidScope msg -> (status400, OAuthErrorResponse ErrInvalidScope (Just msg))
-    AccessDenied msg -> (status403, OAuthErrorResponse ErrAccessDenied (Just msg))
-    ExpiredCode -> (status400, OAuthErrorResponse ErrInvalidGrant (Just "Authorization code has expired"))
-    InvalidRedirectUri -> (status400, OAuthErrorResponse ErrInvalidRequest (Just "Invalid redirect_uri"))
-    PKCEVerificationFailed -> (status400, OAuthErrorResponse ErrInvalidGrant (Just "PKCE verification failed"))
+authorizationErrorToResponse err =
+    let desc = renderAuthorizationError err
+     in case err of
+            InvalidRequest _ -> (status400, OAuthErrorResponse ErrInvalidRequest (Just desc))
+            InvalidClient _ -> (status401, OAuthErrorResponse ErrInvalidClient (Just desc))
+            InvalidGrant _ -> (status400, OAuthErrorResponse ErrInvalidGrant (Just desc))
+            UnauthorizedClient _ -> (status401, OAuthErrorResponse ErrUnauthorizedClient (Just desc))
+            UnsupportedGrantType _ -> (status400, OAuthErrorResponse ErrUnsupportedGrantType (Just desc))
+            InvalidScope _ -> (status400, OAuthErrorResponse ErrInvalidScope (Just desc))
+            AccessDenied _ -> (status403, OAuthErrorResponse ErrAccessDenied (Just desc))
+            ExpiredCode -> (status400, OAuthErrorResponse ErrInvalidGrant (Just desc))
+            InvalidRedirectUri -> (status400, OAuthErrorResponse ErrInvalidRequest (Just desc))
+            PKCEVerificationFailed -> (status400, OAuthErrorResponse ErrInvalidGrant (Just desc))
 
 -- -----------------------------------------------------------------------------
 -- Login Flow Errors
