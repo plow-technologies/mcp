@@ -64,6 +64,7 @@ import Servant.OAuth2.IDP.APISpec qualified as APISpec
 import Servant.OAuth2.IDP.CryptoEntropySpec qualified as CryptoEntropySpec
 import Servant.OAuth2.IDP.ErrorsSpec qualified as ErrorsSpec
 import Servant.OAuth2.IDP.LucidRenderingSpec qualified as LucidRenderingSpec
+import Servant.OAuth2.IDP.MetadataSpec qualified as MetadataSpec
 import Servant.OAuth2.IDP.TokenRequestSpec qualified as TokenRequestSpec
 import Servant.OAuth2.IDP.TypesSpec qualified as IDPTypesSpec
 
@@ -136,6 +137,7 @@ spec = do
         IDPTypesSpec.spec
         CryptoEntropySpec.spec
         ErrorsSpec.spec
+        MetadataSpec.spec
 
     -- Typeclass law tests (using TestM with controlled time)
     describe "TestM OAuthStateStore" $ do
