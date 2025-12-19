@@ -27,7 +27,8 @@ module MCP.Server.HTTP (
     HTTPServerConfig (..),
 
     -- * Demo Configuration Helpers
-    defaultDemoOAuthConfig,
+    DemoOAuthBundle (..),
+    defaultDemoOAuthBundle,
     defaultProtectedResourceMetadata,
 
     -- * Entry Points
@@ -57,7 +58,7 @@ module MCP.Server.HTTP (
     mcpServerAuth,
 
     -- * Configuration Helpers
-    mkOAuthEnvFromConfig,
+    mkOAuthEnvFromBundle,
 ) where
 
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVarIO, writeTVar)
@@ -73,7 +74,7 @@ import Data.Functor.Contravariant (contramap)
 import Data.Generics.Product (HasType, getTyped)
 import Data.Generics.Sum.Typed (AsType, injectTyped)
 import Data.List.NonEmpty (NonEmpty ((:|)))
-import Data.Maybe (isJust, mapMaybe)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
@@ -91,7 +92,7 @@ import Servant.Server.Internal.Handler (runHandler)
 
 import MCP.Protocol
 import MCP.Server (MCPServer (..), MCPServerM, ServerConfig (..), ServerState (..), initialServerState, runMCPServer)
-import MCP.Server.Auth (OAuthConfig (..), OAuthProvider (..), ProtectedResourceMetadata (..))
+import MCP.Server.Auth (MCPOAuthConfig (..), OAuthProvider (..), ProtectedResourceMetadata (..), defaultDemoMCPOAuthConfig)
 import MCP.Server.HTTP.AppEnv (AppEnv (..), HTTPServerConfig (..), runAppM)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Operation (OperationTrace (..))
@@ -113,7 +114,7 @@ import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI, oauthServer)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
 import Servant.OAuth2.IDP.Trace (OAuthTrace)
-import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthGrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), UserId (..), unUserId)
+import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthGrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope, UserId (..), unUserId)
 import Servant.OAuth2.IDP.Types.Internal (unsafeScope)
 
 -- | HTML content type for Servant
@@ -296,14 +297,13 @@ mcpAppInternal :: (MCPServer MCPServerM) => HTTPServerConfig -> IOTracer HTTPTra
 mcpAppInternal config tracer stateVar oauthEnv jwtSettings =
     let cookieSettings = defaultCookieSettings
         authContext = cookieSettings :. jwtSettings :. EmptyContext
-        baseApp = case httpOAuthConfig config of
-            Just oauthCfg
-                | oauthEnabled oauthCfg ->
-                    serveWithContext
-                        (Proxy :: Proxy (CompleteAPI '[JWT]))
-                        authContext
-                        (oauthServerNew config tracer oauthEnv jwtSettings :<|> mcpServerAuth config tracer stateVar)
-            _ ->
+        baseApp = case httpMCPOAuthConfig config of
+            Just _mcpOAuthCfg ->
+                serveWithContext
+                    (Proxy :: Proxy (CompleteAPI '[JWT]))
+                    authContext
+                    (oauthServerNew config tracer oauthEnv jwtSettings :<|> mcpServerAuth config tracer stateVar)
+            Nothing ->
                 serve (Proxy :: Proxy UnprotectedMCPAPI) (mcpServerNoAuth config tracer stateVar)
      in if httpEnableLogging config
             then logStdoutDev baseApp
@@ -313,7 +313,10 @@ mcpAppInternal config tracer stateVar oauthEnv jwtSettings =
     oauthServerNew :: HTTPServerConfig -> IOTracer HTTPTrace -> OAuthTVarEnv -> JWTSettings -> Server OAuthAPI
     oauthServerNew cfg httpTracer oauth jwtSet =
         let authEnv = DemoCredentialEnv defaultDemoCredentialStore
-            oauthCfgEnv = mkOAuthEnvFromConfig cfg
+            -- Note: This function cannot construct OAuthEnv without the full bundle
+            -- For now, use default values - this is a limitation that should be addressed
+            -- by passing OAuthEnv directly to mcpAppInternal
+            oauthCfgEnv = mkOAuthEnvFromBundle defaultDemoOAuthBundle
             -- Create a simple OAuthTrace tracer that discards traces for now
             -- TODO: Convert between MCP.Trace.OAuth.OAuthTrace and Servant.OAuth2.IDP.Trace.OAuthTrace
             oauthTracer = IOTracer $ Tracer $ \_ -> pure () -- Discard OAuth traces during transition
@@ -674,37 +677,59 @@ extractCapabilityNames (ServerCapabilities res prpts tls comps logCap _exp) =
         , maybe [] (const ["logging"]) logCap
         ]
 
--- | Default demo OAuth configuration for testing purposes
-defaultDemoOAuthConfig :: OAuthConfig
-defaultDemoOAuthConfig =
-    OAuthConfig
-        { oauthEnabled = True
-        , oauthProviders = []
-        , requireHTTPS = False -- For demo only
-        -- Default timing parameters
-        , authCodeExpirySeconds = 600 -- 10 minutes
-        , accessTokenExpirySeconds = 3600 -- 1 hour
-        -- Default OAuth parameters
-        , supportedScopes = [unsafeScope "mcp:read", unsafeScope "mcp:write"]
-        , supportedResponseTypes = [ResponseCode]
-        , supportedGrantTypes = [GrantAuthorizationCode, GrantRefreshToken]
-        , supportedAuthMethods = [AuthNone]
-        , supportedCodeChallengeMethods = [S256]
-        , -- Demo mode settings (interactive login required)
-          autoApproveAuth = False
-        , demoUserIdTemplate = Nothing
-        , demoEmailDomain = "example.com"
-        , demoUserName = "Test User"
-        , publicClientSecret = Just ""
-        , -- Default token prefixes
-          authCodePrefix = "code_"
-        , refreshTokenPrefix = "rt_"
-        , clientIdPrefix = "client_"
-        , -- Default response template
-          authorizationSuccessTemplate = Nothing
-        , -- Credential management
-          credentialStore = defaultDemoCredentialStore
-        , loginSessionExpirySeconds = 600 -- 10 minutes
+{- | Bundle of OAuth configuration for demo/testing
+Contains both protocol-level settings (for OAuthEnv) and MCP-specific settings.
+-}
+data DemoOAuthBundle = DemoOAuthBundle
+    { bundleRequireHTTPS :: Bool
+    -- ^ Security flag: require HTTPS for redirect URIs (except localhost)
+    , bundleBaseUrl :: Text
+    -- ^ Base URL for OAuth endpoints (e.g., "http://localhost:8080")
+    , bundleAuthCodeExpirySeconds :: Int
+    -- ^ Authorization code expiry in seconds
+    , bundleAccessTokenExpirySeconds :: Int
+    -- ^ Access token expiry in seconds
+    , bundleLoginSessionExpirySeconds :: Int
+    -- ^ Login session expiry in seconds
+    , bundleAuthCodePrefix :: Text
+    -- ^ Prefix for generated authorization codes
+    , bundleRefreshTokenPrefix :: Text
+    -- ^ Prefix for generated refresh tokens
+    , bundleClientIdPrefix :: Text
+    -- ^ Prefix for generated client IDs
+    , bundleSupportedScopes :: [Servant.OAuth2.IDP.Types.Scope]
+    -- ^ Supported OAuth scopes
+    , bundleSupportedResponseTypes :: NonEmpty ResponseType
+    -- ^ Supported response types (at least one required)
+    , bundleSupportedGrantTypes :: NonEmpty OAuthGrantType
+    -- ^ Supported grant types (at least one required)
+    , bundleSupportedAuthMethods :: NonEmpty ClientAuthMethod
+    -- ^ Supported token endpoint authentication methods
+    , bundleSupportedCodeChallengeMethods :: NonEmpty CodeChallengeMethod
+    -- ^ Supported PKCE code challenge methods
+    , bundleMCPConfig :: MCPOAuthConfig
+    -- ^ MCP-specific OAuth settings
+    }
+    deriving (Generic)
+
+-- | Default demo OAuth bundle for testing purposes
+defaultDemoOAuthBundle :: DemoOAuthBundle
+defaultDemoOAuthBundle =
+    DemoOAuthBundle
+        { bundleRequireHTTPS = False -- For demo only
+        , bundleBaseUrl = "http://localhost:8080"
+        , bundleAuthCodeExpirySeconds = 600 -- 10 minutes
+        , bundleAccessTokenExpirySeconds = 3600 -- 1 hour
+        , bundleLoginSessionExpirySeconds = 600 -- 10 minutes
+        , bundleAuthCodePrefix = "code_"
+        , bundleRefreshTokenPrefix = "rt_"
+        , bundleClientIdPrefix = "client_"
+        , bundleSupportedScopes = [unsafeScope "mcp:read", unsafeScope "mcp:write"]
+        , bundleSupportedResponseTypes = ResponseCode :| []
+        , bundleSupportedGrantTypes = OAuthAuthorizationCode :| [OAuthClientCredentials]
+        , bundleSupportedAuthMethods = AuthNone :| []
+        , bundleSupportedCodeChallengeMethods = S256 :| []
+        , bundleMCPConfig = defaultDemoMCPOAuthConfig
         }
 
 -- | Default protected resource metadata for a given base URL
@@ -719,73 +744,30 @@ defaultProtectedResourceMetadata baseUrl =
         , resourceDocumentation = Nothing
         }
 
-{- | Convert GrantType to OAuthGrantType
+{- | Build OAuthEnv from DemoOAuthBundle
 
-Maps between MCP.Server.Auth.GrantType and Servant.OAuth2.IDP.Types.OAuthGrantType.
-Note: GrantRefreshToken has no equivalent in OAuthGrantType (it's not a grant type in OAuth 2.0 metadata).
+Converts a DemoOAuthBundle into the protocol-level OAuthEnv configuration.
 -}
-convertGrantType :: GrantType -> Maybe OAuthGrantType
-convertGrantType GrantAuthorizationCode = Just OAuthAuthorizationCode
-convertGrantType GrantClientCredentials = Just OAuthClientCredentials
-convertGrantType GrantRefreshToken = Nothing -- Not a metadata grant type
-
-{- | Build OAuthEnv from HTTPServerConfig
-
-Extracts protocol-agnostic OAuth configuration from HTTPServerConfig.
-Uses default values when OAuth is not configured.
--}
-mkOAuthEnvFromConfig :: HTTPServerConfig -> OAuthEnv
-mkOAuthEnvFromConfig cfg =
-    case httpOAuthConfig cfg of
-        Just oauthCfg ->
-            let baseUri = case parseURI (T.unpack (httpBaseUrl cfg)) of
-                    Just uri -> uri
-                    Nothing -> Prelude.error $ "Invalid base URL in HTTPServerConfig: " <> T.unpack (httpBaseUrl cfg)
-                -- Convert GrantType list to OAuthGrantType NonEmpty, filtering out GrantRefreshToken
-                convertedGrants = case mapMaybe convertGrantType (supportedGrantTypes oauthCfg) of
-                    [] -> OAuthAuthorizationCode :| [] -- Default if all filtered out
-                    (x : xs) -> x :| xs
-             in OAuthEnv
-                    { oauthRequireHTTPS = requireHTTPS oauthCfg
-                    , oauthBaseUrl = baseUri
-                    , oauthAuthCodeExpiry = fromIntegral (authCodeExpirySeconds oauthCfg)
-                    , oauthAccessTokenExpiry = fromIntegral (accessTokenExpirySeconds oauthCfg)
-                    , oauthLoginSessionExpiry = fromIntegral (loginSessionExpirySeconds oauthCfg)
-                    , oauthAuthCodePrefix = authCodePrefix oauthCfg
-                    , oauthRefreshTokenPrefix = refreshTokenPrefix oauthCfg
-                    , oauthClientIdPrefix = clientIdPrefix oauthCfg
-                    , oauthSupportedScopes = supportedScopes oauthCfg
-                    , oauthSupportedResponseTypes = case supportedResponseTypes oauthCfg of
-                        [] -> Prelude.error "supportedResponseTypes cannot be empty"
-                        (x : xs) -> x :| xs
-                    , oauthSupportedGrantTypes = convertedGrants
-                    , oauthSupportedAuthMethods = case supportedAuthMethods oauthCfg of
-                        [] -> Prelude.error "supportedAuthMethods cannot be empty"
-                        (x : xs) -> x :| xs
-                    , oauthSupportedCodeChallengeMethods = case supportedCodeChallengeMethods oauthCfg of
-                        [] -> Prelude.error "supportedCodeChallengeMethods cannot be empty"
-                        (x : xs) -> x :| xs
-                    }
-        Nothing ->
-            -- Default OAuthEnv when OAuth is not configured
-            let defaultUri = case parseURI "http://localhost:8080" of
-                    Just uri -> uri
-                    Nothing -> Prelude.error "Failed to parse default URI"
-             in OAuthEnv
-                    { oauthRequireHTTPS = False
-                    , oauthBaseUrl = defaultUri
-                    , oauthAuthCodeExpiry = 600
-                    , oauthAccessTokenExpiry = 3600
-                    , oauthLoginSessionExpiry = 600
-                    , oauthAuthCodePrefix = "code_"
-                    , oauthRefreshTokenPrefix = "rt_"
-                    , oauthClientIdPrefix = "client_"
-                    , oauthSupportedScopes = []
-                    , oauthSupportedResponseTypes = ResponseCode :| []
-                    , oauthSupportedGrantTypes = OAuthAuthorizationCode :| []
-                    , oauthSupportedAuthMethods = AuthNone :| []
-                    , oauthSupportedCodeChallengeMethods = S256 :| []
-                    }
+mkOAuthEnvFromBundle :: DemoOAuthBundle -> OAuthEnv
+mkOAuthEnvFromBundle bundle =
+    let baseUri = case parseURI (T.unpack (bundleBaseUrl bundle)) of
+            Just uri -> uri
+            Nothing -> Prelude.error $ "Invalid base URL in DemoOAuthBundle: " <> T.unpack (bundleBaseUrl bundle)
+     in OAuthEnv
+            { oauthRequireHTTPS = bundleRequireHTTPS bundle
+            , oauthBaseUrl = baseUri
+            , oauthAuthCodeExpiry = fromIntegral (bundleAuthCodeExpirySeconds bundle)
+            , oauthAccessTokenExpiry = fromIntegral (bundleAccessTokenExpirySeconds bundle)
+            , oauthLoginSessionExpiry = fromIntegral (bundleLoginSessionExpirySeconds bundle)
+            , oauthAuthCodePrefix = bundleAuthCodePrefix bundle
+            , oauthRefreshTokenPrefix = bundleRefreshTokenPrefix bundle
+            , oauthClientIdPrefix = bundleClientIdPrefix bundle
+            , oauthSupportedScopes = bundleSupportedScopes bundle
+            , oauthSupportedResponseTypes = bundleSupportedResponseTypes bundle
+            , oauthSupportedGrantTypes = bundleSupportedGrantTypes bundle
+            , oauthSupportedAuthMethods = bundleSupportedAuthMethods bundle
+            , oauthSupportedCodeChallengeMethods = bundleSupportedCodeChallengeMethods bundle
+            }
 
 -- | Map scope to human-readable description
 scopeToDescription :: Text -> Text
@@ -833,6 +815,10 @@ demoMcpApp = do
     -- Create null tracer (discards all traces)
     let tracer = IOTracer (Tracer (\_ -> pure ()))
 
+    -- Get default demo OAuth bundle
+    let bundle = defaultDemoOAuthBundle
+        mcpConfig = bundleMCPConfig bundle
+
     -- Create default demo configuration
     let config =
             HTTPServerConfig
@@ -841,7 +827,7 @@ demoMcpApp = do
                 , httpServerInfo = Implementation "mcp-demo" (Just "0.3.0") ""
                 , httpCapabilities = ServerCapabilities Nothing Nothing Nothing Nothing Nothing Nothing
                 , httpEnableLogging = False
-                , httpOAuthConfig = Just defaultDemoOAuthConfig
+                , httpMCPOAuthConfig = Just mcpConfig
                 , httpJWK = Just jwk
                 , httpProtocolVersion = "2025-06-18"
                 , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata "http://localhost:8080")
@@ -853,8 +839,8 @@ demoMcpApp = do
     -- Initialize server state
     stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
 
-    -- Create OAuthEnv from config
-    let oauthCfgEnv = mkOAuthEnvFromConfig config
+    -- Create OAuthEnv from bundle
+    let oauthCfgEnv = mkOAuthEnvFromBundle bundle
         -- Create a simple OAuthTrace tracer that discards traces for now
         oauthTracer = IOTracer $ Tracer $ \_ -> pure ()
 
@@ -891,11 +877,11 @@ runServerHTTP config tracer = do
 
     traceWith tracer $ HTTPServerStarting (httpPort config) (httpBaseUrl config)
 
-    when (maybe False oauthEnabled (httpOAuthConfig config)) $ do
+    when (isJust (httpMCPOAuthConfig config)) $ do
         let authEp = httpBaseUrl config <> "/authorize"
             tokenEp = httpBaseUrl config <> "/token"
         traceWith tracer $ HTTPOAuthEnabled authEp tokenEp
-        case httpOAuthConfig config >>= \cfg -> if null (oauthProviders cfg) then Nothing else Just (oauthProviders cfg) of
+        case httpMCPOAuthConfig config >>= \cfg -> if null (oauthProviders cfg) then Nothing else Just (oauthProviders cfg) of
             Just providers -> do
                 traceWith tracer $ HTTPOAuthProviders (map providerName providers)
                 when (any requiresPKCE providers) $ traceWith tracer HTTPPKCEEnabled

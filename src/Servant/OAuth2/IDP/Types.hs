@@ -79,6 +79,7 @@ module Servant.OAuth2.IDP.Types (
     ResponseType (..),
     ClientAuthMethod (..),
     OAuthGrantType (..),
+    oauthGrantTypeToGrantType,
     LoginAction (..),
 
     -- * Domain Entities
@@ -788,6 +789,11 @@ instance FromJSON OAuthGrantType where
 instance ToJSON OAuthGrantType where
     toJSON OAuthAuthorizationCode = toJSON ("authorization_code" :: Text)
     toJSON OAuthClientCredentials = toJSON ("client_credentials" :: Text)
+
+-- | Convert OAuthGrantType to GrantType for metadata endpoints
+oauthGrantTypeToGrantType :: OAuthGrantType -> GrantType
+oauthGrantTypeToGrantType OAuthAuthorizationCode = GrantAuthorizationCode
+oauthGrantTypeToGrantType OAuthClientCredentials = GrantClientCredentials
 
 -- | Login form action (approve or deny authorization)
 data LoginAction

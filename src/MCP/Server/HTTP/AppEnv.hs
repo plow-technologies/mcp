@@ -89,7 +89,7 @@ import Servant (Handler, ServerError (..), err400, err401, err500, errBody)
 import Servant.Auth.Server (JWTSettings)
 
 import MCP.Server (ServerState)
-import MCP.Server.Auth (OAuthConfig, ProtectedResourceMetadata)
+import MCP.Server.Auth (MCPOAuthConfig, ProtectedResourceMetadata)
 import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types (Implementation, ServerCapabilities)
 import Plow.Logging (IOTracer)
@@ -130,7 +130,7 @@ data HTTPServerConfig = HTTPServerConfig
     , httpServerInfo :: Implementation
     , httpCapabilities :: ServerCapabilities
     , httpEnableLogging :: Bool
-    , httpOAuthConfig :: Maybe OAuthConfig
+    , httpMCPOAuthConfig :: Maybe MCPOAuthConfig
     , httpJWK :: Maybe JWK -- JWT signing key
     , httpProtocolVersion :: Text -- MCP protocol version
     , httpProtectedResourceMetadata :: Maybe ProtectedResourceMetadata

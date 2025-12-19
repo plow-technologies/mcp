@@ -26,10 +26,10 @@ module MCP.Server.Auth (
     module Servant.OAuth2.IDP.Auth.Backend,
 
     -- * OAuth Configuration
-    OAuthConfig (..),
     OAuthProvider (..),
     OAuthGrantType (..),
     MCPOAuthConfig (..),
+    defaultDemoMCPOAuthConfig,
 
     -- * Token Validation
     TokenInfo (..),
@@ -94,48 +94,14 @@ data OAuthProvider = OAuthProvider
     }
     deriving (Show, Eq, Generic)
 
--- | OAuth configuration for the MCP server
-data OAuthConfig = OAuthConfig
-    { oauthEnabled :: Bool
-    , oauthProviders :: [OAuthProvider]
-    , requireHTTPS :: Bool -- MCP requires HTTPS for OAuth
-    -- Configurable timing parameters
-    , authCodeExpirySeconds :: Int
-    , accessTokenExpirySeconds :: Int
-    , -- Configurable OAuth parameters
-      supportedScopes :: [Scope]
-    , supportedResponseTypes :: [ResponseType]
-    , supportedGrantTypes :: [GrantType]
-    , supportedAuthMethods :: [ClientAuthMethod]
-    , supportedCodeChallengeMethods :: [CodeChallengeMethod]
-    , -- Demo mode settings
-      autoApproveAuth :: Bool
-    , demoUserIdTemplate :: Maybe Text -- Nothing means no demo mode
-    , demoEmailDomain :: Text
-    , demoUserName :: Text
-    , publicClientSecret :: Maybe Text
-    , -- Token prefixes
-      authCodePrefix :: Text
-    , refreshTokenPrefix :: Text
-    , clientIdPrefix :: Text
-    , -- Response templates
-      authorizationSuccessTemplate :: Maybe Text
-    , -- Credential management
-      credentialStore :: CredentialStore
-    , loginSessionExpirySeconds :: Int
-    }
-    deriving (Generic)
-
--- Note: No Show instance because CredentialStore contains ScrubbedBytes (no Show)
-
 -- | MCP-specific OAuth configuration (demo-specific fields)
 data MCPOAuthConfig = MCPOAuthConfig
     { autoApproveAuth :: Bool
     -- ^ Demo mode auto-approval flag (bypasses interactive login)
     , oauthProviders :: [OAuthProvider]
     -- ^ External OAuth identity providers for federated login
-    , demoUserIdTemplate :: Text
-    -- ^ Template for generating demo user IDs (e.g., "user-{id}")
+    , demoUserIdTemplate :: Maybe Text
+    -- ^ Template for generating demo user IDs (e.g., "user-{id}"). Nothing means no demo mode.
     , demoEmailDomain :: Text
     -- ^ Domain suffix for demo user emails (e.g., "example.com")
     , demoUserName :: Text
@@ -146,6 +112,19 @@ data MCPOAuthConfig = MCPOAuthConfig
     -- ^ HTML template for authorization success page
     }
     deriving (Show, Eq, Generic)
+
+-- | Default demo configuration for MCPOAuthConfig
+defaultDemoMCPOAuthConfig :: MCPOAuthConfig
+defaultDemoMCPOAuthConfig =
+    MCPOAuthConfig
+        { autoApproveAuth = False -- Interactive login by default
+        , oauthProviders = []
+        , demoUserIdTemplate = Just "user-{id}"
+        , demoEmailDomain = "example.com"
+        , demoUserName = "Demo User"
+        , publicClientSecret = Nothing
+        , authorizationSuccessTemplate = "<html><body><h1>Authorization Successful</h1></body></html>"
+        }
 
 -- | PKCE challenge data
 data PKCEChallenge = PKCEChallenge

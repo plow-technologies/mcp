@@ -22,16 +22,17 @@ module Servant.OAuth2.IDP.Handlers.Metadata (
 import Control.Monad.Reader (MonadReader, asks)
 import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
+import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
 
 import MCP.Server.Auth (
-    OAuthConfig (..),
     OAuthMetadata (..),
     ProtectedResourceMetadata (..),
  )
 import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
+import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Types (
-    ResponseType (..),
+    oauthGrantTypeToGrantType,
  )
 import Servant.OAuth2.IDP.Types.Internal (unsafeScope)
 
@@ -58,12 +59,12 @@ metadata <- handleMetadata  -- Extracts config from custom env
 @
 -}
 handleMetadata ::
-    (MonadReader env m, HasType HTTPServerConfig env) =>
+    (MonadReader env m, HasType HTTPServerConfig env, HasType OAuthEnv env) =>
     m OAuthMetadata
 handleMetadata = do
     config <- asks (getTyped @HTTPServerConfig)
+    oauthEnv <- asks (getTyped @OAuthEnv)
     let baseUrl = httpBaseUrl config
-        oauthCfg = httpOAuthConfig config
     return
         OAuthMetadata
             { issuer = baseUrl
@@ -72,11 +73,11 @@ handleMetadata = do
             , registrationEndpoint = Just (baseUrl <> "/register")
             , userInfoEndpoint = Nothing
             , jwksUri = Nothing
-            , scopesSupported = fmap supportedScopes oauthCfg
-            , responseTypesSupported = maybe [ResponseCode] supportedResponseTypes oauthCfg
-            , grantTypesSupported = fmap supportedGrantTypes oauthCfg
-            , tokenEndpointAuthMethodsSupported = fmap supportedAuthMethods oauthCfg
-            , codeChallengeMethodsSupported = fmap supportedCodeChallengeMethods oauthCfg
+            , scopesSupported = Just (oauthSupportedScopes oauthEnv)
+            , responseTypesSupported = NE.toList (oauthSupportedResponseTypes oauthEnv)
+            , grantTypesSupported = Just (NE.toList (fmap oauthGrantTypeToGrantType (oauthSupportedGrantTypes oauthEnv)))
+            , tokenEndpointAuthMethodsSupported = Just (NE.toList (oauthSupportedAuthMethods oauthEnv))
+            , codeChallengeMethodsSupported = Just (NE.toList (oauthSupportedCodeChallengeMethods oauthEnv))
             }
 
 {- | Protected resource metadata endpoint (polymorphic).

@@ -30,10 +30,9 @@ import Data.Set qualified as Set
 import Data.UUID.V4 qualified as UUID
 
 import Data.UUID qualified as UUID
-import MCP.Server.Auth (OAuthConfig (..), clientIdPrefix)
-import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
 import MCP.Trace.HTTP (HTTPTrace (..))
 import Plow.Logging (IOTracer, traceWith)
+import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
 import Servant.OAuth2.IDP.API (
     ClientRegistrationRequest (..),
@@ -85,13 +84,13 @@ handleRegister ::
     , MonadReader env m
     , MonadError e m
     , AsType AuthorizationError e
-    , HasType HTTPServerConfig env
+    , HasType OAuthEnv env
     , HasType (IOTracer HTTPTrace) env
     ) =>
     ClientRegistrationRequest ->
     m ClientRegistrationResponse
 handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqResponses reqAuth) = do
-    config <- asks (getTyped @HTTPServerConfig)
+    oauthEnv <- asks (getTyped @OAuthEnv)
     tracer <- asks (getTyped @(IOTracer HTTPTrace))
 
     -- Validate redirect_uris is not empty
@@ -101,7 +100,7 @@ handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqR
                 InvalidRequest MalformedRequest
 
     -- Generate client ID
-    let prefix = maybe "client_" clientIdPrefix (httpOAuthConfig config)
+    let prefix = oauthClientIdPrefix oauthEnv
     uuid <- liftIO UUID.nextRandom
     let clientIdText = prefix <> UUID.toText uuid
         clientId = unsafeClientId clientIdText
