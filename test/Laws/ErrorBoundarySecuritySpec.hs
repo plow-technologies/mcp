@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 {- |
 Module      : Laws.ErrorBoundarySecuritySpec
@@ -37,32 +38,78 @@ The boundary must ensure that:
 -}
 module Laws.ErrorBoundarySecuritySpec (spec) where
 
-import Test.Hspec (Spec, describe)
+import Control.Monad.IO.Class (liftIO)
+import Data.Aeson (decode)
+import Data.ByteString.Lazy qualified as BL
+import Data.IORef (modifyIORef', newIORef, readIORef)
+import Data.Maybe (fromMaybe)
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
+import Data.Text.Encoding.Error (lenientDecode)
+import MCP.Server.HTTP.AppEnv (AppError (..), AppM)
+import MCP.Trace.HTTP (HTTPTrace (..))
+import Plow.Logging (IOTracer (..), Tracer (..))
+import Servant.OAuth2.IDP.Auth.Backend (mkUsername)
+import Servant.OAuth2.IDP.Auth.Demo (DemoAuthError (..))
+import Servant.OAuth2.IDP.Boundary (
+    OAuthBoundaryTrace (..),
+    domainErrorToServerError,
+ )
+import Servant.OAuth2.IDP.Errors (
+    AccessDeniedReason (..),
+    AuthorizationError (..),
+    InvalidClientReason (..),
+    InvalidGrantReason (..),
+    InvalidRequestReason (..),
+    OAuthErrorCode (..),
+    OAuthErrorResponse (..),
+    UnauthorizedClientReason (..),
+    ValidationError (..),
+    oauthErrorCode,
+    oauthErrorDescription,
+ )
+import Servant.OAuth2.IDP.Store.InMemory (OAuthStoreError (..))
+import Servant.OAuth2.IDP.Types (
+    mkAuthCodeId,
+    mkClientId,
+    mkScope,
+ )
+import Servant.Server (ServerError (..), errBody, errHTTPCode, errHeaders)
+import Test.Hspec (Spec, describe, it, shouldBe)
 
--- All test helper functions and imports commented out pending ValidationError migration
--- See TODO comments in spec function below
+-- | Helper to extract Just or fail test
+fromJustOrFail :: String -> Maybe a -> a
+fromJustOrFail msg Nothing = error msg
+fromJustOrFail _ (Just x) = x
+
+-- | Mock tracer that records trace events to an IORef
+withMockTracer :: (IOTracer trace -> IO (Maybe ServerError)) -> IO ([trace], Maybe ServerError)
+withMockTracer action = do
+    tracesRef <- newIORef []
+    let tracer = IOTracer $ Tracer $ \trace -> liftIO $ modifyIORef' tracesRef (trace :)
+    result <- action tracer
+    traces <- readIORef tracesRef
+    pure (reverse traces, result)
 
 -- -----------------------------------------------------------------------------
 -- Test Spec
 -- -----------------------------------------------------------------------------
 
 spec :: Spec
-spec = describe "OAuth Error Boundary Security (PENDING: ValidationError migration incomplete)" $ do
-    -- TODO: Re-enable these tests after ValidationError migration is complete
-    -- The AppM.runAppM currently uses toServerError directly instead of domainErrorToServerError
-    -- See MCP.Server.HTTP.AppEnv lines 237-240
-    pure () -- Skip all tests for now
+spec = describe "OAuth Error Boundary Security" $ do
+    secureErrorHidingSpec
+    validationErrorExposureSpec
+    authorizationErrorExposureSpec
+    infrastructureDetailExclusionSpec
+    tracerVerificationSpec
 
 -- -----------------------------------------------------------------------------
 -- Secure Error Hiding Tests
 -- -----------------------------------------------------------------------------
 
-{- DISABLED: All test functions below are commented out pending ValidationError migration
-
 {- | Verify that OAuthStoreError and AuthBackendError details are hidden
 from HTTP responses but logged via tracer.
 -}
-{-
 secureErrorHidingSpec :: Spec
 secureErrorHidingSpec = describe "Secure Error Hiding" $ do
     describe "OAuthStoreError" $ do
@@ -122,7 +169,8 @@ secureErrorHidingSpec = describe "Secure Error Hiding" $ do
                 _ -> fail $ "Expected BoundaryAuthError trace, got: " ++ show traces
 
         it "returns generic 401 for UserNotFound (no user enumeration)" $ do
-            let err = AuthBackendErr (UserNotFound (Username "alice"))
+            let username = fromJustOrFail "mkUsername failed for 'alice'" $ mkUsername "alice"
+                err = AuthBackendErr (UserNotFound username)
             (traces, mServerErr) <- withMockTracer $ \tracer ->
                 domainErrorToServerError @IO @AppM tracer HTTPOAuthBoundary err
 
@@ -214,7 +262,7 @@ with appropriate HTTP status codes.
 authorizationErrorExposureSpec :: Spec
 authorizationErrorExposureSpec = describe "AuthorizationError Exposure" $ do
     it "returns 400 with JSON for InvalidRequest" $ do
-        let err = AuthorizationErr (InvalidRequest "Missing required parameter")
+        let err = AuthorizationErr (InvalidRequest MalformedRequest)
         (_, mServerErr) <- withMockTracer $ \tracer ->
             domainErrorToServerError @IO @AppM tracer HTTPOAuthBoundary err
 
@@ -228,11 +276,11 @@ authorizationErrorExposureSpec = describe "AuthorizationError Exposure" $ do
                 case decode (errBody serverErr) :: Maybe OAuthErrorResponse of
                     Nothing -> fail "Failed to parse OAuthErrorResponse JSON"
                     Just oauthErr -> do
-                        oauthErrorCode oauthErr `shouldBe` "invalid_request"
-                        oauthErrorDescription oauthErr `shouldBe` Just "Missing required parameter"
+                        oauthErrorCode oauthErr `shouldBe` ErrInvalidRequest
+                        oauthErrorDescription oauthErr `shouldBe` Just "Malformed request"
 
     it "returns 401 with JSON for InvalidClient" $ do
-        let err = AuthorizationErr (InvalidClient "Client authentication failed")
+        let err = AuthorizationErr (InvalidClient InvalidClientCredentials)
         (_, mServerErr) <- withMockTracer $ \tracer ->
             domainErrorToServerError @IO @AppM tracer HTTPOAuthBoundary err
 
@@ -243,11 +291,12 @@ authorizationErrorExposureSpec = describe "AuthorizationError Exposure" $ do
                 case decode (errBody serverErr) :: Maybe OAuthErrorResponse of
                     Nothing -> fail "Failed to parse OAuthErrorResponse JSON"
                     Just oauthErr -> do
-                        oauthErrorCode oauthErr `shouldBe` "invalid_client"
-                        oauthErrorDescription oauthErr `shouldBe` Just "Client authentication failed"
+                        oauthErrorCode oauthErr `shouldBe` ErrInvalidClient
+                        oauthErrorDescription oauthErr `shouldBe` Just "Invalid client credentials"
 
     it "returns 400 with JSON for InvalidGrant" $ do
-        let err = AuthorizationErr (InvalidGrant "Code expired")
+        let codeId = fromJustOrFail "mkAuthCodeId failed" $ mkAuthCodeId "test_code_123"
+            err = AuthorizationErr (InvalidGrant (CodeExpired codeId))
         (_, mServerErr) <- withMockTracer $ \tracer ->
             domainErrorToServerError @IO @AppM tracer HTTPOAuthBoundary err
 
@@ -258,11 +307,12 @@ authorizationErrorExposureSpec = describe "AuthorizationError Exposure" $ do
                 case decode (errBody serverErr) :: Maybe OAuthErrorResponse of
                     Nothing -> fail "Failed to parse OAuthErrorResponse JSON"
                     Just oauthErr -> do
-                        oauthErrorCode oauthErr `shouldBe` "invalid_grant"
-                        oauthErrorDescription oauthErr `shouldBe` Just "Code expired"
+                        oauthErrorCode oauthErr `shouldBe` ErrInvalidGrant
+                        T.isInfixOf "expired" (fromMaybe "" (oauthErrorDescription oauthErr)) `shouldBe` True
 
     it "returns 401 with JSON for UnauthorizedClient" $ do
-        let err = AuthorizationErr (UnauthorizedClient "Client not authorized")
+        let scope = fromJustOrFail "mkScope failed" $ mkScope "admin"
+            err = AuthorizationErr (UnauthorizedClient (ScopeNotAllowed scope))
         (_, mServerErr) <- withMockTracer $ \tracer ->
             domainErrorToServerError @IO @AppM tracer HTTPOAuthBoundary err
 
@@ -273,10 +323,10 @@ authorizationErrorExposureSpec = describe "AuthorizationError Exposure" $ do
                 case decode (errBody serverErr) :: Maybe OAuthErrorResponse of
                     Nothing -> fail "Failed to parse OAuthErrorResponse JSON"
                     Just oauthErr -> do
-                        oauthErrorCode oauthErr `shouldBe` "unauthorized_client"
+                        oauthErrorCode oauthErr `shouldBe` ErrUnauthorizedClient
 
     it "returns 403 with JSON for AccessDenied" $ do
-        let err = AuthorizationErr (AccessDenied "User denied authorization")
+        let err = AuthorizationErr (AccessDenied UserDenied)
         (_, mServerErr) <- withMockTracer $ \tracer ->
             domainErrorToServerError @IO @AppM tracer HTTPOAuthBoundary err
 
@@ -287,7 +337,7 @@ authorizationErrorExposureSpec = describe "AuthorizationError Exposure" $ do
                 case decode (errBody serverErr) :: Maybe OAuthErrorResponse of
                     Nothing -> fail "Failed to parse OAuthErrorResponse JSON"
                     Just oauthErr -> do
-                        oauthErrorCode oauthErr `shouldBe` "access_denied"
+                        oauthErrorCode oauthErr `shouldBe` ErrAccessDenied
 
     it "returns 400 with JSON for ExpiredCode" $ do
         let err = AuthorizationErr ExpiredCode
@@ -301,7 +351,7 @@ authorizationErrorExposureSpec = describe "AuthorizationError Exposure" $ do
                 case decode (errBody serverErr) :: Maybe OAuthErrorResponse of
                     Nothing -> fail "Failed to parse OAuthErrorResponse JSON"
                     Just oauthErr -> do
-                        oauthErrorCode oauthErr `shouldBe` "invalid_grant"
+                        oauthErrorCode oauthErr `shouldBe` ErrInvalidGrant
                         oauthErrorDescription oauthErr `shouldBe` Just "Authorization code has expired"
 
 -- -----------------------------------------------------------------------------
@@ -361,7 +411,7 @@ infrastructureDetailExclusionSpec = describe "Infrastructure Detail Exclusion" $
                 bodyText `shouldBe` "Internal server error"
 
     it "excludes usernames from AuthBackendError responses" $ do
-        let username = Username "sensitive.admin.user@company.internal"
+        let username = fromJustOrFail "mkUsername failed" $ mkUsername "sensitive.admin.user@company.internal"
             err = AuthBackendErr (UserNotFound username)
         (_, mServerErr) <- withMockTracer $ \tracer ->
             domainErrorToServerError @IO @AppM tracer HTTPOAuthBoundary err
@@ -415,12 +465,10 @@ tracerVerificationSpec = describe "Tracer Verification" $ do
         traces `shouldBe` []
 
     it "logs AuthorizationError via BoundaryAuthorizationError" $ do
-        let err = AuthorizationErr (InvalidGrant "test error")
+        let err = AuthorizationErr ExpiredCode
         (traces, _) <- withMockTracer $ \tracer ->
             domainErrorToServerError @IO @AppM tracer HTTPOAuthBoundary err
 
         -- Note: Currently AuthorizationError is not explicitly traced in domainErrorToServerError
         -- This test documents current behavior and can be updated if tracing is added
         traces `shouldBe` []
--}
--}

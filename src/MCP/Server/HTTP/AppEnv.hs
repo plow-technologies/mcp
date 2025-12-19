@@ -90,11 +90,12 @@ import Servant.Auth.Server (JWTSettings)
 
 import MCP.Server (ServerState)
 import MCP.Server.Auth (MCPOAuthConfig, ProtectedResourceMetadata)
-import MCP.Trace.HTTP (HTTPTrace)
+import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Types (Implementation, ServerCapabilities)
 import Plow.Logging (IOTracer)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser, DemoAuthError (..), DemoCredentialEnv)
+import Servant.OAuth2.IDP.Boundary (domainErrorToServerError)
 import Servant.OAuth2.IDP.Config (OAuthEnv)
 import Servant.OAuth2.IDP.Errors (
     AuthorizationError (..),
@@ -239,10 +240,13 @@ runAppM env action = do
     result <- runExceptT $ runReaderT (unAppM action) env
     case result of
         Left err -> do
-            -- TODO: Re-enable domainErrorToServerError after ValidationError migration is complete
-            -- The Boundary module needs to be updated to use Servant.OAuth2.IDP.Errors.ValidationError
-            -- For now, use toServerError directly
-            throwError (toServerError err)
+            -- Use domainErrorToServerError for security-conscious error handling
+            -- - OAuthStateError/AuthBackendError: logged but return generic 500/401
+            -- - ValidationError/AuthorizationError: safe to expose with details
+            mServerErr <- liftIO $ domainErrorToServerError @IO @AppM (envTracer env) HTTPOAuthBoundary err
+            case mServerErr of
+                Just serverErr -> throwError serverErr
+                Nothing -> throwError (toServerError err) -- Fallback for non-OAuth errors
         Right a -> pure a
 
 -- -----------------------------------------------------------------------------
