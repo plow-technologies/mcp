@@ -92,7 +92,7 @@ data OAuthProvider = OAuthProvider
     , requiresPKCE :: Bool -- MCP requires PKCE for all clients
     , metadataEndpoint :: Maybe Text -- For OAuth metadata discovery
     }
-    deriving (Show, Generic)
+    deriving (Show, Eq, Generic)
 
 -- | OAuth configuration for the MCP server
 data OAuthConfig = OAuthConfig
@@ -130,13 +130,19 @@ data OAuthConfig = OAuthConfig
 
 -- | MCP-specific OAuth configuration (demo-specific fields)
 data MCPOAuthConfig = MCPOAuthConfig
-    { mcpAutoApproveAuth :: Bool
+    { autoApproveAuth :: Bool
     -- ^ Demo mode auto-approval flag (bypasses interactive login)
-    , mcpDemoUserIdTemplate :: Text
+    , oauthProviders :: [OAuthProvider]
+    -- ^ External OAuth identity providers for federated login
+    , demoUserIdTemplate :: Text
     -- ^ Template for generating demo user IDs (e.g., "user-{id}")
-    , mcpDemoEmailDomain :: Text
+    , demoEmailDomain :: Text
     -- ^ Domain suffix for demo user emails (e.g., "example.com")
-    , mcpAuthorizationSuccessTemplate :: Text
+    , demoUserName :: Text
+    -- ^ Display name for demo users
+    , publicClientSecret :: Maybe Text
+    -- ^ Secret returned for public clients (typically empty or Nothing)
+    , authorizationSuccessTemplate :: Text
     -- ^ HTML template for authorization success page
     }
     deriving (Show, Eq, Generic)

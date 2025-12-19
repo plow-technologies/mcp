@@ -21,46 +21,100 @@ import MCP.Server.Auth
 spec :: Spec
 spec = do
     describe "MCPOAuthConfig" $ do
-        describe "record construction" $ do
-            it "creates config with autoApproveAuth disabled" $ do
+        describe "record construction with unprefixed fields" $ do
+            it "creates config with autoApproveAuth disabled (unprefixed)" $ do
                 let config =
                         MCPOAuthConfig
-                            { mcpAutoApproveAuth = False
-                            , mcpDemoUserIdTemplate = "user-{id}"
-                            , mcpDemoEmailDomain = "example.com"
-                            , mcpAuthorizationSuccessTemplate = "<html>Success</html>"
+                            { autoApproveAuth = False
+                            , oauthProviders = []
+                            , demoUserIdTemplate = "user-{id}"
+                            , demoEmailDomain = "example.com"
+                            , demoUserName = "Demo User"
+                            , publicClientSecret = Nothing
+                            , authorizationSuccessTemplate = "<html>Success</html>"
                             }
-                mcpAutoApproveAuth config `shouldBe` False
+                autoApproveAuth config `shouldBe` False
 
-            it "creates config with demo user ID template" $ do
+            it "creates config with demo user ID template (unprefixed)" $ do
                 let template = "demo-user-{id}" :: Text
                     config =
                         MCPOAuthConfig
-                            { mcpAutoApproveAuth = True
-                            , mcpDemoUserIdTemplate = template
-                            , mcpDemoEmailDomain = "test.org"
-                            , mcpAuthorizationSuccessTemplate = ""
+                            { autoApproveAuth = True
+                            , oauthProviders = []
+                            , demoUserIdTemplate = template
+                            , demoEmailDomain = "test.org"
+                            , demoUserName = "Test User"
+                            , publicClientSecret = Nothing
+                            , authorizationSuccessTemplate = ""
                             }
-                mcpDemoUserIdTemplate config `shouldBe` template
+                demoUserIdTemplate config `shouldBe` template
 
-            it "creates config with demo email domain" $ do
+            it "creates config with demo email domain (unprefixed)" $ do
                 let domain = "demo.example.com" :: Text
                     config =
                         MCPOAuthConfig
-                            { mcpAutoApproveAuth = True
-                            , mcpDemoUserIdTemplate = "user-{id}"
-                            , mcpDemoEmailDomain = domain
-                            , mcpAuthorizationSuccessTemplate = ""
+                            { autoApproveAuth = True
+                            , oauthProviders = []
+                            , demoUserIdTemplate = "user-{id}"
+                            , demoEmailDomain = domain
+                            , demoUserName = "Demo User"
+                            , publicClientSecret = Nothing
+                            , authorizationSuccessTemplate = ""
                             }
-                mcpDemoEmailDomain config `shouldBe` domain
+                demoEmailDomain config `shouldBe` domain
 
-            it "creates config with authorization success template" $ do
+            it "creates config with authorization success template (unprefixed)" $ do
                 let template = "<html><body>Authorization successful!</body></html>" :: Text
                     config =
                         MCPOAuthConfig
-                            { mcpAutoApproveAuth = False
-                            , mcpDemoUserIdTemplate = "user-{id}"
-                            , mcpDemoEmailDomain = "example.com"
-                            , mcpAuthorizationSuccessTemplate = template
+                            { autoApproveAuth = False
+                            , oauthProviders = []
+                            , demoUserIdTemplate = "user-{id}"
+                            , demoEmailDomain = "example.com"
+                            , demoUserName = "Demo User"
+                            , publicClientSecret = Nothing
+                            , authorizationSuccessTemplate = template
                             }
-                mcpAuthorizationSuccessTemplate config `shouldBe` template
+                authorizationSuccessTemplate config `shouldBe` template
+
+            it "creates config with oauth providers list" $ do
+                let config =
+                        MCPOAuthConfig
+                            { autoApproveAuth = False
+                            , oauthProviders = [] -- Empty list for simplicity in tests
+                            , demoUserIdTemplate = "user-{id}"
+                            , demoEmailDomain = "example.com"
+                            , demoUserName = "Demo User"
+                            , publicClientSecret = Nothing
+                            , authorizationSuccessTemplate = ""
+                            }
+                -- Just verify the field exists and can be accessed
+                oauthProviders config `shouldBe` []
+
+            it "creates config with demo user name" $ do
+                let name = "Custom Demo User" :: Text
+                    config =
+                        MCPOAuthConfig
+                            { autoApproveAuth = True
+                            , oauthProviders = []
+                            , demoUserIdTemplate = "user-{id}"
+                            , demoEmailDomain = "example.com"
+                            , demoUserName = name
+                            , publicClientSecret = Nothing
+                            , authorizationSuccessTemplate = ""
+                            }
+                demoUserName config `shouldBe` name
+
+            it "creates config with public client secret" $ do
+                let secret = Just "" :: Maybe Text
+                    config =
+                        MCPOAuthConfig
+                            { autoApproveAuth = True
+                            , oauthProviders = []
+                            , demoUserIdTemplate = "user-{id}"
+                            , demoEmailDomain = "example.com"
+                            , demoUserName = "Demo User"
+                            , publicClientSecret = secret
+                            , authorizationSuccessTemplate = ""
+                            }
+                publicClientSecret config `shouldBe` secret
