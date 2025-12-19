@@ -52,6 +52,9 @@ import MCP.Server.OAuth.AppSpec qualified as AppSpec
 -- HTTP endpoint tests
 import MCP.Server.HTTP.McpAuthSpec qualified as McpAuthSpec
 
+-- MCP.Server.Auth tests
+import MCP.Server.AuthSpec qualified as AuthSpec
+
 -- Functional tests
 import Functional.OAuthFlowSpec qualified as OAuthFlowSpec
 
@@ -117,6 +120,9 @@ spec = do
 
     -- HTTP endpoint tests
     McpAuthSpec.spec
+
+    -- MCP.Server.Auth tests
+    AuthSpec.spec
 
     -- Boundary layer tests (Servant FromHttpApiData/ToHttpApiData)
     BoundarySpec.spec

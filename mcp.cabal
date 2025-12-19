@@ -291,6 +291,7 @@ test-suite mcp-test
         MCP.Server.OAuth.BoundarySpec
         MCP.Server.OAuth.AppSpec
         MCP.Server.HTTP.McpAuthSpec
+        MCP.Server.AuthSpec
         Security.SessionCookieSpec
         Servant.OAuth2.IDP.APISpec
         Servant.OAuth2.IDP.TokenRequestSpec
