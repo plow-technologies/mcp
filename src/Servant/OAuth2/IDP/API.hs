@@ -70,7 +70,8 @@ import Servant (
 import Servant.HTML.Lucid (HTML)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
 
-import MCP.Server.Auth (OAuthMetadata, ProtectedResourceMetadata)
+import MCP.Server.Auth (OAuthMetadata)
+import Servant.OAuth2.IDP.Metadata (ProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Auth.Backend (PlaintextPassword, Username, mkPlaintextPassword, mkUsername)
 import Servant.OAuth2.IDP.Handlers.HTML (LoginPage)
 import Servant.OAuth2.IDP.Types (

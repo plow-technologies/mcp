@@ -23,6 +23,7 @@ import Data.Time.Clock (NominalDiffTime)
 import GHC.Generics (Generic)
 import Network.URI (URI)
 
+import Servant.OAuth2.IDP.Metadata (ProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Types (
     ClientAuthMethod,
     CodeChallengeMethod,
@@ -59,5 +60,9 @@ data OAuthEnv = OAuthEnv
     -- ^ Supported token endpoint authentication methods (RFC requires at least one)
     , oauthSupportedCodeChallengeMethods :: NonEmpty CodeChallengeMethod
     -- ^ Supported PKCE code challenge methods (RFC requires at least one)
+    , resourceServerBaseUrl :: URI
+    -- ^ Base URL for the resource server (e.g., "https://resource.example.com")
+    , resourceServerMetadata :: ProtectedResourceMetadata
+    -- ^ Protected resource metadata (RFC 9728) for resource server discovery
     }
     deriving (Generic)

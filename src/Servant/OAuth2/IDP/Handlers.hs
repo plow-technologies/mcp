@@ -48,7 +48,6 @@ module Servant.OAuth2.IDP.Handlers (
     -- * Metadata Handlers
     handleMetadata,
     handleProtectedResourceMetadata,
-    defaultProtectedResourceMetadata,
 
     -- * Registration Handler
     handleRegister,
@@ -88,7 +87,6 @@ import Servant.OAuth2.IDP.Handlers.Helpers (
  )
 import Servant.OAuth2.IDP.Handlers.Login (handleLogin)
 import Servant.OAuth2.IDP.Handlers.Metadata (
-    defaultProtectedResourceMetadata,
     handleMetadata,
     handleProtectedResourceMetadata,
  )

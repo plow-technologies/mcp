@@ -7,6 +7,7 @@ import Network.URI (URI, parseURI)
 import Test.Hspec (Spec, describe, it, shouldBe)
 
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
+import Servant.OAuth2.IDP.Metadata (ProtectedResourceMetadata, mkProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Types (
     ClientAuthMethod (..),
     CodeChallengeMethod (..),
@@ -28,6 +29,18 @@ testScope = case mkScope "read" of
     Just scope -> scope
     Nothing -> error "Failed to create test scope"
 
+-- Helper for test resource metadata
+testResourceMetadata :: ProtectedResourceMetadata
+testResourceMetadata = case mkProtectedResourceMetadata
+    "https://example.com"
+    ["https://example.com"]
+    Nothing
+    Nothing
+    Nothing
+    Nothing of
+    Just m -> m
+    Nothing -> error "Failed to create test metadata"
+
 spec :: Spec
 spec = do
     describe "OAuthEnv" $ do
@@ -48,6 +61,8 @@ spec = do
                         , oauthSupportedGrantTypes = OAuthAuthorizationCode :| []
                         , oauthSupportedAuthMethods = AuthNone :| []
                         , oauthSupportedCodeChallengeMethods = S256 :| []
+                        , resourceServerBaseUrl = testUri
+                        , resourceServerMetadata = testResourceMetadata
                         }
 
             oauthRequireHTTPS env `shouldBe` True
@@ -76,6 +91,8 @@ spec = do
                         , oauthSupportedGrantTypes = OAuthAuthorizationCode :| []
                         , oauthSupportedAuthMethods = AuthNone :| []
                         , oauthSupportedCodeChallengeMethods = S256 :| []
+                        , resourceServerBaseUrl = testUri
+                        , resourceServerMetadata = testResourceMetadata
                         }
 
             oauthSupportedScopes env `shouldBe` []
@@ -96,6 +113,8 @@ spec = do
                         , oauthSupportedGrantTypes = OAuthAuthorizationCode :| []
                         , oauthSupportedAuthMethods = AuthNone :| []
                         , oauthSupportedCodeChallengeMethods = S256 :| []
+                        , resourceServerBaseUrl = testUri
+                        , resourceServerMetadata = testResourceMetadata
                         }
 
             length (oauthSupportedResponseTypes env) `shouldBe` 2
@@ -116,6 +135,8 @@ spec = do
                         , oauthSupportedGrantTypes = OAuthAuthorizationCode :| [OAuthClientCredentials]
                         , oauthSupportedAuthMethods = AuthNone :| []
                         , oauthSupportedCodeChallengeMethods = S256 :| []
+                        , resourceServerBaseUrl = testUri
+                        , resourceServerMetadata = testResourceMetadata
                         }
 
             length (oauthSupportedGrantTypes env) `shouldBe` 2
@@ -136,6 +157,8 @@ spec = do
                         , oauthSupportedGrantTypes = OAuthAuthorizationCode :| []
                         , oauthSupportedAuthMethods = AuthNone :| [AuthClientSecretPost, AuthClientSecretBasic]
                         , oauthSupportedCodeChallengeMethods = S256 :| []
+                        , resourceServerBaseUrl = testUri
+                        , resourceServerMetadata = testResourceMetadata
                         }
 
             length (oauthSupportedAuthMethods env) `shouldBe` 3
@@ -156,6 +179,8 @@ spec = do
                         , oauthSupportedGrantTypes = OAuthAuthorizationCode :| []
                         , oauthSupportedAuthMethods = AuthNone :| []
                         , oauthSupportedCodeChallengeMethods = S256 :| [Plain]
+                        , resourceServerBaseUrl = testUri
+                        , resourceServerMetadata = testResourceMetadata
                         }
 
             length (oauthSupportedCodeChallengeMethods env) `shouldBe` 2

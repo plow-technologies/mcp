@@ -16,25 +16,22 @@ OAuth metadata discovery endpoint handlers (RFC 8414, RFC 9728).
 module Servant.OAuth2.IDP.Handlers.Metadata (
     handleMetadata,
     handleProtectedResourceMetadata,
-    defaultProtectedResourceMetadata,
 ) where
 
 import Control.Monad.Reader (MonadReader, asks)
 import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
 import Data.List.NonEmpty qualified as NE
-import Data.Text (Text)
 
 import MCP.Server.Auth (
     OAuthMetadata (..),
-    ProtectedResourceMetadata (..),
  )
 import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
+import Servant.OAuth2.IDP.Metadata (ProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Types (
     oauthGrantTypeToGrantType,
  )
-import Servant.OAuth2.IDP.Types.Internal (unsafeScope)
 
 {- | OAuth authorization server metadata endpoint (polymorphic).
 
@@ -87,11 +84,10 @@ Returns protected resource metadata per RFC 9728.
 This handler is polymorphic over the monad @m@, requiring only:
 
 * 'MonadReader env m': Access to environment containing config
-* 'HasType HTTPServerConfig env': Config can be extracted via generic-lens
+* 'HasType OAuthEnv env': OAuthEnv can be extracted via generic-lens
 
-The handler extracts the HTTPServerConfig from the environment and returns
-either the custom metadata (if provided) or auto-generated metadata based
-on the base URL.
+The handler extracts the OAuthEnv from the environment and returns
+the resource server metadata configured in it.
 
 == Usage
 
@@ -104,23 +100,8 @@ metadata <- handleProtectedResourceMetadata
 @
 -}
 handleProtectedResourceMetadata ::
-    (MonadReader env m, HasType HTTPServerConfig env) =>
+    (MonadReader env m, HasType OAuthEnv env) =>
     m ProtectedResourceMetadata
 handleProtectedResourceMetadata = do
-    config <- asks (getTyped @HTTPServerConfig)
-    let metadata = case httpProtectedResourceMetadata config of
-            Just m -> m
-            Nothing -> defaultProtectedResourceMetadata (httpBaseUrl config)
-    return metadata
-
--- | Default protected resource metadata for a given base URL
-defaultProtectedResourceMetadata :: Text -> ProtectedResourceMetadata
-defaultProtectedResourceMetadata baseUrl =
-    ProtectedResourceMetadata
-        { resource = baseUrl
-        , authorizationServers = [baseUrl]
-        , scopesSupported = Just [unsafeScope "mcp:read", unsafeScope "mcp:write"]
-        , bearerMethodsSupported = Just ["header"]
-        , resourceName = Nothing
-        , resourceDocumentation = Nothing
-        }
+    oauthEnv <- asks (getTyped @OAuthEnv)
+    return (resourceServerMetadata oauthEnv)
