@@ -99,6 +99,8 @@ spec = do
                         , oauthSupportedCodeChallengeMethods = S256 :| []
                         , resourceServerBaseUrl = testResourceUri
                         , resourceServerMetadata = expectedMetadata
+                        , oauthServerName = "OAuth Server"
+                        , oauthScopeDescriptions = mempty
                         }
 
             let env = TestEnv{testOAuthEnv = oauthEnv}
@@ -145,6 +147,8 @@ spec = do
                         , oauthSupportedCodeChallengeMethods = S256 :| []
                         , resourceServerBaseUrl = testResourceUri
                         , resourceServerMetadata = expectedMetadata
+                        , oauthServerName = "OAuth Server"
+                        , oauthScopeDescriptions = mempty
                         }
 
             let env = TestEnv{testOAuthEnv = oauthEnv}

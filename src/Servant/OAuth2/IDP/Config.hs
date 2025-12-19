@@ -18,6 +18,7 @@ module Servant.OAuth2.IDP.Config (
 ) where
 
 import Data.List.NonEmpty (NonEmpty)
+import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Data.Time.Clock (NominalDiffTime)
 import GHC.Generics (Generic)
@@ -64,5 +65,9 @@ data OAuthEnv = OAuthEnv
     -- ^ Base URL for the resource server (e.g., "https://resource.example.com")
     , resourceServerMetadata :: ProtectedResourceMetadata
     -- ^ Protected resource metadata (RFC 9728) for resource server discovery
+    , oauthServerName :: Text
+    -- ^ Server name for branding (e.g., HTML titles like 'Sign In - {serverName}')
+    , oauthScopeDescriptions :: Map Scope Text
+    -- ^ Human-readable descriptions for OAuth scopes (for consent pages)
     }
     deriving (Generic)

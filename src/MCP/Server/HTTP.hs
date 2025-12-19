@@ -716,6 +716,8 @@ defaultDemoOAuthBundle =
                 , oauthSupportedCodeChallengeMethods = S256 :| []
                 , resourceServerBaseUrl = baseUri
                 , resourceServerMetadata = resourceMetadata
+                , oauthServerName = "MCP Server"
+                , oauthScopeDescriptions = mempty
                 }
      in DemoOAuthBundle
             { bundleEnv = oauthEnv
