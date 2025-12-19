@@ -316,6 +316,8 @@ curl -i http://localhost:8080/mcp
 - Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1) + servant-server 0.19-0.20, servant-auth-server 0.4, jose 0.10-0.11, cryptonite 0.30, stm 2.5, mtl 2.3, aeson 2.1-2.2, generic-lens (to add) (004-oauth-auth-typeclasses)
 - In-memory (TVar-based) for default implementation; typeclass enables PostgreSQL/Redis backends (004-oauth-auth-typeclasses)
 - Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1) + servant-server 0.19-0.20, servant-auth-server 0.4, jose 0.10-0.11, cryptonite 0.30, stm 2.5, mtl 2.3, aeson 2.1-2.2, generic-lens (to add), network-uri (to add) (004-oauth-auth-typeclasses)
+- Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1) + servant-server 0.19-0.20, servant-auth-server 0.4, aeson 2.1-2.2, monad-time, network-uri, cryptonite 0.30, generic-lens (005-servant-oauth-extraction)
+- N/A (refactoring only, no data changes) (005-servant-oauth-extraction)
 
 ## Recent Changes
 - 004-oauth-auth-typeclasses: Refactored OAuth to typeclass-based architecture
