@@ -44,8 +44,8 @@ import Servant.OAuth2.IDP.Types (
     AuthorizationError (..),
     ClientId (..),
     ClientInfo (..),
-    mkClientName,
     mkClientSecret,
+    unClientName,
  )
 
 {- | Dynamic client registration endpoint (polymorphic).
@@ -88,7 +88,7 @@ handleRegister ::
     ) =>
     ClientRegistrationRequest ->
     m ClientRegistrationResponse
-handleRegister (ClientRegistrationRequest reqName reqRedirects reqGrants reqResponses reqAuth) = do
+handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqResponses reqAuth) = do
     config <- asks (getTyped @HTTPServerConfig)
     tracer <- asks (getTyped @(IOTracer HTTPTrace))
 
@@ -112,7 +112,7 @@ handleRegister (ClientRegistrationRequest reqName reqRedirects reqGrants reqResp
         responsesSet = Set.fromList (NE.toList reqResponses)
         clientInfo =
             ClientInfo
-                { clientName = reqName
+                { clientName = unClientName clientName
                 , clientRedirectUris = redirectsNE
                 , clientGrantTypes = grantsSet
                 , clientResponseTypes = responsesSet
@@ -123,15 +123,7 @@ handleRegister (ClientRegistrationRequest reqName reqRedirects reqGrants reqResp
 
     -- Emit trace
     let oauthTracer = contramap HTTPOAuth tracer
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthClientRegistration clientIdText reqName
-
-    -- Wrap raw Text values in newtypes for response
-    clientNameNewtype <- case mkClientName reqName of
-        Just cn -> pure cn
-        Nothing ->
-            throwError $
-                injectTyped @AuthorizationError $
-                    InvalidRequest "client_name must not be empty"
+    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthClientRegistration clientIdText (unClientName clientName)
 
     let clientSecretNewtype = case mkClientSecret "" of
             Just cs -> cs
@@ -141,7 +133,7 @@ handleRegister (ClientRegistrationRequest reqName reqRedirects reqGrants reqResp
         ClientRegistrationResponse
             { client_id = clientId
             , client_secret = clientSecretNewtype
-            , client_name = clientNameNewtype
+            , client_name = clientName
             , redirect_uris = reqRedirects
             , grant_types = reqGrants
             , response_types = reqResponses

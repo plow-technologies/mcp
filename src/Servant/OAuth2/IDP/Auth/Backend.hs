@@ -126,11 +126,11 @@ Convert from 'Text' at API boundary using 'mkPlaintextPassword'.
 
 @
 let password = mkPlaintextPassword "secret"
--- password won't appear in logs or memory dumps
+-- password won't appear in logs or memory dumps because ScrubbedBytes redacts contents
 @
 -}
 newtype PlaintextPassword = PlaintextPassword {unPlaintextPassword :: ScrubbedBytes}
-    deriving (Eq, Generic)
+    deriving (Eq, Generic, Show)
 
 -- No Show instance: ScrubbedBytes doesn't have one
 

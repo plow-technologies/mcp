@@ -55,10 +55,9 @@ mkTestAuthCode userId =
         , authExpiry = testTime
         }
   where
-    testRedirectUri = case parseURI "https://example.com/callback" of
+    testRedirectUri = case Network.URI.parseURI "https://example.com/callback" of
         Just uri -> RedirectUri uri
         Nothing -> error "Invalid test URI"
-    parseURI uri = Network.URI.parseURI uri
     testTime = case parseTimeM True defaultTimeLocale "%Y-%m-%d" "2025-01-01" of
         Just t -> t
         Nothing -> error "Invalid test time"

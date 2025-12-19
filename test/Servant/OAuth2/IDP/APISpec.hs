@@ -16,6 +16,7 @@ import Servant.OAuth2.IDP.Types (
     GrantType (..),
     RefreshToken (..),
     ResponseType (..),
+    Scopes (..),
     TokenType (..),
     mkClientId,
     mkClientName,
@@ -199,7 +200,7 @@ spec = do
                     scope1 = unsafeMk $ mkScope "mcp:read"
                     scope2 = unsafeMk $ mkScope "mcp:write"
                     scopes = Set.fromList [scope1, scope2]
-                    response = TokenResponse accessToken tokenType (Just 3600) Nothing (Just scopes)
+                    response = TokenResponse accessToken tokenType (Just 3600) Nothing (Just (Scopes scopes))
                     encoded = encode response
                     decoded = decode encoded :: Maybe Value
 

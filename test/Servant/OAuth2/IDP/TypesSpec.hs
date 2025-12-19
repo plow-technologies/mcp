@@ -7,7 +7,7 @@ import Data.Either (isLeft)
 import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import Data.Text (Text)
-import Servant.OAuth2.IDP.Types (AccessToken (..), ClientName (..), ClientSecret (..), RefreshToken (..), Scope (..), ScopeList (..), TokenType (..), mkClientName, mkClientSecret, mkRedirectUri, parseScopeList, serializeScopeSet)
+import Servant.OAuth2.IDP.Types (AccessToken (..), ClientName (..), ClientSecret (..), RefreshToken (..), Scope (..), Scopes (..), TokenType (..), mkClientName, mkClientSecret, mkRedirectUri, parseScopes, serializeScopeSet)
 import Test.Hspec
 import Web.HttpApiData (parseUrlPiece, toUrlPiece)
 
@@ -117,20 +117,20 @@ spec = do
 
         context "Space-delimited scope list parsing (RFC 6749 Section 3.3)" $ do
             it "parses space-delimited scopes into Set" $
-                parseScopeList "openid profile email"
+                parseScopes "openid profile email"
                     `shouldBe` Just (Set.fromList [Scope "openid", Scope "profile", Scope "email"])
 
             it "handles single scope" $
-                parseScopeList "openid" `shouldBe` Just (Set.fromList [Scope "openid"])
+                parseScopes "openid" `shouldBe` Just (Set.fromList [Scope "openid"])
 
             it "handles empty string" $
-                parseScopeList "" `shouldBe` Just Set.empty
+                parseScopes "" `shouldBe` Just Set.empty
 
             it "filters out empty scopes from consecutive spaces" $
-                parseScopeList "openid  profile" `shouldBe` Just (Set.fromList [Scope "openid", Scope "profile"])
+                parseScopes "openid  profile" `shouldBe` Just (Set.fromList [Scope "openid", Scope "profile"])
 
             it "trims whitespace around scopes" $
-                parseScopeList "  openid   profile  " `shouldBe` Just (Set.fromList [Scope "openid", Scope "profile"])
+                parseScopes "  openid   profile  " `shouldBe` Just (Set.fromList [Scope "openid", Scope "profile"])
 
         context "Set Scope serialization to space-delimited string" $ do
             it "serializes Set to space-delimited string" $
@@ -143,27 +143,27 @@ spec = do
             it "handles single scope Set" $
                 serializeScopeSet (Set.fromList [Scope "openid"]) `shouldBe` "openid"
 
-        context "ScopeList newtype for HTTP API (FR-060)" $ do
+        context "Scopes newtype for HTTP API (FR-060)" $ do
             it "parses space-delimited scopes via FromHttpApiData" $
                 parseUrlPiece "openid profile"
-                    `shouldBe` Right (ScopeList (Set.fromList [Scope "openid", Scope "profile"]))
+                    `shouldBe` Right (Scopes (Set.fromList [Scope "openid", Scope "profile"]))
 
             it "parses single scope" $
-                parseUrlPiece "openid" `shouldBe` Right (ScopeList (Set.fromList [Scope "openid"]))
+                parseUrlPiece "openid" `shouldBe` Right (Scopes (Set.fromList [Scope "openid"]))
 
             it "parses empty string to empty Set" $
-                parseUrlPiece "" `shouldBe` Right (ScopeList Set.empty)
+                parseUrlPiece "" `shouldBe` Right (Scopes Set.empty)
 
             it "handles multiple spaces between scopes" $
                 parseUrlPiece "openid  profile"
-                    `shouldBe` Right (ScopeList (Set.fromList [Scope "openid", Scope "profile"]))
+                    `shouldBe` Right (Scopes (Set.fromList [Scope "openid", Scope "profile"]))
 
             it "serializes to space-delimited via ToHttpApiData" $
-                let scopeList = ScopeList (Set.fromList [Scope "openid", Scope "profile"])
+                let scopeList = Scopes (Set.fromList [Scope "openid", Scope "profile"])
                  in toUrlPiece scopeList `shouldSatisfy` (\s -> s `elem` ["openid profile", "profile openid"])
 
             it "round-trips through FromHttpApiData and ToHttpApiData" $
-                let original = ScopeList (Set.fromList [Scope "email", Scope "openid"])
+                let original = Scopes (Set.fromList [Scope "email", Scope "openid"])
                     serialized = toUrlPiece original
                     parsed = parseUrlPiece serialized
                  in parsed `shouldBe` Right original

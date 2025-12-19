@@ -38,9 +38,9 @@ module Servant.OAuth2.IDP.Types (
     mkRedirectUri,
     Scope (..),
     mkScope,
-    parseScopeList,
+    parseScopes,
     serializeScopeSet,
-    ScopeList (..),
+    Scopes (..),
     CodeChallenge (..),
     mkCodeChallenge,
     CodeVerifier (..),
@@ -434,8 +434,8 @@ instance ToHttpApiData Scope where
 Empty string returns empty Set. Invalid scopes cause entire parse to fail.
 Filters out empty strings from multiple consecutive spaces.
 -}
-parseScopeList :: Text -> Maybe (Set Scope)
-parseScopeList t
+parseScopes :: Text -> Maybe (Set Scope)
+parseScopes t
     | T.null (T.strip t) = Just Set.empty
     | otherwise =
         let scopeTexts = filter (not . T.null) $ map T.strip $ T.splitOn " " t
@@ -453,16 +453,24 @@ serializeScopeSet scopes
 {- | Space-delimited scope list for HTTP API (RFC 6749 Section 3.3).
 Wraps a Set of Scope values for use in Servant query parameters.
 -}
-newtype ScopeList = ScopeList {unScopeList :: Set Scope}
+newtype Scopes = Scopes {unScopes :: Set Scope}
     deriving stock (Eq, Ord, Show, Generic)
 
-instance FromHttpApiData ScopeList where
-    parseUrlPiece t = case parseScopeList t of
-        Just scopes -> Right (ScopeList scopes)
+instance FromHttpApiData Scopes where
+    parseUrlPiece t = case parseScopes t of
+        Just scopes -> Right (Scopes scopes)
         Nothing -> Left "Invalid scope list"
 
-instance ToHttpApiData ScopeList where
-    toUrlPiece (ScopeList scopes) = serializeScopeSet scopes
+instance ToHttpApiData Scopes where
+    toUrlPiece (Scopes scopes) = serializeScopeSet scopes
+
+instance ToJSON Scopes where
+    toJSON = toJSON . toUrlPiece
+
+instance FromJSON Scopes where
+    parseJSON =
+        withText "Scopes" $
+            either (fail . T.unpack) pure . parseUrlPiece
 
 -- | PKCE code challenge
 newtype CodeChallenge = CodeChallenge {unCodeChallenge :: Text}

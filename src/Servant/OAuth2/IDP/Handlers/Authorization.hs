@@ -60,7 +60,7 @@ import Servant.OAuth2.IDP.Types (
     ResourceIndicator (..),
     ResponseType (..),
     Scope (..),
-    ScopeList (..),
+    Scopes (..),
     SessionCookie (..),
     ValidationError (..),
     mkSessionId,
@@ -114,7 +114,7 @@ handleAuthorize ::
     RedirectUri ->
     CodeChallenge ->
     CodeChallengeMethod ->
-    Maybe ScopeList ->
+    Maybe Scopes ->
     Maybe OAuthState ->
     Maybe ResourceIndicator ->
     m (Headers '[Header "Set-Cookie" SessionCookie] LoginPage)
@@ -155,10 +155,10 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
         throwError $ injectTyped @ValidationError $ RedirectUriMismatch clientId redirectUri
 
     let displayName = clientName clientInfo
-        -- Convert ScopeList to [Text] for tracing
+        -- Convert Scopes to [Text] for tracing
         scopeList = case mScope of
             Nothing -> []
-            Just (ScopeList scopes) -> map unScope (Set.toList scopes)
+            Just (Scopes scopes) -> map unScope (Set.toList scopes)
 
     -- Emit authorization request trace
     liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthAuthorizationRequest clientIdText scopeList (isJust mState)
@@ -170,8 +170,8 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
             Nothing -> error "Generated invalid session UUID"
     now <- currentTime
 
-    -- Extract Set Scope from ScopeList (already parsed by Servant)
-    let scopesSet = fmap unScopeList mScope
+    -- Extract Set Scope from Scopes (already parsed by Servant)
+    let scopesSet = fmap unScopes mScope
         -- Convert mResource from Maybe ResourceIndicator to Maybe URI
         resourceUri = mResource >>= (parseURI . T.unpack . unResourceIndicator)
 
@@ -201,10 +201,10 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
             Just oauthConf | requireHTTPS oauthConf -> "; Secure"
             _ -> ""
         cookieValue = SessionCookie $ "mcp_session=" <> sessionIdText <> "; HttpOnly; SameSite=Strict; Path=/; Max-Age=" <> T.pack (show sessionExpirySeconds) <> secureFlag
-        -- Convert ScopeList to Text for display
+        -- Convert Scopes to Text for display
         scopesText = case mScope of
             Nothing -> "default access"
-            Just (ScopeList scopeSet) -> serializeScopeSet scopeSet
+            Just (Scopes scopeSet) -> serializeScopeSet scopeSet
         loginPage =
             LoginPage
                 { loginClientName = displayName

@@ -55,6 +55,7 @@ import Servant.OAuth2.IDP.Types (
     RefreshToken (..),
     RefreshTokenId (..),
     ResourceIndicator (..),
+    Scopes (..),
     TokenType (..),
     authClientId,
     authCodeChallenge,
@@ -237,7 +238,7 @@ handleAuthCodeGrant params = do
             , token_type = TokenType "Bearer"
             , expires_in = Just $ maybe 3600 accessTokenExpirySeconds (httpOAuthConfig config)
             , refresh_token = Just (RefreshToken refreshTokenText)
-            , scope = if Set.null (authScopes authCode) then Nothing else Just (authScopes authCode)
+            , scope = if Set.null (authScopes authCode) then Nothing else Just (Scopes (authScopes authCode))
             }
 
 {- | Refresh token grant handler (polymorphic).

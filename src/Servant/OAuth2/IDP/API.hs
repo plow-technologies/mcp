@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeOperators #-}
 
 {- |
@@ -46,10 +46,8 @@ module Servant.OAuth2.IDP.API (
     TokenResponse (..),
 ) where
 
-import Data.Aeson ((.=))
 import Data.Aeson qualified as Aeson
 import Data.List.NonEmpty (NonEmpty)
-import Data.Set (Set)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Servant (
@@ -93,19 +91,11 @@ import Servant.OAuth2.IDP.Types (
     RefreshTokenId,
     ResourceIndicator,
     ResponseType,
-    Scope,
-    ScopeList,
+    Scopes,
     SessionCookie,
     SessionId,
     TokenType,
     mkSessionId,
-    serializeScopeSet,
-    unAccessToken,
-    unClientId,
-    unClientName,
-    unClientSecret,
-    unRefreshToken,
-    unTokenType,
  )
 import Web.HttpApiData (parseUrlPiece)
 
@@ -207,7 +197,7 @@ type OAuthAPI =
             :> QueryParam' '[Required] "redirect_uri" RedirectUri
             :> QueryParam' '[Required] "code_challenge" CodeChallenge
             :> QueryParam' '[Required] "code_challenge_method" CodeChallengeMethod
-            :> QueryParam "scope" ScopeList
+            :> QueryParam "scope" Scopes
             :> QueryParam "state" OAuthState
             :> QueryParam "resource" ResourceIndicator
             :> Get '[HTML] (Headers '[Header "Set-Cookie" SessionCookie] LoginPage)
@@ -231,18 +221,7 @@ data LoginForm = LoginForm
     , formSessionId :: SessionId
     , formAction :: Text -- "login" or "deny"
     }
-    deriving (Generic)
-
--- | Custom Show instance that redacts password
-instance Show LoginForm where
-    show (LoginForm u _p s a) =
-        "LoginForm {formUsername = "
-            <> show u
-            <> ", formPassword = <redacted>, formSessionId = "
-            <> show s
-            <> ", formAction = "
-            <> show a
-            <> "}"
+    deriving (Generic, Show)
 
 instance FromForm LoginForm where
     fromForm form = do
@@ -266,22 +245,13 @@ instance FromForm LoginForm where
 Submitted by OAuth clients to register dynamically per RFC 7591.
 -}
 data ClientRegistrationRequest = ClientRegistrationRequest
-    { client_name :: Text
+    { client_name :: ClientName
     , redirect_uris :: NonEmpty RedirectUri
     , grant_types :: NonEmpty GrantType
     , response_types :: NonEmpty ResponseType
     , token_endpoint_auth_method :: ClientAuthMethod
     }
-    deriving (Show, Generic)
-
-instance Aeson.FromJSON ClientRegistrationRequest where
-    parseJSON = Aeson.withObject "ClientRegistrationRequest" $ \v ->
-        ClientRegistrationRequest
-            <$> v Aeson..: "client_name"
-            <*> v Aeson..: "redirect_uris"
-            <*> v Aeson..: "grant_types"
-            <*> v Aeson..: "response_types"
-            <*> v Aeson..: "token_endpoint_auth_method"
+    deriving (Show, Generic, Aeson.FromJSON)
 
 {- | Client registration response.
 
@@ -297,19 +267,7 @@ data ClientRegistrationResponse = ClientRegistrationResponse
     , response_types :: NonEmpty ResponseType
     , token_endpoint_auth_method :: ClientAuthMethod
     }
-    deriving (Show, Generic)
-
-instance Aeson.ToJSON ClientRegistrationResponse where
-    toJSON (ClientRegistrationResponse cid csec cname uris gtypes rtypes authMethod) =
-        Aeson.object
-            [ "client_id" .= unClientId cid
-            , "client_secret" .= unClientSecret csec
-            , "client_name" .= unClientName cname
-            , "redirect_uris" .= uris
-            , "grant_types" .= gtypes
-            , "response_types" .= rtypes
-            , "token_endpoint_auth_method" .= authMethod
-            ]
+    deriving (Show, Generic, Aeson.ToJSON)
 
 {- | Token endpoint response.
 
@@ -319,21 +277,15 @@ Contains access token, optional refresh token, and metadata.
 data TokenResponse = TokenResponse
     { access_token :: AccessToken
     , token_type :: TokenType
-    , expires_in :: Maybe Int
+    , -- FIXME; Use NominalDiffTime instead of Int
+      expires_in :: Maybe Int
     , refresh_token :: Maybe RefreshToken
-    , scope :: Maybe (Set Scope)
+    , scope :: Maybe Scopes
     }
     deriving (Show, Generic)
 
 instance Aeson.ToJSON TokenResponse where
-    toJSON TokenResponse{..} =
-        Aeson.object $
-            [ "access_token" .= unAccessToken access_token
-            , "token_type" .= unTokenType token_type
-            ]
-                ++ maybe [] (\e -> ["expires_in" .= e]) expires_in
-                ++ maybe [] (\r -> ["refresh_token" .= unRefreshToken r]) refresh_token
-                ++ maybe [] (\s -> ["scope" .= serializeScopeSet s]) scope
+    toJSON = Aeson.genericToJSON Aeson.defaultOptions{Aeson.omitNothingFields = True}
 
 {- | Token endpoint request.
 
