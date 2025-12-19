@@ -20,15 +20,24 @@ import Network.URI (URI, parseURI)
 import Test.Hspec (Spec, describe, it, shouldBe)
 
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
-import Servant.OAuth2.IDP.Handlers.Metadata (handleProtectedResourceMetadata)
+import Servant.OAuth2.IDP.Handlers.Metadata (handleMetadata, handleProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Metadata (
     mkProtectedResourceMetadata,
+    oauthAuthorizationEndpoint,
+    oauthCodeChallengeMethodsSupported,
+    oauthGrantTypesSupported,
+    oauthIssuer,
+    oauthResponseTypesSupported,
+    oauthScopesSupported,
+    oauthTokenEndpoint,
+    oauthTokenEndpointAuthMethodsSupported,
     prAuthorizationServers,
     prResource,
  )
 import Servant.OAuth2.IDP.Types (
     ClientAuthMethod (..),
     CodeChallengeMethod (..),
+    GrantType (..),
     OAuthGrantType (..),
     ResponseType (..),
     Scope,
@@ -61,6 +70,52 @@ newtype TestEnv = TestEnv
 
 spec :: Spec
 spec = do
+    describe "handleMetadata" $ do
+        it "constructs OAuthMetadata from OAuthEnv without HTTPServerConfig" $ do
+            let expectedMetadata = case mkProtectedResourceMetadata
+                    "https://resource.example.com"
+                    ["https://example.com"]
+                    Nothing
+                    Nothing
+                    Nothing
+                    Nothing of
+                    Just m -> m
+                    Nothing -> error "Test fixture: failed to create metadata"
+
+            let oauthEnv =
+                    OAuthEnv
+                        { oauthRequireHTTPS = True
+                        , oauthBaseUrl = testUri
+                        , oauthAuthCodeExpiry = 600
+                        , oauthAccessTokenExpiry = 3600
+                        , oauthLoginSessionExpiry = 600
+                        , oauthAuthCodePrefix = "code_"
+                        , oauthRefreshTokenPrefix = "rt_"
+                        , oauthClientIdPrefix = "client_"
+                        , oauthSupportedScopes = [testScope]
+                        , oauthSupportedResponseTypes = ResponseCode :| []
+                        , oauthSupportedGrantTypes = OAuthAuthorizationCode :| []
+                        , oauthSupportedAuthMethods = AuthNone :| []
+                        , oauthSupportedCodeChallengeMethods = S256 :| []
+                        , resourceServerBaseUrl = testResourceUri
+                        , resourceServerMetadata = expectedMetadata
+                        }
+
+            let env = TestEnv{testOAuthEnv = oauthEnv}
+
+            -- Test that handleMetadata works with ONLY OAuthEnv (no HTTPServerConfig)
+            result <- runReaderT handleMetadata env
+
+            -- Verify metadata is constructed from OAuthEnv fields
+            oauthIssuer result `shouldBe` "https://example.com"
+            oauthAuthorizationEndpoint result `shouldBe` "https://example.com/authorize"
+            oauthTokenEndpoint result `shouldBe` "https://example.com/token"
+            oauthResponseTypesSupported result `shouldBe` [ResponseCode]
+            oauthScopesSupported result `shouldBe` Just [testScope]
+            oauthGrantTypesSupported result `shouldBe` Just [GrantAuthorizationCode]
+            oauthTokenEndpointAuthMethodsSupported result `shouldBe` Just [AuthNone]
+            oauthCodeChallengeMethodsSupported result `shouldBe` Just [S256]
+
     describe "handleProtectedResourceMetadata" $ do
         it "returns resource server metadata directly from OAuthEnv" $ do
             let expectedMetadata = case mkProtectedResourceMetadata
