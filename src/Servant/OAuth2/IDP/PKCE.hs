@@ -33,7 +33,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Base64.URL qualified as B64URL
 import Data.Text.Encoding qualified as TE
 
-import Servant.OAuth2.IDP.Types (CodeChallenge (..), CodeVerifier (..))
+import Servant.OAuth2.IDP.Types (CodeChallenge, CodeVerifier, mkCodeChallenge, mkCodeVerifier, unCodeChallenge, unCodeVerifier)
 
 {- | Generate a cryptographically secure code verifier for PKCE.
 
@@ -52,7 +52,9 @@ generateCodeVerifier = do
     bytes <- getRandomBytes 32 -- 32 bytes = 256 bits entropy
     -- Base64URL encoding always produces valid UTF-8, so decodeUtf8' cannot fail here
     case TE.decodeUtf8' $ B64URL.encodeUnpadded bytes of
-        Right encoded -> pure (CodeVerifier encoded)
+        Right encoded -> case mkCodeVerifier encoded of
+            Just cv -> pure cv
+            Nothing -> error $ "Impossible: 32-byte base64url encoding produced invalid CodeVerifier"
         Left err -> error $ "Impossible: base64url encoding produced invalid UTF-8: " ++ show err
 
 {- | Generate code challenge from verifier using SHA256 (S256 method).
@@ -64,15 +66,17 @@ Takes a 'CodeVerifier' and returns the corresponding 'CodeChallenge'.
 The transformation is deterministic (same verifier always produces same challenge).
 -}
 generateCodeChallenge :: CodeVerifier -> CodeChallenge
-generateCodeChallenge (CodeVerifier verifier) =
-    let verifierBytes = TE.encodeUtf8 verifier
+generateCodeChallenge verifier =
+    let verifierBytes = TE.encodeUtf8 (unCodeVerifier verifier)
         challengeHash = hashWith SHA256 verifierBytes
         challengeBytes = convert challengeHash :: ByteString
         -- Base64URL encoding always produces valid UTF-8, so decodeUtf8' cannot fail here
         encoded = case TE.decodeUtf8' $ B64URL.encodeUnpadded challengeBytes of
             Right txt -> txt
             Left err -> error $ "Impossible: base64url encoding produced invalid UTF-8: " ++ show err
-     in CodeChallenge encoded
+     in case mkCodeChallenge encoded of
+            Just cc -> cc
+            Nothing -> error $ "Impossible: SHA256 base64url encoding produced invalid CodeChallenge"
 
 {- | Validate PKCE code verifier against challenge.
 
@@ -86,6 +90,6 @@ This function is used during token exchange to verify the client possesses
 the original code verifier.
 -}
 validateCodeVerifier :: CodeVerifier -> CodeChallenge -> Bool
-validateCodeVerifier verifier (CodeChallenge challenge) =
-    let CodeChallenge computed = generateCodeChallenge verifier
-     in computed == challenge
+validateCodeVerifier verifier challenge =
+    let computed = generateCodeChallenge verifier
+     in unCodeChallenge computed == unCodeChallenge challenge

@@ -41,6 +41,9 @@ module Servant.OAuth2.IDP.Types (
     parseScopes,
     serializeScopeSet,
     Scopes (..),
+    -- TODO(mcp-5wk.27): Remove (..) exports after creating Types.Internal module
+    -- These are temporarily exported for Boundary.hs unsafe constructors
+    -- Per Constitution Principle II, raw constructors should not be in public API
     CodeChallenge (..),
     mkCodeChallenge,
     CodeVerifier (..),

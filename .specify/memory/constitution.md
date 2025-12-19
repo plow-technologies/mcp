@@ -4,7 +4,7 @@ SYNC IMPACT REPORT
 Version: 1.0.2 (smart constructor hygiene)
 Changes:
 - Initial constitution creation from typed functional design skills
-- 6 core principles distilled from: functional-domain-modeling, haskell-design,
+- 6 core principles distilled from: typed-domain-modeling, haskell-design,
   architecture-patterns, testing-strategies, code-review-standards, error-handling-strategies
 - 1.0.1: Added domain-centric type naming convention (types denote what they ARE, not field names)
 - 1.0.2: Added smart constructor export rule (MUST NOT export type constructors, use pattern synonyms for matching)

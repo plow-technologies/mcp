@@ -289,7 +289,7 @@ generateCodeChallenge verifier =
 
 -- | Validate PKCE code verifier against challenge
 validateCodeVerifier :: CodeVerifier -> CodeChallenge -> Bool
-validateCodeVerifier (CodeVerifier verifier) (CodeChallenge challenge) = generateCodeChallenge verifier == challenge
+validateCodeVerifier verifier challenge = generateCodeChallenge (unCodeVerifier verifier) == unCodeChallenge challenge
 
 -- | Type-level tag for MCP protected resource authentication
 data ProtectedResourceAuth

@@ -22,11 +22,11 @@ import Servant.OAuth2.IDP.Types (
     AuthCodeId (..),
     AuthorizationCode (..),
     ClientId (..),
-    CodeChallenge (..),
     CodeChallengeMethod (..),
     RedirectUri (..),
     Scope (..),
     UserId (..),
+    mkCodeChallenge,
  )
 
 -- | Test that AuthorizationCode is a Functor
@@ -57,7 +57,9 @@ mkTestAuthCode userId =
         { authCodeId = AuthCodeId "code_test123"
         , authClientId = ClientId "client_test"
         , authRedirectUri = testRedirectUri
-        , authCodeChallenge = CodeChallenge "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+        , authCodeChallenge = case mkCodeChallenge "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" of
+            Just cc -> cc
+            Nothing -> error "Invalid test CodeChallenge"
         , authCodeChallengeMethod = S256
         , authScopes = Set.fromList [Scope "read", Scope "write"]
         , authUserId = userId

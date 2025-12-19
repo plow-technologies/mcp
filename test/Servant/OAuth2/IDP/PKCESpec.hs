@@ -18,7 +18,7 @@ module Servant.OAuth2.IDP.PKCESpec (spec) where
 import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
 import Data.Text qualified as T
 import Servant.OAuth2.IDP.PKCE (generateCodeChallenge, generateCodeVerifier, validateCodeVerifier)
-import Servant.OAuth2.IDP.Types (CodeChallenge (..), CodeVerifier (..), mkCodeChallenge, mkCodeVerifier)
+import Servant.OAuth2.IDP.Types (mkCodeChallenge, mkCodeVerifier, unCodeChallenge, unCodeVerifier)
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
 import Test.QuickCheck (ioProperty)

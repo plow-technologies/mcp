@@ -18,9 +18,9 @@ import Web.FormUrlEncoded (urlDecodeAsForm, urlEncodeAsForm)
 import Servant.OAuth2.IDP.API (TokenRequest (..))
 import Servant.OAuth2.IDP.Types (
     AuthCodeId (..),
-    CodeVerifier (..),
     RefreshTokenId (..),
     ResourceIndicator (..),
+    mkCodeVerifier,
  )
 
 spec :: Spec
@@ -39,7 +39,9 @@ spec = do
                     Left err -> expectationFailure $ "Failed to parse: " <> show err
                     Right (AuthorizationCodeGrant code verifier mResource) -> do
                         code `shouldBe` AuthCodeId "code_abc123"
-                        verifier `shouldBe` CodeVerifier "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+                        case mkCodeVerifier "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~" of
+                            Just expected -> verifier `shouldBe` expected
+                            Nothing -> expectationFailure "Invalid test CodeVerifier"
                         mResource `shouldBe` Nothing
                     Right other -> expectationFailure $ "Expected AuthorizationCodeGrant, got: " <> show other
 
@@ -56,7 +58,9 @@ spec = do
                     Left err -> expectationFailure $ "Failed to parse: " <> show err
                     Right (AuthorizationCodeGrant code verifier mResource) -> do
                         code `shouldBe` AuthCodeId "code_xyz789"
-                        verifier `shouldBe` CodeVerifier "1234567890abcdefghijklmnopqrstuvwxyz-._~ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                        case mkCodeVerifier "1234567890abcdefghijklmnopqrstuvwxyz-._~ABCDEFGHIJKLMNOPQRSTUVWXYZ" of
+                            Just expected -> verifier `shouldBe` expected
+                            Nothing -> expectationFailure "Invalid test CodeVerifier"
                         mResource `shouldBe` Just (ResourceIndicator "https://api.example.com")
                     Right other -> expectationFailure $ "Expected AuthorizationCodeGrant, got: " <> show other
 
