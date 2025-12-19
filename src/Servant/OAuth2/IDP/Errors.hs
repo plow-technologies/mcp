@@ -459,7 +459,7 @@ instance ToHtml LoginFlowError where
     toHtml err = doctypehtml_ $ do
         head_ $ do
             meta_ [charset_ "utf-8"]
-            title_ $ toHtml (errorTitle err <> " - MCP Server")
+            title_ $ toHtml (errorTitle err)
             style_ $
                 T.unlines
                     [ "body { font-family: system-ui, sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; }"

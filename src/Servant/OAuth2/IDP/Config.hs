@@ -10,8 +10,7 @@ Stability   : experimental
 Portability : GHC
 
 This module provides OAuthEnv, a record type for protocol-agnostic OAuth
-configuration. This is part of the extraction of Servant.OAuth2.IDP modules
-from the MCP namespace.
+configuration.
 -}
 module Servant.OAuth2.IDP.Config (
     OAuthEnv (..),

@@ -164,9 +164,6 @@ The generated values satisfy the server's validation rules:
 - Verifier: 43-128 chars, unreserved charset (A-Z, a-z, 0-9, -, ., _, ~)
 - Challenge: 43 chars (SHA256 output), base64url charset (A-Z, a-z, 0-9, -, _)
 
-This implementation matches the production code in MCP.Server.Auth to ensure
-compatibility.
-
 == Example
 
 >>> (verifier, challenge) <- generatePKCE

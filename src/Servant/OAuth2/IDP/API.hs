@@ -156,7 +156,7 @@ type LoginAPI =
 
 {- | Complete OAuth 2.1 API.
 
-Provides all OAuth endpoints required by the MCP OAuth specification:
+Provides all OAuth endpoints required by the OAuth specification:
 
 * @/.well-known/oauth-protected-resource@: Protected resource metadata (RFC 9728)
 * @/.well-known/oauth-authorization-server@: Authorization server metadata (RFC 8414)
@@ -165,7 +165,7 @@ Provides all OAuth endpoints required by the MCP OAuth specification:
 * @/login@: Login form submission endpoint (custom)
 * @/token@: Token exchange endpoint (RFC 6749)
 
-All endpoints follow their respective RFCs and the MCP OAuth specification.
+All endpoints follow their respective RFCs.
 
 = API Composition
 

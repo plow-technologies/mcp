@@ -51,7 +51,7 @@ import Servant.OAuth2.IDP.Types.Internal (unsafeClientId)
 
 {- | Dynamic client registration endpoint (polymorphic).
 
-Handles client registration per RFC 7591 and MCP OAuth specification.
+Handles client registration per RFC 7591.
 
 This handler is polymorphic over the monad @m@, requiring:
 

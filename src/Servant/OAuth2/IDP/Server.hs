@@ -37,10 +37,6 @@ This allows the server to work with different storage and auth backends:
 -- Create server with specific monad
 server :: Server OAuthAPI
 server = hoistServer (Proxy :: Proxy OAuthAPI) (runAppM appEnv) oauthServer
-
--- Or use directly with AppM from MCP.Server.HTTP.AppEnv
-app :: Application
-app = serve (Proxy :: Proxy OAuthAPI) oauthServer
 @
 
 = Module Structure
@@ -155,7 +151,7 @@ architecture (OAuthStateStore, AuthBackend, MonadTime).
 
 == Usage
 
-To use this server with AppM from MCP.Server.HTTP.AppEnv:
+To use this server with a ReaderT (ExceptT m):
 
 @
 -- Create AppEnv combining all dependencies

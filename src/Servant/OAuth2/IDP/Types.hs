@@ -772,7 +772,7 @@ instance ToHttpApiData ClientAuthMethod where
     toUrlPiece AuthClientSecretPost = "client_secret_post"
     toUrlPiece AuthClientSecretBasic = "client_secret_basic"
 
--- | OAuth grant types (MCP-specific subset)
+-- | OAuth grant types (MCP-specific subset, rest TBD)
 data OAuthGrantType
     = -- | Authorization code flow for user-based scenarios
       OAuthAuthorizationCode

@@ -32,7 +32,7 @@ import Servant.OAuth2.IDP.Types (
 
 {- | OAuth authorization server metadata endpoint (polymorphic).
 
-Returns discovery metadata per RFC 8414 and MCP OAuth specification.
+Returns discovery metadata per RFC 8414.
 
 This handler is polymorphic over the monad @m@, requiring only:
 
