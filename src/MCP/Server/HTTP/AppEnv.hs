@@ -104,11 +104,9 @@ import Servant.OAuth2.IDP.Store.InMemory (
     OAuthTVarEnv (..),
  )
 import Servant.OAuth2.IDP.Types (
-    AuthCodeId (..),
     AuthorizationCode (..),
     AuthorizationError (..),
     PendingAuthorization (..),
-    SessionId (..),
     ValidationError (..),
     authorizationErrorToResponse,
     validationErrorToResponse,
@@ -415,8 +413,7 @@ instance OAuthStateStore AppM where
         now <- currentTime
         liftIO $ atomically $ do
             state <- readTVar (oauthStateVar oauthEnv)
-            let key = unAuthCodeId codeId
-            case Map.lookup key (authCodes state) of
+            case Map.lookup codeId (authCodes state) of
                 Nothing -> pure Nothing
                 Just authCode ->
                     if now >= authExpiry authCode
@@ -433,15 +430,14 @@ instance OAuthStateStore AppM where
         now <- currentTime
         liftIO $ atomically $ do
             state <- readTVar (oauthStateVar oauthEnv)
-            let key = unAuthCodeId codeId
-            case Map.lookup key (authCodes state) of
+            case Map.lookup codeId (authCodes state) of
                 Nothing -> pure Nothing
                 Just code
                     -- Check if expired
                     | now >= authExpiry code -> pure Nothing
                     | otherwise -> do
                         -- Delete the code atomically within the same transaction
-                        let newState = state{authCodes = Map.delete key (authCodes state)}
+                        let newState = state{authCodes = Map.delete codeId (authCodes state)}
                         writeTVar (oauthStateVar oauthEnv) newState
                         pure (Just code)
 
@@ -484,8 +480,7 @@ instance OAuthStateStore AppM where
         let config = oauthExpiryConfig oauthEnv
         liftIO $ atomically $ do
             state <- readTVar (oauthStateVar oauthEnv)
-            let key = unSessionId sessionId
-            case Map.lookup key (pendingAuthorizations state) of
+            case Map.lookup sessionId (pendingAuthorizations state) of
                 Nothing -> pure Nothing
                 Just auth ->
                     let expiryTime = addUTCTime (loginSessionExpiry config) (pendingCreatedAt auth)
