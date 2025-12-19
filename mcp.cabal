@@ -114,6 +114,7 @@ library
         Servant.OAuth2.IDP.Handlers.Login
         Servant.OAuth2.IDP.Handlers.Token
         Servant.OAuth2.IDP.Test.Internal
+        Servant.OAuth2.IDP.Types.Internal
         Servant.OAuth2.IDP.Auth.Backend
         Servant.OAuth2.IDP.Auth.Demo
         MCP.Trace.Types
@@ -126,7 +127,6 @@ library
 
     -- Modules included in this library but not exported.
     other-modules:
-        Servant.OAuth2.IDP.Types.Internal
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

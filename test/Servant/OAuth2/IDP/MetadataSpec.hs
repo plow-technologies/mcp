@@ -25,7 +25,8 @@ import Servant.OAuth2.IDP.Metadata (
     prResource,
     prScopesSupported,
  )
-import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), ResponseType (..), Scope (..))
+import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), ResponseType (..), mkScope)
+import Servant.OAuth2.IDP.Types.Internal (unsafeScope)
 import Test.Hspec
 
 spec :: Spec
@@ -158,8 +159,8 @@ spec = do
                         decode encoded `shouldBe` Just expected
 
             it "serializes all optional fields with snake_case keys" $ do
-                let openidScope = Scope "openid"
-                    profileScope = Scope "profile"
+                let openidScope = unsafeScope "openid"
+                    profileScope = unsafeScope "profile"
                 case mkOAuthMetadata
                     "https://auth.example.com"
                     "https://auth.example.com/authorize"
@@ -193,7 +194,7 @@ spec = do
                         decode encoded `shouldBe` Just expected
 
             it "round-trips through JSON with snake_case fields" $ do
-                let openidScope = Scope "openid"
+                let openidScope = unsafeScope "openid"
                 case mkOAuthMetadata
                     "https://auth.example.com"
                     "https://auth.example.com/authorize"
@@ -301,8 +302,8 @@ spec = do
                         decode encoded `shouldBe` Just expected
 
             it "serializes all optional fields with snake_case keys" $ do
-                let openidScope = Scope "openid"
-                    profileScope = Scope "profile"
+                let openidScope = unsafeScope "openid"
+                    profileScope = unsafeScope "profile"
                 case mkProtectedResourceMetadata
                     "https://api.example.com"
                     ["https://auth.example.com", "https://auth2.example.com"]
@@ -326,7 +327,7 @@ spec = do
                         decode encoded `shouldBe` Just expected
 
             it "round-trips through JSON with snake_case fields" $ do
-                let openidScope = Scope "openid"
+                let openidScope = unsafeScope "openid"
                 case mkProtectedResourceMetadata
                     "https://api.example.com"
                     ["https://auth.example.com"]
@@ -356,6 +357,8 @@ spec = do
                         prResource metadata `shouldBe` "https://api.example.com"
                         prAuthorizationServers metadata `shouldBe` ["https://auth.example.com"]
                         case prScopesSupported metadata of
-                            Just [scope] -> scope `shouldBe` Scope "openid"
+                            Just [scope] -> case mkScope "openid" of
+                                Just expected -> scope `shouldBe` expected
+                                Nothing -> expectationFailure "Test fixture: invalid scope"
                             _ -> expectationFailure "Expected exactly one scope"
                     Nothing -> expectationFailure "Failed to decode RFC 9728 JSON"

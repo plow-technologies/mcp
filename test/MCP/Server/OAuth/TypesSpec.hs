@@ -7,7 +7,8 @@ import Data.Text qualified as T
 import Network.HTTP.Types.Status (statusCode)
 import Network.URI (parseURI)
 import Servant.OAuth2.IDP.Errors
-import Servant.OAuth2.IDP.Types
+import Servant.OAuth2.IDP.Types ()
+import Servant.OAuth2.IDP.Types.Internal (unsafeClientId, unsafeRedirectUri, unsafeScope)
 import Test.Hspec
 
 -- Helper functions to extract fields from OAuthErrorResponse
@@ -155,11 +156,11 @@ spec = do
     describe "ValidationError" $ do
         describe "validationErrorToResponse" $ do
             it "RedirectUriMismatch returns descriptive 400 error" $ do
-                let clientId = ClientId "client123"
+                let clientId = unsafeClientId "client123"
                     uri = case parseURI "https://example.com/callback" of
                         Just u -> u
                         Nothing -> error "Test URI parsing failed"
-                    redirectUri = RedirectUri uri
+                    redirectUri = unsafeRedirectUri uri
                     err = RedirectUriMismatch clientId redirectUri
                     (status, message) = validationErrorToResponse err
                 statusCode status `shouldBe` 400
@@ -174,7 +175,7 @@ spec = do
                 T.unpack message `shouldContain` "implicit"
 
             it "ClientNotRegistered returns descriptive 400 error" $ do
-                let clientId = ClientId "unknown_client"
+                let clientId = unsafeClientId "unknown_client"
                     err = ClientNotRegistered clientId
                     (status, message) = validationErrorToResponse err
                 statusCode status `shouldBe` 400
@@ -182,7 +183,7 @@ spec = do
                 T.unpack message `shouldContain` "unknown_client"
 
             it "MissingRequiredScope returns descriptive 400 error" $ do
-                let scope = Scope "admin"
+                let scope = unsafeScope "admin"
                     err = MissingRequiredScope scope
                     (status, message) = validationErrorToResponse err
                 statusCode status `shouldBe` 400
@@ -198,11 +199,11 @@ spec = do
 
         describe "ValidationError constructors" $ do
             it "RedirectUriMismatch can be constructed and pattern matched" $ do
-                let clientId = ClientId "client123"
+                let clientId = unsafeClientId "client123"
                     uri = case parseURI "https://example.com/callback" of
                         Just u -> u
                         Nothing -> error "Test URI parsing failed"
-                    redirectUri = RedirectUri uri
+                    redirectUri = unsafeRedirectUri uri
                     err = RedirectUriMismatch clientId redirectUri
                 case err of
                     RedirectUriMismatch cid ruri -> do
@@ -217,14 +218,14 @@ spec = do
                     _ -> expectationFailure "Pattern match failed"
 
             it "ClientNotRegistered can be constructed and pattern matched" $ do
-                let clientId = ClientId "unknown"
+                let clientId = unsafeClientId "unknown"
                     err = ClientNotRegistered clientId
                 case err of
                     ClientNotRegistered cid -> cid `shouldBe` clientId
                     _ -> expectationFailure "Pattern match failed"
 
             it "MissingRequiredScope can be constructed and pattern matched" $ do
-                let scope = Scope "admin"
+                let scope = unsafeScope "admin"
                     err = MissingRequiredScope scope
                 case err of
                     MissingRequiredScope s -> s `shouldBe` scope

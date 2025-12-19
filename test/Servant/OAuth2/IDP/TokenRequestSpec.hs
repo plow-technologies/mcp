@@ -17,10 +17,12 @@ import Web.FormUrlEncoded (urlDecodeAsForm, urlEncodeAsForm)
 
 import Servant.OAuth2.IDP.API (TokenRequest (..))
 import Servant.OAuth2.IDP.Types (
-    AuthCodeId (..),
-    RefreshTokenId (..),
     ResourceIndicator (..),
     mkCodeVerifier,
+ )
+import Servant.OAuth2.IDP.Types.Internal (
+    unsafeAuthCodeId,
+    unsafeRefreshTokenId,
  )
 
 spec :: Spec
@@ -38,7 +40,7 @@ spec = do
                 case urlDecodeAsForm encoded of
                     Left err -> expectationFailure $ "Failed to parse: " <> show err
                     Right (AuthorizationCodeGrant code verifier mResource) -> do
-                        code `shouldBe` AuthCodeId "code_abc123"
+                        code `shouldBe` unsafeAuthCodeId "code_abc123"
                         case mkCodeVerifier "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~" of
                             Just expected -> verifier `shouldBe` expected
                             Nothing -> expectationFailure "Invalid test CodeVerifier"
@@ -57,7 +59,7 @@ spec = do
                 case urlDecodeAsForm encoded of
                     Left err -> expectationFailure $ "Failed to parse: " <> show err
                     Right (AuthorizationCodeGrant code verifier mResource) -> do
-                        code `shouldBe` AuthCodeId "code_xyz789"
+                        code `shouldBe` unsafeAuthCodeId "code_xyz789"
                         case mkCodeVerifier "1234567890abcdefghijklmnopqrstuvwxyz-._~ABCDEFGHIJKLMNOPQRSTUVWXYZ" of
                             Just expected -> verifier `shouldBe` expected
                             Nothing -> expectationFailure "Invalid test CodeVerifier"
@@ -109,7 +111,7 @@ spec = do
                 case urlDecodeAsForm encoded of
                     Left err -> expectationFailure $ "Failed to parse: " <> show err
                     Right (RefreshTokenGrant refreshToken mResource) -> do
-                        refreshToken `shouldBe` RefreshTokenId "rt_refresh123"
+                        refreshToken `shouldBe` unsafeRefreshTokenId "rt_refresh123"
                         mResource `shouldBe` Nothing
                     Right other -> expectationFailure $ "Expected RefreshTokenGrant, got: " <> show other
 
@@ -124,7 +126,7 @@ spec = do
                 case urlDecodeAsForm encoded of
                     Left err -> expectationFailure $ "Failed to parse: " <> show err
                     Right (RefreshTokenGrant refreshToken mResource) -> do
-                        refreshToken `shouldBe` RefreshTokenId "rt_refresh456"
+                        refreshToken `shouldBe` unsafeRefreshTokenId "rt_refresh456"
                         mResource `shouldBe` Just (ResourceIndicator "https://api.example.com")
                     Right other -> expectationFailure $ "Expected RefreshTokenGrant, got: " <> show other
 

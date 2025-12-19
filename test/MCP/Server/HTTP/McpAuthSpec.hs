@@ -35,7 +35,7 @@ import MCP.Server.HTTP qualified as HTTP
 import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types (Implementation (..), ServerCapabilities (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..))
-import Servant.OAuth2.IDP.Types (UserId (..))
+import Servant.OAuth2.IDP.Types.Internal (unsafeUserId)
 
 -- | Minimal MCPServer instance for testing (uses default implementations)
 instance MCPServer MCPServerM
@@ -63,7 +63,7 @@ testTracer = IOTracer (Tracer (\_ -> pure ()))
 testAuthUser :: AuthUser
 testAuthUser =
     AuthUser
-        { userUserId = UserId "test-user-123"
+        { userUserId = unsafeUserId "test-user-123"
         , userUserEmail = Just "test@example.com"
         , userUserName = Just "Test User"
         }

@@ -64,10 +64,10 @@ import Servant.OAuth2.IDP.Auth.Backend (
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..))
 import Servant.OAuth2.IDP.Types (
     AccessTokenId (..),
-    AuthCodeId (..),
+    AuthCodeId,
     AuthorizationCode (..),
     ClientAuthMethod (..),
-    ClientId (..),
+    ClientId,
     ClientInfo (..),
     CodeChallenge,
     CodeChallengeMethod (..),
@@ -75,16 +75,30 @@ import Servant.OAuth2.IDP.Types (
     GrantType (..),
     OAuthState (..),
     PendingAuthorization (..),
-    RedirectUri (..),
-    RefreshTokenId (..),
+    RedirectUri,
+    RefreshTokenId,
     ResourceIndicator (..),
     ResponseType (..),
-    Scope (..),
-    SessionId (..),
-    UserId (..),
+    Scope,
+    SessionId,
+    UserId,
     mkCodeChallenge,
     mkCodeVerifier,
     mkScope,
+    unAuthCodeId,
+    unClientId,
+    unRedirectUri,
+    unRefreshTokenId,
+    unScope,
+    unUserId,
+ )
+import Servant.OAuth2.IDP.Types.Internal (
+    unsafeAuthCodeId,
+    unsafeClientId,
+    unsafeRedirectUri,
+    unsafeRefreshTokenId,
+    unsafeSessionId,
+    unsafeUserId,
  )
 
 -- ============================================================================
@@ -92,16 +106,16 @@ import Servant.OAuth2.IDP.Types (
 -- ============================================================================
 
 instance Arbitrary AuthCodeId where
-    arbitrary = AuthCodeId . T.pack . getNonEmpty <$> arbitrary
-    shrink (AuthCodeId t) = [AuthCodeId (T.pack s) | s <- shrink (T.unpack t), not (null s)]
+    arbitrary = unsafeAuthCodeId . T.pack . getNonEmpty <$> arbitrary
+    shrink ac = [unsafeAuthCodeId (T.pack s) | s <- shrink (T.unpack (unAuthCodeId ac)), not (null s)]
 
 instance Arbitrary ClientId where
-    arbitrary = ClientId . T.pack . getNonEmpty <$> arbitrary
-    shrink (ClientId t) = [ClientId (T.pack s) | s <- shrink (T.unpack t), not (null s)]
+    arbitrary = unsafeClientId . T.pack . getNonEmpty <$> arbitrary
+    shrink cid = [unsafeClientId (T.pack s) | s <- shrink (T.unpack (unClientId cid)), not (null s)]
 
 -- SessionId requires UUID format: 8-4-4-4-12 hex pattern
 instance Arbitrary SessionId where
-    arbitrary = SessionId <$> genUUID
+    arbitrary = unsafeSessionId <$> genUUID
       where
         genUUID :: Gen Text
         genUUID = do
@@ -118,12 +132,12 @@ instance Arbitrary SessionId where
     shrink _ = [] -- Don't shrink UUIDs (they must maintain format)
 
 instance Arbitrary UserId where
-    arbitrary = UserId . T.pack . getNonEmpty <$> arbitrary
-    shrink (UserId t) = [UserId (T.pack s) | s <- shrink (T.unpack t), not (null s)]
+    arbitrary = unsafeUserId . T.pack . getNonEmpty <$> arbitrary
+    shrink uid = [unsafeUserId (T.pack s) | s <- shrink (T.unpack (unUserId uid)), not (null s)]
 
 instance Arbitrary RefreshTokenId where
-    arbitrary = RefreshTokenId . T.pack . getNonEmpty <$> arbitrary
-    shrink (RefreshTokenId t) = [RefreshTokenId (T.pack s) | s <- shrink (T.unpack t), not (null s)]
+    arbitrary = unsafeRefreshTokenId . T.pack . getNonEmpty <$> arbitrary
+    shrink rt = [unsafeRefreshTokenId (T.pack s) | s <- shrink (T.unpack (unRefreshTokenId rt)), not (null s)]
 
 instance Arbitrary AccessTokenId where
     arbitrary = AccessTokenId . T.pack . getNonEmpty <$> arbitrary
@@ -154,7 +168,7 @@ instance Arbitrary RedirectUri where
         path <- genPath
         let uriStr = scheme ++ "://" ++ host ++ ":" ++ show port ++ path
         case parseURI uriStr of
-            Just uri -> pure (RedirectUri uri)
+            Just uri -> pure (unsafeRedirectUri uri)
             Nothing -> arbitrary -- Retry if URI parsing fails
       where
         genHostname :: Gen String
@@ -178,7 +192,7 @@ instance Arbitrary Scope where
         len <- chooseInt (1, 30)
         scopeText <- T.pack <$> vectorOf len (elements validChars)
         maybe arbitrary pure (mkScope scopeText) -- Retry if validation fails
-    shrink (Scope t) = [s | str <- shrink (T.unpack t), not (null str), Just s <- [mkScope (T.pack str)]]
+    shrink scope = [s | str <- shrink (T.unpack (unScope scope)), not (null str), Just s <- [mkScope (T.pack str)]]
 
 -- CodeChallenge: base64url charset, 43-128 chars
 instance Arbitrary CodeChallenge where
@@ -287,8 +301,8 @@ instance Arbitrary PendingAuthorization where
       where
         genResourceURI :: Gen URI
         genResourceURI = do
-            RedirectUri uri <- arbitrary
-            pure uri
+            redirectUri <- arbitrary
+            pure (unRedirectUri redirectUri)
 
 instance Arbitrary AuthUser where
     arbitrary = do

@@ -32,8 +32,8 @@ import MCP.Server.Auth (
 import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
 import Servant.OAuth2.IDP.Types (
     ResponseType (..),
-    Scope (..),
  )
+import Servant.OAuth2.IDP.Types.Internal (unsafeScope)
 
 {- | OAuth authorization server metadata endpoint (polymorphic).
 
@@ -118,7 +118,7 @@ defaultProtectedResourceMetadata baseUrl =
     ProtectedResourceMetadata
         { resource = baseUrl
         , authorizationServers = [baseUrl]
-        , scopesSupported = Just [Scope "mcp:read", Scope "mcp:write"]
+        , scopesSupported = Just [unsafeScope "mcp:read", unsafeScope "mcp:write"]
         , bearerMethodsSupported = Just ["header"]
         , resourceName = Nothing
         , resourceDocumentation = Nothing

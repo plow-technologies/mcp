@@ -16,7 +16,8 @@ import Data.Either (isLeft)
 import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import Data.Text (Text)
-import Servant.OAuth2.IDP.Types (AccessToken (..), ClientName (..), ClientSecret (..), LoginAction (..), OAuthGrantType (..), RefreshToken (..), Scope (..), Scopes (..), TokenType (..), mkClientName, mkClientSecret, mkRedirectUri, mkTokenValidity, parseScopes, serializeScopeSet)
+import Servant.OAuth2.IDP.Types (AccessToken (..), LoginAction (..), OAuthGrantType (..), RefreshToken (..), Scope (..), Scopes (..), TokenType (..), mkClientName, mkClientSecret, mkRedirectUri, mkTokenValidity, parseScopes, serializeScopeSet, unAccessToken, unClientName, unClientSecret, unRefreshToken, unTokenType)
+import Servant.OAuth2.IDP.Types.Internal (unsafeClientName, unsafeClientSecret, unsafeScope)
 import Test.Hspec
 import Web.HttpApiData (parseUrlPiece, toUrlPiece)
 
@@ -112,7 +113,7 @@ spec = do
     describe "FR-060: Scope parsing and serialization" $ do
         context "Scope newtype single value" $ do
             it "accepts valid single scope via FromHttpApiData" $
-                parseUrlPiece "openid" `shouldBe` Right (Scope "openid")
+                parseUrlPiece "openid" `shouldBe` Right (unsafeScope "openid")
 
             it "rejects empty scope" $
                 (parseUrlPiece "" :: Either Text Scope) `shouldSatisfy` isLeft
@@ -121,58 +122,58 @@ spec = do
                 (parseUrlPiece "open id" :: Either Text Scope) `shouldSatisfy` isLeft
 
             it "round-trips through ToHttpApiData" $
-                let scope = Scope "profile"
+                let scope = unsafeScope "profile"
                  in parseUrlPiece (toUrlPiece scope) `shouldBe` Right scope
 
         context "Space-delimited scope list parsing (RFC 6749 Section 3.3)" $ do
             it "parses space-delimited scopes into Set" $
                 parseScopes "openid profile email"
-                    `shouldBe` Just (Set.fromList [Scope "openid", Scope "profile", Scope "email"])
+                    `shouldBe` Just (Set.fromList [unsafeScope "openid", unsafeScope "profile", unsafeScope "email"])
 
             it "handles single scope" $
-                parseScopes "openid" `shouldBe` Just (Set.fromList [Scope "openid"])
+                parseScopes "openid" `shouldBe` Just (Set.fromList [unsafeScope "openid"])
 
             it "handles empty string" $
                 parseScopes "" `shouldBe` Just Set.empty
 
             it "filters out empty scopes from consecutive spaces" $
-                parseScopes "openid  profile" `shouldBe` Just (Set.fromList [Scope "openid", Scope "profile"])
+                parseScopes "openid  profile" `shouldBe` Just (Set.fromList [unsafeScope "openid", unsafeScope "profile"])
 
             it "trims whitespace around scopes" $
-                parseScopes "  openid   profile  " `shouldBe` Just (Set.fromList [Scope "openid", Scope "profile"])
+                parseScopes "  openid   profile  " `shouldBe` Just (Set.fromList [unsafeScope "openid", unsafeScope "profile"])
 
         context "Set Scope serialization to space-delimited string" $ do
             it "serializes Set to space-delimited string" $
-                let scopes = Set.fromList [Scope "email", Scope "openid", Scope "profile"]
+                let scopes = Set.fromList [unsafeScope "email", unsafeScope "openid", unsafeScope "profile"]
                  in serializeScopeSet scopes `shouldSatisfy` (\s -> s `elem` ["email openid profile", "email profile openid", "openid email profile", "openid profile email", "profile email openid", "profile openid email"])
 
             it "handles empty Set" $
                 serializeScopeSet Set.empty `shouldBe` ""
 
             it "handles single scope Set" $
-                serializeScopeSet (Set.fromList [Scope "openid"]) `shouldBe` "openid"
+                serializeScopeSet (Set.fromList [unsafeScope "openid"]) `shouldBe` "openid"
 
         context "Scopes newtype for HTTP API (FR-060)" $ do
             it "parses space-delimited scopes via FromHttpApiData" $
                 parseUrlPiece "openid profile"
-                    `shouldBe` Right (Scopes (Set.fromList [Scope "openid", Scope "profile"]))
+                    `shouldBe` Right (Scopes (Set.fromList [unsafeScope "openid", unsafeScope "profile"]))
 
             it "parses single scope" $
-                parseUrlPiece "openid" `shouldBe` Right (Scopes (Set.fromList [Scope "openid"]))
+                parseUrlPiece "openid" `shouldBe` Right (Scopes (Set.fromList [unsafeScope "openid"]))
 
             it "parses empty string to empty Set" $
                 parseUrlPiece "" `shouldBe` Right (Scopes Set.empty)
 
             it "handles multiple spaces between scopes" $
                 parseUrlPiece "openid  profile"
-                    `shouldBe` Right (Scopes (Set.fromList [Scope "openid", Scope "profile"]))
+                    `shouldBe` Right (Scopes (Set.fromList [unsafeScope "openid", unsafeScope "profile"]))
 
             it "serializes to space-delimited via ToHttpApiData" $
-                let scopeList = Scopes (Set.fromList [Scope "openid", Scope "profile"])
+                let scopeList = Scopes (Set.fromList [unsafeScope "openid", unsafeScope "profile"])
                  in toUrlPiece scopeList `shouldSatisfy` (\s -> s `elem` ["openid profile", "profile openid"])
 
             it "round-trips through FromHttpApiData and ToHttpApiData" $
-                let original = Scopes (Set.fromList [Scope "email", Scope "openid"])
+                let original = Scopes (Set.fromList [unsafeScope "email", unsafeScope "openid"])
                     serialized = toUrlPiece original
                     parsed = parseUrlPiece serialized
                  in parsed `shouldBe` Right original
@@ -187,18 +188,18 @@ spec = do
 
             it "unwraps correctly" $
                 case mkClientSecret "test-secret" of
-                    Just (ClientSecret s) -> s `shouldBe` "test-secret"
+                    Just secret -> unClientSecret secret `shouldBe` "test-secret"
                     Nothing -> expectationFailure "mkClientSecret should accept non-empty string"
 
         context "JSON serialization" $ do
             it "round-trips through JSON" $
-                let secret = ClientSecret "secret-value"
+                let secret = unsafeClientSecret "secret-value"
                     encoded = encode secret
                     decoded = decode encoded
                  in decoded `shouldBe` Just secret
 
             it "serializes empty secret" $
-                let secret = ClientSecret ""
+                let secret = unsafeClientSecret ""
                     encoded = encode secret
                     decoded = decode encoded
                  in decoded `shouldBe` Just secret
@@ -213,7 +214,7 @@ spec = do
 
             it "unwraps correctly" $
                 case mkClientName "Test App" of
-                    Just (ClientName n) -> n `shouldBe` "Test App"
+                    Just name -> unClientName name `shouldBe` "Test App"
                     Nothing -> expectationFailure "mkClientName should accept non-empty string"
 
             it "accepts name with special characters" $
@@ -224,7 +225,7 @@ spec = do
 
         context "JSON serialization" $ do
             it "round-trips through JSON" $
-                let name = ClientName "My Application"
+                let name = unsafeClientName "My Application"
                     encoded = encode name
                     decoded = decode encoded
                  in decoded `shouldBe` Just name

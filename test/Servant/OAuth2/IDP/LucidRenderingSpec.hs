@@ -21,7 +21,8 @@ import Servant.OAuth2.IDP.Handlers.HTML (
     ErrorPage (..),
     LoginPage (..),
  )
-import Servant.OAuth2.IDP.Types (SessionId (..))
+import Servant.OAuth2.IDP.Types ()
+import Servant.OAuth2.IDP.Types.Internal (unsafeSessionId)
 
 -- | Test suite for Lucid-based HTML rendering
 spec :: Spec
@@ -202,16 +203,16 @@ spec = do
             html `shouldSatisfy` T.isInfixOf "cookie mismatch"
 
         it "renders SessionNotFound error with session ID" $ do
-            let err = SessionNotFound (SessionId "test-session-123")
-            let html = TL.toStrict $ renderText (toHtml err)
+            let err = SessionNotFound (unsafeSessionId "test-session-123")
+            let html = TL.toStrict $ renderText (toHtml (err :: LoginFlowError))
 
             html `shouldSatisfy` T.isInfixOf "Invalid Session"
             html `shouldSatisfy` T.isInfixOf "not found"
             html `shouldSatisfy` T.isInfixOf "expired"
 
         it "renders SessionExpired error with session ID" $ do
-            let err = SessionExpired (SessionId "expired-session-456")
-            let html = TL.toStrict $ renderText (toHtml err)
+            let err = SessionExpired (unsafeSessionId "expired-session-456")
+            let html = TL.toStrict $ renderText (toHtml (err :: LoginFlowError))
 
             html `shouldSatisfy` T.isInfixOf "Session Expired"
             html `shouldSatisfy` T.isInfixOf "login session has expired"
@@ -219,8 +220,8 @@ spec = do
         it "uses Lucid's automatic HTML escaping" $ do
             -- The ToHtml instance uses Lucid which automatically escapes HTML
             -- This test verifies the instance compiles and renders valid HTML
-            let err = SessionNotFound (SessionId "test-session")
-            let html = TL.toStrict $ renderText (toHtml err)
+            let err = SessionNotFound (unsafeSessionId "test-session")
+            let html = TL.toStrict $ renderText (toHtml (err :: LoginFlowError))
 
             -- Should produce valid HTML structure
             html `shouldSatisfy` T.isInfixOf "<!DOCTYPE HTML>"

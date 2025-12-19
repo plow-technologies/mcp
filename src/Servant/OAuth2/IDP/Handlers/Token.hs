@@ -49,10 +49,8 @@ import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     AccessToken (..),
     AccessTokenId (..),
-    AuthCodeId (..),
     AuthorizationCode (..),
     RefreshToken (..),
-    RefreshTokenId (..),
     ResourceIndicator (..),
     Scopes (..),
     TokenType (..),
@@ -67,6 +65,7 @@ import Servant.OAuth2.IDP.Types (
     unRefreshTokenId,
     unResourceIndicator,
  )
+import Servant.OAuth2.IDP.Types.Internal (unsafeRefreshTokenId)
 
 {- | Token endpoint handler (polymorphic).
 
@@ -223,7 +222,7 @@ handleAuthCodeGrant params = do
     -- Generate tokens
     accessTokenText <- generateJWTAccessToken user jwtSettings
     refreshTokenText <- liftIO $ generateRefreshTokenWithConfig config
-    let refreshToken = RefreshTokenId refreshTokenText
+    let refreshToken = unsafeRefreshTokenId refreshTokenText
 
     -- Store tokens (code already deleted by consumeAuthCode)
     storeAccessToken (AccessTokenId accessTokenText) user

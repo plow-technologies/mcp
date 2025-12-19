@@ -107,7 +107,8 @@ import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI, oauthServer)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
 import Servant.OAuth2.IDP.Trace (OAuthTrace)
-import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthGrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope (..), UserId (..), unUserId)
+import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthGrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), UserId (..), unUserId)
+import Servant.OAuth2.IDP.Types.Internal (unsafeScope)
 
 -- | HTML content type for Servant
 data HTML
@@ -678,7 +679,7 @@ defaultDemoOAuthConfig =
         , authCodeExpirySeconds = 600 -- 10 minutes
         , accessTokenExpirySeconds = 3600 -- 1 hour
         -- Default OAuth parameters
-        , supportedScopes = [Scope "mcp:read", Scope "mcp:write"]
+        , supportedScopes = [unsafeScope "mcp:read", unsafeScope "mcp:write"]
         , supportedResponseTypes = [ResponseCode]
         , supportedGrantTypes = [GrantAuthorizationCode, GrantRefreshToken]
         , supportedAuthMethods = [AuthNone]
@@ -706,7 +707,7 @@ defaultProtectedResourceMetadata baseUrl =
     ProtectedResourceMetadata
         { resource = baseUrl
         , authorizationServers = [baseUrl]
-        , scopesSupported = Just [Scope "mcp:read", Scope "mcp:write"]
+        , scopesSupported = Just [unsafeScope "mcp:read", unsafeScope "mcp:write"]
         , bearerMethodsSupported = Just ["header"]
         , resourceName = Nothing
         , resourceDocumentation = Nothing

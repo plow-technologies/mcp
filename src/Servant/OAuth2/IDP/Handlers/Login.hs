@@ -51,13 +51,11 @@ import Servant.OAuth2.IDP.Errors (AuthorizationError (..), LoginFlowError (..))
 import Servant.OAuth2.IDP.Handlers.Helpers (extractSessionFromCookie, generateAuthCode)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
-    AuthCodeId (..),
     AuthorizationCode (..),
     LoginAction (..),
     PendingAuthorization (..),
     RedirectTarget (..),
     SessionCookie (..),
-    SessionId (..),
     pendingClientId,
     pendingCodeChallenge,
     pendingCodeChallengeMethod,
@@ -68,6 +66,7 @@ import Servant.OAuth2.IDP.Types (
     unClientId,
     unSessionId,
  )
+import Servant.OAuth2.IDP.Types.Internal (unsafeAuthCodeId)
 
 {- | Login form submission handler (polymorphic).
 
@@ -196,7 +195,7 @@ handleLogin mCookie loginForm = do
                         expiry = addUTCTime expirySeconds codeGenerationTime
                         -- Convert pendingScope from Maybe (Set Scope) to Set Scope
                         scopes = fromMaybe Set.empty (pendingScope pending)
-                        codeId = AuthCodeId code
+                        codeId = unsafeAuthCodeId code
                         authCode =
                             AuthorizationCode
                                 { authCodeId = codeId

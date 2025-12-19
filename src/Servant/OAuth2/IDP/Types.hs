@@ -21,23 +21,30 @@ refactoring.
 -}
 module Servant.OAuth2.IDP.Types (
     -- * Identity Newtypes
-    AuthCodeId (..),
+    AuthCodeId,
     mkAuthCodeId,
-    ClientId (..),
+    unAuthCodeId,
+    ClientId,
     mkClientId,
-    SessionId (..),
+    unClientId,
+    SessionId,
     mkSessionId,
+    unSessionId,
     AccessTokenId (..),
-    RefreshTokenId (..),
+    RefreshTokenId,
     mkRefreshTokenId,
-    UserId (..),
+    unRefreshTokenId,
+    UserId,
     mkUserId,
+    unUserId,
 
     -- * Value Newtypes
-    RedirectUri (..),
+    RedirectUri,
     mkRedirectUri,
-    Scope (..),
+    unRedirectUri,
+    Scope,
     mkScope,
+    unScope,
     parseScopes,
     serializeScopeSet,
     Scopes (..),
@@ -49,10 +56,12 @@ module Servant.OAuth2.IDP.Types (
     unCodeVerifier,
     OAuthState (..),
     ResourceIndicator (..),
-    ClientSecret (..),
+    ClientSecret,
     mkClientSecret,
-    ClientName (..),
+    unClientSecret,
+    ClientName,
     mkClientName,
+    unClientName,
     AccessToken (..),
     TokenType (..),
     RefreshToken (..),
@@ -93,9 +102,6 @@ import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Network.URI (URI, parseURI, uriAuthority, uriRegName, uriScheme, uriToString)
 import Web.HttpApiData (FromHttpApiData (..), ToHttpApiData (..))
-
--- Import PKCE types from Internal module (raw constructors hidden from public API)
-import Servant.OAuth2.IDP.Types.Internal (CodeChallenge (..), CodeVerifier (..))
 
 -- -----------------------------------------------------------------------------
 -- Identity Newtypes
@@ -475,8 +481,55 @@ instance FromJSON Scopes where
             either (fail . T.unpack) pure . parseUrlPiece
 
 -- -----------------------------------------------------------------------------
--- PKCE Types (imported from Internal, smart constructors defined here)
+-- PKCE Types
 -- -----------------------------------------------------------------------------
+
+-- | PKCE code challenge
+newtype CodeChallenge = CodeChallenge {unCodeChallenge :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+instance FromHttpApiData CodeChallenge where
+    parseUrlPiece t
+        | len < 43 || len > 128 = Left "CodeChallenge must be base64url (43-128 chars)"
+        | not (T.all isBase64UrlChar t) = Left "CodeChallenge must be base64url (43-128 chars)"
+        | otherwise = Right (CodeChallenge t)
+      where
+        len = T.length t
+        isBase64UrlChar c =
+            isAsciiUpper c
+                || isAsciiLower c
+                || isDigit c
+                || c == '-'
+                || c == '_'
+
+instance ToHttpApiData CodeChallenge where
+    toUrlPiece = unCodeChallenge
+
+-- | PKCE code verifier
+newtype CodeVerifier = CodeVerifier {unCodeVerifier :: Text}
+    deriving stock (Eq, Ord, Show, Generic)
+    deriving newtype (FromJSON, ToJSON)
+
+instance FromHttpApiData CodeVerifier where
+    parseUrlPiece t
+        | len < 43 || len > 128 = Left "CodeVerifier must contain unreserved chars (43-128 chars)"
+        | not (T.all isUnreservedChar t) = Left "CodeVerifier must contain unreserved chars (43-128 chars)"
+        | otherwise = Right (CodeVerifier t)
+      where
+        len = T.length t
+        -- RFC 7636: unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
+        isUnreservedChar c =
+            isAsciiUpper c
+                || isAsciiLower c
+                || isDigit c
+                || c == '-'
+                || c == '.'
+                || c == '_'
+                || c == '~'
+
+instance ToHttpApiData CodeVerifier where
+    toUrlPiece = unCodeVerifier
 
 -- | Smart constructor for CodeChallenge (base64url charset, 43-128 chars)
 mkCodeChallenge :: Text -> Maybe CodeChallenge

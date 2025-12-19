@@ -42,11 +42,11 @@ import Servant.OAuth2.IDP.API (
 import Servant.OAuth2.IDP.Errors (AuthorizationError (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
-    ClientId (..),
     ClientInfo (..),
     mkClientSecret,
     unClientName,
  )
+import Servant.OAuth2.IDP.Types.Internal (unsafeClientId)
 
 {- | Dynamic client registration endpoint (polymorphic).
 
@@ -102,7 +102,7 @@ handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqR
     let prefix = maybe "client_" clientIdPrefix (httpOAuthConfig config)
     uuid <- liftIO UUID.nextRandom
     let clientIdText = prefix <> UUID.toText uuid
-        clientId = ClientId clientIdText
+        clientId = unsafeClientId clientIdText
 
     -- Convert NonEmpty to Set for ClientInfo
     -- Note: ClientInfo from OAuth.Types requires NonEmpty and Set

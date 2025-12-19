@@ -101,6 +101,7 @@ import Servant.OAuth2.IDP.Auth.Backend (
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..))
 import Servant.OAuth2.IDP.Store
 import Servant.OAuth2.IDP.Types hiding (OAuthState)
+import Servant.OAuth2.IDP.Types.Internal (unsafeUserId)
 
 -- -----------------------------------------------------------------------------
 -- Test Environment
@@ -329,7 +330,7 @@ instance AuthBackend TestM where
                 let candidateHash = mkHashedPassword (storeSalt store) password
                 if storedHash == candidateHash -- Constant-time via ScrubbedBytes Eq
                     then do
-                        let userId = UserId (usernameText username)
+                        let userId = unsafeUserId (usernameText username)
                         let authUser =
                                 AuthUser
                                     { userUserId = userId

@@ -94,7 +94,8 @@ import Control.Monad.Time (MonadTime)
 import Servant.Auth.Server (ToJWT)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
-import Servant.OAuth2.IDP.Types (AuthCodeId (..), ClientId (..), mkAuthCodeId)
+import Servant.OAuth2.IDP.Types (AuthCodeId, ClientId, mkAuthCodeId, unAuthCodeId, unClientId)
+import Servant.OAuth2.IDP.Types.Internal (unsafeAuthCodeId, unsafeClientId)
 
 -- -----------------------------------------------------------------------------
 -- Test Configuration Types
@@ -377,7 +378,7 @@ withRegisteredClient _config action = do
             Object obj ->
                 case KM.lookup "client_id" obj of
                     Just (String clientIdText) ->
-                        Right (ClientId clientIdText)
+                        Right (unsafeClientId clientIdText)
                     Just other ->
                         Left $ "client_id was not a string: " <> show other
                     Nothing ->
@@ -860,7 +861,7 @@ tokenExchangeSpec config = with (withFreshAppNoTime config) $ do
 
         it "returns 400 for invalid authorization code" $ do
             withRegisteredClient config $ \clientId -> do
-                let body = tokenExchangeBody clientId (AuthCodeId "invalid") "verifier"
+                let body = tokenExchangeBody clientId (unsafeAuthCodeId "invalid") "verifier"
                 request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict body) `shouldRespondWith` 400
 
 {- | Helper to create application/x-www-form-urlencoded token exchange request body.

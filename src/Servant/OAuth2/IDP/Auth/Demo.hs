@@ -84,7 +84,8 @@ import Servant.OAuth2.IDP.Auth.Backend (
     mkUsername,
     usernameText,
  )
-import Servant.OAuth2.IDP.Types (UserId (..))
+import Servant.OAuth2.IDP.Types (UserId)
+import Servant.OAuth2.IDP.Types.Internal (unsafeUserId)
 
 -- -----------------------------------------------------------------------------
 -- User Types
@@ -169,7 +170,7 @@ instance (MonadIO m) => AuthBackend (ReaderT DemoCredentialEnv m) where
                 -- ScrubbedBytes Eq is constant-time
                 if hash == candidateHash
                     then do
-                        let userId = UserId (usernameText username)
+                        let userId = unsafeUserId (usernameText username)
                         let authUser =
                                 AuthUser
                                     { userUserId = userId

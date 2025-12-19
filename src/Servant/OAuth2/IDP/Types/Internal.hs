@@ -21,63 +21,90 @@ constructors from "Servant.OAuth2.IDP.Types" instead.
 
 Per Constitution Principle II: Raw constructors should not be in public API.
 This module exists solely for boundary translation purposes.
+
+IMPLEMENTATION NOTE: This module does NOT define the types. It imports them
+from where they are defined in Types.hs and re-exports them with raw
+constructors exposed. This ensures there is only one definition of each type.
 -}
 module Servant.OAuth2.IDP.Types.Internal (
-    -- * PKCE Types (with raw constructors)
-    CodeChallenge (..),
-    CodeVerifier (..),
+    -- * Unsafe constructor functions
+    -- These are the ONLY exports - no raw constructors exported
+    unsafeAuthCodeId,
+    unsafeClientId,
+    unsafeSessionId,
+    unsafeRefreshTokenId,
+    unsafeUserId,
+    unsafeRedirectUri,
+    unsafeScope,
+    unsafeCodeChallenge,
+    unsafeCodeVerifier,
+    unsafeClientSecret,
+    unsafeClientName,
 ) where
 
-import Data.Aeson (FromJSON, ToJSON)
-import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
+-- Import types WITH constructors so coerce can work
+-- These constructors are NOT re-exported by this module
+import Servant.OAuth2.IDP.Types
+    ( AuthCodeId (..)
+    , ClientId (..)
+    , ClientName (..)
+    , ClientSecret (..)
+    , CodeChallenge (..)
+    , CodeVerifier (..)
+    , RedirectUri (..)
+    , RefreshTokenId (..)
+    , Scope (..)
+    , SessionId (..)
+    , UserId (..)
+    )
+
 import Data.Text (Text)
-import Data.Text qualified as T
-import GHC.Generics (Generic)
-import Web.HttpApiData (FromHttpApiData (..), ToHttpApiData (..))
+import Network.URI (URI)
+import Unsafe.Coerce (unsafeCoerce)
 
--- | PKCE code challenge
-newtype CodeChallenge = CodeChallenge {unCodeChallenge :: Text}
-    deriving stock (Eq, Ord, Show, Generic)
-    deriving newtype (FromJSON, ToJSON)
+{- | Unsafe constructor wrappers (bypass validation)
 
-instance FromHttpApiData CodeChallenge where
-    parseUrlPiece t
-        | len < 43 || len > 128 = Left "CodeChallenge must be base64url (43-128 chars)"
-        | not (T.all isBase64UrlChar t) = Left "CodeChallenge must be base64url (43-128 chars)"
-        | otherwise = Right (CodeChallenge t)
-      where
-        len = T.length t
-        isBase64UrlChar c =
-            isAsciiUpper c
-                || isAsciiLower c
-                || isDigit c
-                || c == '-'
-                || c == '_'
+These functions use `unsafeCoerce` to convert between the underlying type and
+the newtype wrapper, bypassing all smart constructor validation.
 
-instance ToHttpApiData CodeChallenge where
-    toUrlPiece = unCodeChallenge
+This is safe in this specific case because:
+1. All these types are newtypes with the same runtime representation as their wrapped type
+2. We're only changing the compile-time type, not the runtime value
+3. This is ONLY used at HTTP boundaries where validation has already occurred
 
--- | PKCE code verifier
-newtype CodeVerifier = CodeVerifier {unCodeVerifier :: Text}
-    deriving stock (Eq, Ord, Show, Generic)
-    deriving newtype (FromJSON, ToJSON)
+WARNING: These bypass all validation logic. Use ONLY at HTTP boundaries where
+data has already been validated by the HTTP layer (e.g., in Boundary.hs).
+-}
 
-instance FromHttpApiData CodeVerifier where
-    parseUrlPiece t
-        | len < 43 || len > 128 = Left "CodeVerifier must contain unreserved chars (43-128 chars)"
-        | not (T.all isUnreservedChar t) = Left "CodeVerifier must contain unreserved chars (43-128 chars)"
-        | otherwise = Right (CodeVerifier t)
-      where
-        len = T.length t
-        -- RFC 7636: unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
-        isUnreservedChar c =
-            isAsciiUpper c
-                || isAsciiLower c
-                || isDigit c
-                || c == '-'
-                || c == '.'
-                || c == '_'
-                || c == '~'
+unsafeAuthCodeId :: Text -> AuthCodeId
+unsafeAuthCodeId = unsafeCoerce
 
-instance ToHttpApiData CodeVerifier where
-    toUrlPiece = unCodeVerifier
+unsafeClientId :: Text -> ClientId
+unsafeClientId = unsafeCoerce
+
+unsafeSessionId :: Text -> SessionId
+unsafeSessionId = unsafeCoerce
+
+unsafeRefreshTokenId :: Text -> RefreshTokenId
+unsafeRefreshTokenId = unsafeCoerce
+
+unsafeUserId :: Text -> UserId
+unsafeUserId = unsafeCoerce
+
+unsafeRedirectUri :: URI -> RedirectUri
+unsafeRedirectUri = unsafeCoerce
+
+unsafeScope :: Text -> Scope
+unsafeScope = unsafeCoerce
+
+unsafeCodeChallenge :: Text -> CodeChallenge
+unsafeCodeChallenge = unsafeCoerce
+
+unsafeCodeVerifier :: Text -> CodeVerifier
+unsafeCodeVerifier = unsafeCoerce
+
+unsafeClientSecret :: Text -> ClientSecret
+unsafeClientSecret = unsafeCoerce
+
+unsafeClientName :: Text -> ClientName
+unsafeClientName = unsafeCoerce

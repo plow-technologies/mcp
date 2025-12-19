@@ -93,7 +93,7 @@ import Servant.OAuth2.IDP.Errors (
  )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types
-import Servant.OAuth2.IDP.Types.Internal (CodeChallenge (..))
+import Servant.OAuth2.IDP.Types.Internal qualified as Internal
 import Servant.Server (ServerError (..), err401, err500)
 
 -- -----------------------------------------------------------------------------
@@ -105,14 +105,14 @@ import Servant.Server (ServerError (..), err401, err500)
 WARNING: Bypasses validation. Use only for data from validated HTTP requests.
 -}
 unsafeAuthCodeId :: Text -> AuthCodeId
-unsafeAuthCodeId = AuthCodeId
+unsafeAuthCodeId = Internal.unsafeAuthCodeId
 
 {- | Unsafe constructor for ClientId.
 
 WARNING: Bypasses validation. Use only for data from validated HTTP requests.
 -}
 unsafeClientId :: Text -> ClientId
-unsafeClientId = ClientId
+unsafeClientId = Internal.unsafeClientId
 
 {- | Unsafe constructor for SessionId.
 
@@ -120,7 +120,7 @@ WARNING: Bypasses validation (does NOT check UUID format).
 Use only for data from validated HTTP requests.
 -}
 unsafeSessionId :: Text -> SessionId
-unsafeSessionId = SessionId
+unsafeSessionId = Internal.unsafeSessionId
 
 {- | Unsafe constructor for AccessTokenId.
 
@@ -134,14 +134,14 @@ unsafeAccessTokenId = AccessTokenId
 WARNING: Bypasses validation. Use only for data from validated HTTP requests.
 -}
 unsafeRefreshTokenId :: Text -> RefreshTokenId
-unsafeRefreshTokenId = RefreshTokenId
+unsafeRefreshTokenId = Internal.unsafeRefreshTokenId
 
 {- | Unsafe constructor for UserId.
 
 WARNING: Bypasses validation. Use only for data from validated HTTP requests.
 -}
 unsafeUserId :: Text -> UserId
-unsafeUserId = UserId
+unsafeUserId = Internal.unsafeUserId
 
 {- | Unsafe constructor for Scope.
 
@@ -149,7 +149,7 @@ WARNING: Bypasses validation (does NOT check for whitespace).
 Use only for data from validated HTTP requests.
 -}
 unsafeScope :: Text -> Scope
-unsafeScope = Scope
+unsafeScope = Internal.unsafeScope
 
 {- | Unsafe constructor for CodeChallenge.
 
@@ -157,7 +157,7 @@ WARNING: Bypasses validation (does NOT check base64url charset or length).
 Use only for data from validated HTTP requests.
 -}
 unsafeCodeChallenge :: Text -> CodeChallenge
-unsafeCodeChallenge = CodeChallenge
+unsafeCodeChallenge = Internal.unsafeCodeChallenge
 
 -- -----------------------------------------------------------------------------
 -- Extractors
@@ -189,7 +189,7 @@ userIdToText = unUserId
 
 -- | Extract Text from RedirectUri
 redirectUriToText :: RedirectUri -> Text
-redirectUriToText (RedirectUri uri) = T.pack (show uri)
+redirectUriToText uri = T.pack (show (unRedirectUri uri))
 
 -- | Extract Text from Scope
 scopeToText :: Scope -> Text

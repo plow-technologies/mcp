@@ -18,19 +18,23 @@ import Servant.OAuth2.IDP.Auth.Backend (Username, mkUsername)
 import Servant.OAuth2.IDP.Errors (ValidationError (..))
 import Servant.OAuth2.IDP.Trace
 import Servant.OAuth2.IDP.Types (
-    ClientId (..),
+    ClientId,
     OAuthGrantType (..),
-    RedirectUri (..),
-    Scope (..),
-    SessionId (..),
+    RedirectUri,
+    Scope,
+    SessionId,
     mkRedirectUri,
     mkScope,
+ )
+import Servant.OAuth2.IDP.Types.Internal (
+    unsafeClientId,
+    unsafeSessionId,
  )
 import Test.Hspec
 
 -- Test fixtures
 testClientId :: ClientId
-testClientId = ClientId "test_client_123"
+testClientId = unsafeClientId "test_client_123"
 
 testRedirectUri :: RedirectUri
 testRedirectUri = case mkRedirectUri "https://example.com/callback" of
@@ -43,7 +47,7 @@ testScope = case mkScope "read" of
     Nothing -> error "Test fixture: invalid scope"
 
 testSessionId :: SessionId
-testSessionId = SessionId "12345678-1234-1234-1234-123456789abc"
+testSessionId = unsafeSessionId "12345678-1234-1234-1234-123456789abc"
 
 testUsername :: Username
 testUsername = case mkUsername "testuser" of

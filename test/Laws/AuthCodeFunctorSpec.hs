@@ -19,14 +19,17 @@ import Test.Hspec.QuickCheck (prop)
 
 import Generators ()
 import Servant.OAuth2.IDP.Types (
-    AuthCodeId (..),
     AuthorizationCode (..),
-    ClientId (..),
     CodeChallengeMethod (..),
-    RedirectUri (..),
-    Scope (..),
-    UserId (..),
+    UserId,
     mkCodeChallenge,
+ )
+import Servant.OAuth2.IDP.Types.Internal (
+    unsafeAuthCodeId,
+    unsafeClientId,
+    unsafeRedirectUri,
+    unsafeScope,
+    unsafeUserId,
  )
 
 -- | Test that AuthorizationCode is a Functor
@@ -46,7 +49,7 @@ spec = describe "AuthorizationCode Functor" $ do
 
     -- Practical use case: map userId to a different type
     it "can map UserId to String" $ do
-        let authCode = mkTestAuthCode (UserId "user123")
+        let authCode = mkTestAuthCode (unsafeUserId "user123")
             mapped = fmap (const "mapped") authCode
         authUserId mapped `shouldBe` ("mapped" :: String)
 
@@ -54,20 +57,20 @@ spec = describe "AuthorizationCode Functor" $ do
 mkTestAuthCode :: userId -> AuthorizationCode userId
 mkTestAuthCode userId =
     AuthorizationCode
-        { authCodeId = AuthCodeId "code_test123"
-        , authClientId = ClientId "client_test"
+        { authCodeId = unsafeAuthCodeId "code_test123"
+        , authClientId = unsafeClientId "client_test"
         , authRedirectUri = testRedirectUri
         , authCodeChallenge = case mkCodeChallenge "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" of
             Just cc -> cc
             Nothing -> error "Invalid test CodeChallenge"
         , authCodeChallengeMethod = S256
-        , authScopes = Set.fromList [Scope "read", Scope "write"]
+        , authScopes = Set.fromList [unsafeScope "read", unsafeScope "write"]
         , authUserId = userId
         , authExpiry = testTime
         }
   where
     testRedirectUri = case Network.URI.parseURI "https://example.com/callback" of
-        Just uri -> RedirectUri uri
+        Just uri -> unsafeRedirectUri uri
         Nothing -> error "Invalid test URI"
     testTime = case parseTimeM True defaultTimeLocale "%Y-%m-%d" "2025-01-01" of
         Just t -> t

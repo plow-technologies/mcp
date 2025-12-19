@@ -17,12 +17,13 @@ import Data.Aeson (decode, encode)
 import Data.Text qualified as T
 import Network.HTTP.Types.Status (status400, status401, status403)
 import Servant.OAuth2.IDP.Errors
-import Servant.OAuth2.IDP.Types (ClientId (..), CodeChallengeMethod (..), RedirectUri (..), Scope (..), SessionId (..), mkRedirectUri, mkScope)
+import Servant.OAuth2.IDP.Types (ClientId, CodeChallengeMethod (..), RedirectUri, Scope, SessionId, mkRedirectUri, mkScope)
+import Servant.OAuth2.IDP.Types.Internal (unsafeClientId, unsafeSessionId)
 import Test.Hspec
 
 -- Test fixture helpers
 testClientId :: ClientId
-testClientId = ClientId "test_client_123"
+testClientId = unsafeClientId "test_client_123"
 
 testRedirectUri :: RedirectUri
 testRedirectUri = case mkRedirectUri "https://example.com/callback" of
@@ -35,7 +36,7 @@ testScope = case mkScope "read" of
     Nothing -> error "Test fixture: invalid scope"
 
 testSessionId :: SessionId
-testSessionId = SessionId "12345678-1234-1234-1234-123456789abc"
+testSessionId = unsafeSessionId "12345678-1234-1234-1234-123456789abc"
 
 spec :: Spec
 spec = do
