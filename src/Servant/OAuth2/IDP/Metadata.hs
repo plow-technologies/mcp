@@ -19,17 +19,39 @@ Both types use custom JSON instances with snake_case field names per the RFCs.
 -}
 module Servant.OAuth2.IDP.Metadata (
     -- * OAuth Authorization Server Metadata (RFC 8414)
-    OAuthMetadata (..),
+    OAuthMetadata,
     mkOAuthMetadata,
+    -- ** Field Accessors
+    oauthIssuer,
+    oauthAuthorizationEndpoint,
+    oauthTokenEndpoint,
+    oauthRegistrationEndpoint,
+    oauthUserInfoEndpoint,
+    oauthJwksUri,
+    oauthScopesSupported,
+    oauthResponseTypesSupported,
+    oauthGrantTypesSupported,
+    oauthTokenEndpointAuthMethodsSupported,
+    oauthCodeChallengeMethodsSupported,
 
     -- * OAuth Protected Resource Metadata (RFC 9728)
-    ProtectedResourceMetadata (..),
+    ProtectedResourceMetadata,
     mkProtectedResourceMetadata,
+    -- ** Field Accessors
+    prResource,
+    prAuthorizationServers,
+    prScopesSupported,
+    prBearerMethodsSupported,
+    prResourceName,
+    prResourceDocumentation,
 ) where
 
+import Control.Monad (guard)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), (.=))
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
+import Network.URI (URI(..), isAbsoluteURI, parseURI)
 import Servant.OAuth2.IDP.Types (
     ClientAuthMethod,
     CodeChallengeMethod,
@@ -37,6 +59,17 @@ import Servant.OAuth2.IDP.Types (
     ResponseType,
     Scope,
  )
+
+-- -----------------------------------------------------------------------------
+-- URI Validation Helper
+-- -----------------------------------------------------------------------------
+
+-- | Check if a Text value is an absolute HTTPS URI
+isAbsoluteHttpsUri :: Text -> Bool
+isAbsoluteHttpsUri uri =
+    case parseURI (T.unpack uri) of
+        Just u -> uriScheme u == "https:" && isAbsoluteURI (T.unpack uri)
+        Nothing -> False
 
 -- -----------------------------------------------------------------------------
 -- OAuth Authorization Server Metadata (RFC 8414)
@@ -81,6 +114,40 @@ data OAuthMetadata = OAuthMetadata
     }
     deriving (Eq, Show, Generic)
 
+-- | Field accessors for OAuthMetadata
+oauthIssuer :: OAuthMetadata -> Text
+oauthIssuer = issuer
+
+oauthAuthorizationEndpoint :: OAuthMetadata -> Text
+oauthAuthorizationEndpoint = authorizationEndpoint
+
+oauthTokenEndpoint :: OAuthMetadata -> Text
+oauthTokenEndpoint = tokenEndpoint
+
+oauthRegistrationEndpoint :: OAuthMetadata -> Maybe Text
+oauthRegistrationEndpoint = registrationEndpoint
+
+oauthUserInfoEndpoint :: OAuthMetadata -> Maybe Text
+oauthUserInfoEndpoint = userInfoEndpoint
+
+oauthJwksUri :: OAuthMetadata -> Maybe Text
+oauthJwksUri = jwksUri
+
+oauthScopesSupported :: OAuthMetadata -> Maybe [Scope]
+oauthScopesSupported = scopesSupported
+
+oauthResponseTypesSupported :: OAuthMetadata -> [ResponseType]
+oauthResponseTypesSupported = responseTypesSupported
+
+oauthGrantTypesSupported :: OAuthMetadata -> Maybe [GrantType]
+oauthGrantTypesSupported = grantTypesSupported
+
+oauthTokenEndpointAuthMethodsSupported :: OAuthMetadata -> Maybe [ClientAuthMethod]
+oauthTokenEndpointAuthMethodsSupported = tokenEndpointAuthMethodsSupported
+
+oauthCodeChallengeMethodsSupported :: OAuthMetadata -> Maybe [CodeChallengeMethod]
+oauthCodeChallengeMethodsSupported = codeChallengeMethodsSupported
+
 -- | Custom ToJSON instance with snake_case field names per RFC 8414
 instance ToJSON OAuthMetadata where
     toJSON OAuthMetadata{..} =
@@ -121,8 +188,8 @@ instance FromJSON OAuthMetadata where
 
 {- | Smart constructor for OAuthMetadata.
 
-Currently performs no validation - fields are validated by their types.
-Provided for API consistency and future validation needs.
+Validates that all URI fields are absolute HTTPS URIs per RFC 8414.
+Returns Nothing if any URI validation fails.
 -}
 mkOAuthMetadata ::
     Text ->
@@ -148,21 +215,35 @@ mkOAuthMetadata
     responseTypesSupp
     grantTypesSupp
     tokenAuthMethodsSupp
-    challengeMethodsSupp =
-        Just $
-            OAuthMetadata
-                { issuer = iss
-                , authorizationEndpoint = authzEndpoint
-                , tokenEndpoint = tokEndpoint
-                , registrationEndpoint = regEndpoint
-                , userInfoEndpoint = userInfoEp
-                , jwksUri = jwksU
-                , scopesSupported = scopesSupp
-                , responseTypesSupported = responseTypesSupp
-                , grantTypesSupported = grantTypesSupp
-                , tokenEndpointAuthMethodsSupported = tokenAuthMethodsSupp
-                , codeChallengeMethodsSupported = challengeMethodsSupp
-                }
+    challengeMethodsSupp = do
+        -- Validate required URI fields
+        guard (isAbsoluteHttpsUri iss)
+        guard (isAbsoluteHttpsUri authzEndpoint)
+        guard (isAbsoluteHttpsUri tokEndpoint)
+        -- Validate optional URI fields (Nothing is valid, Just uri must be HTTPS)
+        case regEndpoint of
+            Nothing -> pure ()
+            Just uri -> guard (isAbsoluteHttpsUri uri)
+        case userInfoEp of
+            Nothing -> pure ()
+            Just uri -> guard (isAbsoluteHttpsUri uri)
+        case jwksU of
+            Nothing -> pure ()
+            Just uri -> guard (isAbsoluteHttpsUri uri)
+        -- All validations passed, construct the value
+        pure $ OAuthMetadata
+            { issuer = iss
+            , authorizationEndpoint = authzEndpoint
+            , tokenEndpoint = tokEndpoint
+            , registrationEndpoint = regEndpoint
+            , userInfoEndpoint = userInfoEp
+            , jwksUri = jwksU
+            , scopesSupported = scopesSupp
+            , responseTypesSupported = responseTypesSupp
+            , grantTypesSupported = grantTypesSupp
+            , tokenEndpointAuthMethodsSupported = tokenAuthMethodsSupp
+            , codeChallengeMethodsSupported = challengeMethodsSupp
+            }
 
 -- -----------------------------------------------------------------------------
 -- OAuth Protected Resource Metadata (RFC 9728)
@@ -225,8 +306,8 @@ instance FromJSON ProtectedResourceMetadata where
 
 {- | Smart constructor for ProtectedResourceMetadata.
 
-Currently performs no validation - fields are validated by their types.
-Provided for API consistency and future validation needs.
+Validates that resource URI and optional documentation URI are absolute HTTPS URIs per RFC 9728.
+Returns Nothing if any URI validation fails.
 -}
 mkProtectedResourceMetadata ::
     Text ->
@@ -242,13 +323,19 @@ mkProtectedResourceMetadata
     scopesSupp
     bearerMethodsSupp
     resName
-    resDoc =
-        Just $
-            ProtectedResourceMetadata
-                { prResource = res
-                , prAuthorizationServers = authzServers
-                , prScopesSupported = scopesSupp
-                , prBearerMethodsSupported = bearerMethodsSupp
-                , prResourceName = resName
-                , prResourceDocumentation = resDoc
-                }
+    resDoc = do
+        -- Validate required resource URI
+        guard (isAbsoluteHttpsUri res)
+        -- Validate optional documentation URI
+        case resDoc of
+            Nothing -> pure ()
+            Just uri -> guard (isAbsoluteHttpsUri uri)
+        -- All validations passed, construct the value
+        pure $ ProtectedResourceMetadata
+            { prResource = res
+            , prAuthorizationServers = authzServers
+            , prScopesSupported = scopesSupp
+            , prBearerMethodsSupported = bearerMethodsSupp
+            , prResourceName = resName
+            , prResourceDocumentation = resDoc
+            }
