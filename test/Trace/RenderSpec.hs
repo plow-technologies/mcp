@@ -11,13 +11,16 @@ Verifies that all trace types can be rendered without runtime errors.
 -}
 module Trace.RenderSpec (spec) where
 
+import Data.Maybe (fromJust)
 import Data.Text qualified as T
 import MCP.Trace.HTTP (HTTPTrace (..), renderHTTPTrace)
-import MCP.Trace.OAuth (OAuthTrace (..))
 import MCP.Trace.Protocol (ProtocolTrace (..), renderProtocolTrace)
 import MCP.Trace.Server (ServerTrace (..), renderServerTrace)
 import MCP.Trace.StdIO (StdIOTrace (..), renderStdIOTrace)
 import MCP.Trace.Types (MCPTrace (..), renderMCPTrace)
+import Network.URI (parseURI)
+import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
+import Servant.OAuth2.IDP.Types.Internal (unsafeClientId, unsafeRedirectUri)
 import Test.Hspec
 
 spec :: Spec
@@ -249,7 +252,8 @@ spec = do
                 rendered `shouldSatisfy` T.isInfixOf "req-1"
 
             it "renders HTTPOAuth nested events" $ do
-                let trace = HTTPOAuth (OAuthClientRegistration{clientId = "client-1", clientName = "Test"})
+                let uri = fromJust $ parseURI "http://localhost/callback"
+                    trace = HTTPOAuth (TraceClientRegistration (unsafeClientId "client-1") (unsafeRedirectUri uri))
                     rendered = renderHTTPTrace trace
                 rendered `shouldSatisfy` (not . T.null)
                 rendered `shouldSatisfy` T.isInfixOf "client-1"
@@ -287,7 +291,8 @@ spec = do
                 rendered `shouldSatisfy` T.isInfixOf "/mcp"
 
             it "renders nested OAuth traces via MCPHttp" $ do
-                let trace = MCPHttp $ HTTPOAuth $ OAuthClientRegistration{clientId = "client-1", clientName = "Test"}
+                let uri = fromJust $ parseURI "http://localhost/callback"
+                    trace = MCPHttp $ HTTPOAuth $ TraceClientRegistration (unsafeClientId "client-1") (unsafeRedirectUri uri)
                     rendered = renderMCPTrace trace
                 rendered `shouldSatisfy` (not . T.null)
                 rendered `shouldSatisfy` T.isInfixOf "client-1"

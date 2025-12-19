@@ -19,7 +19,7 @@ functional tests.
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal
+import Servant.OAuth2.IDP.Test.Internal
 
 spec :: Spec
 spec = do
@@ -643,7 +643,7 @@ Covers:
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal (clientRegistrationSpec)
+import Servant.OAuth2.IDP.Test.Internal (clientRegistrationSpec)
 
 spec :: Spec
 spec = do
@@ -723,7 +723,7 @@ Covers:
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal (loginFlowSpec)
+import Servant.OAuth2.IDP.Test.Internal (loginFlowSpec)
 
 spec :: Spec
 spec = do
@@ -823,7 +823,7 @@ Covers:
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal (tokenExchangeSpec)
+import Servant.OAuth2.IDP.Test.Internal (tokenExchangeSpec)
 
 spec :: Spec
 spec = do
@@ -908,7 +908,7 @@ Covers:
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal (expirySpec)
+import Servant.OAuth2.IDP.Test.Internal (expirySpec)
 
 spec :: Spec
 spec = do
@@ -997,7 +997,7 @@ Covers:
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal (headerSpec)
+import Servant.OAuth2.IDP.Test.Internal (headerSpec)
 
 spec :: Spec
 spec = do
@@ -1145,7 +1145,7 @@ OAuth 2.0 compliance including:
 == Usage
 
 @
-import MCP.Server.OAuth.Test.Internal (oauthConformanceSpec)
+import Servant.OAuth2.IDP.Test.Internal (oauthConformanceSpec)
 
 spec :: Spec
 spec = do

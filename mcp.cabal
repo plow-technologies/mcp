@@ -119,7 +119,6 @@ library
         Servant.OAuth2.IDP.Auth.Demo
         MCP.Trace.Types
         MCP.Trace.HTTP
-        MCP.Trace.OAuth
         MCP.Trace.Operation
         MCP.Trace.Protocol
         MCP.Trace.Server
@@ -284,7 +283,6 @@ test-suite mcp-test
         Laws.ErrorBoundarySecuritySpec
         Trace.FilterSpec
         Trace.GoldenSpec
-        Trace.OAuthSpec
         Trace.RenderSpec
         Functional.OAuthFlowSpec
         MCP.Server.OAuth.Test.Fixtures

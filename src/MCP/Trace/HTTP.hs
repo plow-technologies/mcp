@@ -19,11 +19,11 @@ module MCP.Trace.HTTP (
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
-import MCP.Trace.OAuth (OAuthTrace, renderOAuthTrace)
 import MCP.Trace.Operation (OperationTrace, renderOperationTrace)
 import MCP.Trace.Protocol (ProtocolTrace, renderProtocolTrace)
 import MCP.Trace.Server (ServerTrace, renderServerTrace)
 import Servant.OAuth2.IDP.Boundary (OAuthBoundaryTrace (..))
+import Servant.OAuth2.IDP.Trace (OAuthTrace, renderOAuthTrace)
 
 {- | HTTP transport-specific events.
 

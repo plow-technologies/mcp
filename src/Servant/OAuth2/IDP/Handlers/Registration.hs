@@ -33,8 +33,8 @@ import Data.UUID qualified as UUID
 import MCP.Server.Auth (OAuthConfig (..), clientIdPrefix)
 import MCP.Server.HTTP.AppEnv (HTTPServerConfig (..))
 import MCP.Trace.HTTP (HTTPTrace (..))
-import MCP.Trace.OAuth qualified as OAuthTrace
 import Plow.Logging (IOTracer, traceWith)
+import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
 import Servant.OAuth2.IDP.API (
     ClientRegistrationRequest (..),
     ClientRegistrationResponse (..),
@@ -47,7 +47,6 @@ import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     ClientInfo (..),
     mkClientSecret,
-    unClientName,
  )
 import Servant.OAuth2.IDP.Types.Internal (unsafeClientId)
 
@@ -124,9 +123,9 @@ handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqR
 
     storeClient clientId clientInfo
 
-    -- Emit trace
+    -- Emit trace (use first redirect URI from NonEmpty list)
     let oauthTracer = contramap HTTPOAuth tracer
-    liftIO $ traceWith oauthTracer $ OAuthTrace.OAuthClientRegistration clientIdText (unClientName clientName)
+    liftIO $ traceWith oauthTracer $ TraceClientRegistration clientId (NE.head redirectsNE)
 
     let clientSecretNewtype = case mkClientSecret "" of
             Just cs -> cs

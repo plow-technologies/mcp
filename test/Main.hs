@@ -40,7 +40,6 @@ import Laws.OAuthUserTypeSpec qualified as OAuthUserTypeSpec
 -- Existing specs
 import Trace.FilterSpec qualified as FilterSpec
 import Trace.GoldenSpec qualified as GoldenSpec
-import Trace.OAuthSpec qualified as OAuthSpec
 import Trace.RenderSpec qualified as RenderSpec
 
 -- Unit tests
@@ -117,7 +116,6 @@ spec :: Spec
 spec = do
     FilterSpec.spec
     GoldenSpec.spec
-    OAuthSpec.spec
     RenderSpec.spec
 
     -- Unit tests

@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 {- |
@@ -26,13 +27,28 @@ module Servant.OAuth2.IDP.Trace (
 
     -- * Main Trace ADT
     OAuthTrace (..),
+
+    -- * Rendering
+    renderOAuthTrace,
 ) where
 
 import Data.Text (Text)
+import Data.Text qualified as T
 import GHC.Generics (Generic)
-import Servant.OAuth2.IDP.Auth.Backend (Username)
-import Servant.OAuth2.IDP.Errors (ValidationError)
-import Servant.OAuth2.IDP.Types (ClientId, OAuthGrantType, RedirectUri, Scope, SessionId)
+import Network.URI (uriToString)
+import Servant.OAuth2.IDP.Auth.Backend (Username, usernameText)
+import Servant.OAuth2.IDP.Errors (ValidationError (..))
+import Servant.OAuth2.IDP.Types (
+    ClientId,
+    OAuthGrantType (..),
+    RedirectUri,
+    Scope,
+    SessionId,
+    unClientId,
+    unRedirectUri,
+    unScope,
+    unSessionId,
+ )
 
 -- -----------------------------------------------------------------------------
 -- Supporting Types
@@ -90,3 +106,95 @@ data OAuthTrace
     | -- | Validation error occurred
       TraceValidationError ValidationError
     deriving stock (Show, Eq, Generic)
+
+-- -----------------------------------------------------------------------------
+-- Rendering
+-- -----------------------------------------------------------------------------
+
+{- | Render an OAuth trace event to human-readable text.
+
+Unwraps domain newtypes (ClientId, SessionId, Username, etc.) and renders
+ADTs (OperationResult, DenialReason, ValidationError) to human-readable text.
+
+Per FR-005 requirements:
+- Unwrap domain newtypes using un* functions or show
+- Render OperationResult as "SUCCESS"/"FAILED"
+- Render DenialReason constructors to human-readable text
+- Render OAuthGrantType and ValidationError appropriately
+-}
+renderOAuthTrace :: OAuthTrace -> Text
+renderOAuthTrace = \case
+    TraceClientRegistration cid redirectUri ->
+        "Client registered: " <> unClientId cid <> " (" <> renderRedirectUri redirectUri <> ")"
+    TraceAuthorizationRequest cid scopes result ->
+        "Authorization request from "
+            <> unClientId cid
+            <> " for scopes "
+            <> renderScopes scopes
+            <> ": "
+            <> renderResult result
+    TraceLoginPageServed sid ->
+        "Login page served for session " <> unSessionId sid
+    TraceLoginAttempt user result ->
+        "Login attempt for user " <> usernameText user <> ": " <> renderResult result
+    TracePKCEValidation result ->
+        "PKCE validation: " <> renderResult result
+    TraceAuthorizationGranted cid user ->
+        "Authorization granted to client " <> unClientId cid <> " by user " <> usernameText user
+    TraceAuthorizationDenied cid reason ->
+        "Authorization denied for client " <> unClientId cid <> ": " <> renderDenialReason reason
+    TraceTokenExchange grantType result ->
+        "Token exchange (" <> renderGrantType grantType <> "): " <> renderResult result
+    TraceTokenRefresh result ->
+        "Token refresh: " <> renderResult result
+    TraceSessionExpired sid ->
+        "Session expired: " <> unSessionId sid
+    TraceValidationError err ->
+        "Validation error: " <> renderValidationError err
+  where
+    -- Render OperationResult as SUCCESS/FAILED
+    renderResult :: OperationResult -> Text
+    renderResult Success = "SUCCESS"
+    renderResult Failure = "FAILED"
+
+    -- Render DenialReason to human-readable text
+    renderDenialReason :: DenialReason -> Text
+    renderDenialReason UserDenied = "User denied"
+    renderDenialReason InvalidRequest = "Invalid request"
+    renderDenialReason UnauthorizedClient = "Unauthorized client"
+    renderDenialReason (ServerError msg) = "Server error: " <> msg
+
+    -- Render OAuthGrantType to protocol string
+    renderGrantType :: OAuthGrantType -> Text
+    renderGrantType OAuthAuthorizationCode = "authorization_code"
+    renderGrantType OAuthClientCredentials = "client_credentials"
+
+    -- Render RedirectUri (URI) to Text
+    renderRedirectUri :: RedirectUri -> Text
+    renderRedirectUri = T.pack . (\uri -> uriToString id uri "") . unRedirectUri
+
+    -- Render list of scopes
+    renderScopes :: [Scope] -> Text
+    renderScopes [] = "(none)"
+    renderScopes xs = "[" <> T.intercalate ", " (map unScope xs) <> "]"
+
+    -- Render ValidationError to human-readable text
+    renderValidationError :: ValidationError -> Text
+    renderValidationError (RedirectUriMismatch cid uri) =
+        "Redirect URI mismatch for client " <> unClientId cid <> ": " <> renderRedirectUri uri
+    renderValidationError (UnsupportedResponseType rt) =
+        "Unsupported response_type: " <> rt
+    renderValidationError (ClientNotRegistered cid) =
+        "Client not registered: " <> unClientId cid
+    renderValidationError (MissingRequiredScope scope) =
+        "Missing required scope: " <> unScope scope
+    renderValidationError (InvalidStateParameter state) =
+        "Invalid state parameter: " <> state
+    renderValidationError (UnsupportedCodeChallengeMethod method) =
+        "Unsupported code_challenge_method: " <> T.pack (show method) <> " (only S256 supported)"
+    renderValidationError (MissingTokenParameter param) =
+        "Missing token parameter: " <> T.pack (show param)
+    renderValidationError (InvalidTokenParameterFormat param detail) =
+        "Invalid token parameter format (" <> T.pack (show param) <> "): " <> detail
+    renderValidationError EmptyRedirectUris =
+        "Client registration with no redirect URIs"
