@@ -47,8 +47,8 @@ import MCP.Trace.OAuth qualified as OAuthTrace
 import Plow.Logging (IOTracer, traceWith)
 import Servant.OAuth2.IDP.API (LoginForm (..))
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..), Username (..), unUsername)
+import Servant.OAuth2.IDP.Errors (LoginFlowError (..))
 import Servant.OAuth2.IDP.Handlers.Helpers (extractSessionFromCookie, generateAuthCode)
-import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
     AuthCodeId (..),

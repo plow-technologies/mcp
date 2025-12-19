@@ -113,7 +113,7 @@ import Servant.OAuth2.IDP.Handlers (
     handleRegister,
     handleToken,
  )
-import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError)
+import Servant.OAuth2.IDP.Errors (LoginFlowError)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (AuthorizationError, ValidationError)
 

@@ -16,11 +16,11 @@ import Data.Text.Lazy qualified as TL
 import Lucid (Html, renderText, toHtml)
 import Test.Hspec
 
+import Servant.OAuth2.IDP.Errors (LoginFlowError (..))
 import Servant.OAuth2.IDP.Handlers.HTML (
     ErrorPage (..),
     LoginPage (..),
  )
-import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError (..))
 import Servant.OAuth2.IDP.Types (SessionId (..))
 
 -- | Test suite for Lucid-based HTML rendering

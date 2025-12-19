@@ -95,7 +95,7 @@ import Plow.Logging (IOTracer)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser, DemoAuthError (..), DemoCredentialEnv)
 import Servant.OAuth2.IDP.Boundary (domainErrorToServerError)
-import Servant.OAuth2.IDP.LoginFlowError (LoginFlowError)
+import Servant.OAuth2.IDP.Errors (LoginFlowError)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (
     ExpiryConfig (..),
