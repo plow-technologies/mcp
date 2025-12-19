@@ -97,6 +97,7 @@ library
         Servant.OAuth2.IDP.API
         Servant.OAuth2.IDP.Types
         Servant.OAuth2.IDP.Metadata
+        Servant.OAuth2.IDP.PKCE
         Servant.OAuth2.IDP.Store
         Servant.OAuth2.IDP.Store.InMemory
         Servant.OAuth2.IDP.Boundary
@@ -297,6 +298,7 @@ test-suite mcp-test
         Servant.OAuth2.IDP.CryptoEntropySpec
         Servant.OAuth2.IDP.ErrorsSpec
         Servant.OAuth2.IDP.MetadataSpec
+        Servant.OAuth2.IDP.PKCESpec
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
