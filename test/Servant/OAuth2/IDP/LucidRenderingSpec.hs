@@ -55,7 +55,7 @@ spec = do
 
             html `shouldSatisfy` T.isInfixOf "MyApp"
 
-        it "includes scope descriptions in the rendered HTML" $ do
+        it "includes scope text in the rendered HTML" $ do
             let page =
                     LoginPage
                         { loginClientName = "Test"
@@ -65,9 +65,8 @@ spec = do
                         }
             let html = TL.toStrict $ renderText (toHtml page)
 
-            -- Should contain human-readable scope descriptions
-            html `shouldSatisfy` T.isInfixOf "Read MCP resources"
-            html `shouldSatisfy` T.isInfixOf "Write MCP resources"
+            -- Should contain the raw scope text (formatting is done separately via formatScopeDescriptions)
+            html `shouldSatisfy` T.isInfixOf "mcp:read mcp:write"
 
         it "includes session ID as hidden field" $ do
             let page =
