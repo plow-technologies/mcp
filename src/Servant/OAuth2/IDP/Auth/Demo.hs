@@ -84,8 +84,7 @@ import Servant.OAuth2.IDP.Auth.Backend (
     mkUsername,
     usernameText,
  )
-import Servant.OAuth2.IDP.Types (UserId)
-import Servant.OAuth2.IDP.Types (unsafeUserId)
+import Servant.OAuth2.IDP.Types (UserId, unsafeUserId)
 
 -- -----------------------------------------------------------------------------
 -- User Types

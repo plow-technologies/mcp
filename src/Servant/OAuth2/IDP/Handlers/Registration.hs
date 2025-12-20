@@ -43,8 +43,8 @@ import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
 import Servant.OAuth2.IDP.Types (
     ClientInfo (..),
     mkClientSecret,
+    unsafeClientId,
  )
-import Servant.OAuth2.IDP.Types (unsafeClientId)
 
 {- | Dynamic client registration endpoint (polymorphic).
 
