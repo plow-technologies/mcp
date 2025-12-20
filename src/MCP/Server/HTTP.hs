@@ -71,6 +71,7 @@ import Data.Functor.Contravariant (contramap)
 import Data.Generics.Product (HasType, getTyped)
 import Data.Generics.Sum.Typed (AsType, injectTyped)
 import Data.List.NonEmpty (NonEmpty ((:|)))
+import Data.Map.Strict qualified as Map
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -716,7 +717,12 @@ defaultDemoOAuthBundle =
                 , resourceServerBaseUrl = baseUri
                 , resourceServerMetadata = resourceMetadata
                 , oauthServerName = "MCP Server"
-                , oauthScopeDescriptions = mempty
+                , oauthScopeDescriptions =
+                    Map.fromList
+                        [ (unsafeScope "mcp:read", "Read MCP resources")
+                        , (unsafeScope "mcp:write", "Write MCP resources")
+                        , (unsafeScope "mcp:tools", "Execute MCP tools")
+                        ]
                 }
      in DemoOAuthBundle
             { bundleEnv = oauthEnv
