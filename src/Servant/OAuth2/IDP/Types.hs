@@ -1021,10 +1021,6 @@ WARNING: These bypass all smart constructor validation. Use ONLY when:
 
 Per Constitution Principle II: These are exported to support boundary translation,
 but should NOT be used in application code. Use the smart constructors instead.
-
-IMPLEMENTATION NOTE: These use direct constructor application instead of
-unsafeCoerce because we're in the same module as the type definitions.
-This is safer and doesn't require importing Unsafe.Coerce.
 -}
 
 -- | Bypass AuthCodeId validation (internal use only)

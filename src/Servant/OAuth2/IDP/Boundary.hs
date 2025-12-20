@@ -17,8 +17,7 @@ Portability : GHC
 
 This module provides unsafe constructors and extractors for converting between
 Text (used by HTTP.hs and Servant) and type-safe OAuth newtypes. These functions
-bypass validation and should ONLY be used at the HTTP boundary where data has
-already been validated by the HTTP layer.
+bypass validation and should ONLY be used for tests
 
 = Usage Pattern
 
@@ -31,9 +30,7 @@ JSON responses.
 These functions are marked "unsafe" because they bypass the smart constructors
 that perform validation. They should ONLY be used when:
 
-1. The Text value comes from a validated HTTP request
-2. You're at the boundary between HTTP.hs and the typeclass layer
-3. You need to convert between representations without re-validating
+1. You need to convert between representations without re-validating
 
 For all other uses, prefer the smart constructors from "Servant.OAuth2.IDP.Types".
 -}
