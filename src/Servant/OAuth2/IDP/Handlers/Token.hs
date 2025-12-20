@@ -1,5 +1,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
 {- |
@@ -133,6 +134,7 @@ response <- handleAuthCodeGrant code verifier mResource
 @
 -}
 handleAuthCodeGrant ::
+    forall m env e.
     ( OAuthStateStore m
     , ToJWT (OAuthUser m)
     , MonadIO m
@@ -175,7 +177,7 @@ handleAuthCodeGrant code codeVerifier _mResource = do
         clientId = authClientId authCode
 
     -- Generate tokens
-    accessToken <- generateJWTAccessToken user jwtSettings
+    accessToken <- generateJWTAccessToken @m user jwtSettings
     refreshToken <- liftIO $ generateRefreshTokenWithConfig config
 
     -- Store tokens (code already deleted by consumeAuthCode)
@@ -217,6 +219,7 @@ response <- handleRefreshTokenGrant refreshToken mResource
 @
 -}
 handleRefreshTokenGrant ::
+    forall m env e.
     ( OAuthStateStore m
     , ToJWT (OAuthUser m)
     , MonadIO m
@@ -244,7 +247,7 @@ handleRefreshTokenGrant refreshTokenId _mResource = do
             throwError $ injectTyped @AuthorizationError $ InvalidGrant (RefreshTokenNotFound refreshTokenId)
 
     -- Generate new JWT access token
-    newAccessToken <- generateJWTAccessToken user jwtSettings
+    newAccessToken <- generateJWTAccessToken @m user jwtSettings
 
     -- Update tokens (keep same refresh token, update with new client/user association)
     storeAccessToken newAccessToken user

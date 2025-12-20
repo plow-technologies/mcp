@@ -91,8 +91,7 @@ module Servant.OAuth2.IDP.Types (
 
     -- * Unsafe constructors (INTERNAL USE ONLY)
 
-    {- | WARNING: These bypass all validation logic. Use ONLY at tests
-    -}
+    -- | WARNING: These bypass all validation logic. Use ONLY at tests
     unsafeAuthCodeId,
     unsafeClientId,
     unsafeSessionId,
@@ -425,9 +424,10 @@ mkRedirectUri t = do
             || hasOctalOctet host
 
     -- Check if any octet in dotted-quad starts with 0 (octal notation)
+    -- Only applies to strings that look like IP addresses (digits and dots only)
     hasOctalOctet :: String -> Bool
     hasOctalOctet host
-        | '.' `elem` host =
+        | '.' `elem` host && all (\c -> isDigit c || c == '.') host =
             let octets = splitOn '.' host
              in any startsWithZero octets
         | otherwise = False

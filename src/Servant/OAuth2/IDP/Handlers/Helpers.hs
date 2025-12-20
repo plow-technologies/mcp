@@ -1,6 +1,7 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
-{-# OPTIONS_GHC -Wno-redundant-constraints #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- |
 Module      : Servant.OAuth2.IDP.Handlers.Helpers
@@ -73,9 +74,12 @@ generateAuthCode config = do
         Just codeId -> return codeId
         Nothing -> error "generateAuthCode: UUID generation produced empty text (impossible)"
 
--- | Generate JWT access token for user
-{-# ANN generateJWTAccessToken ("HLint: ignore Redundant constraints" :: String) #-}
-generateJWTAccessToken :: (OAuthStateStore m, ToJWT (OAuthUser m), MonadIO m, MonadError e m, AsType AuthorizationError e) => OAuthUser m -> JWTSettings -> m AccessTokenId
+{- | Generate JWT access token for user
+
+Uses TypeApplications to specify the monad context (and thus the OAuthUser type).
+Call with: @generateJWTAccessToken \@m user jwtSettings@
+-}
+generateJWTAccessToken :: forall m e. (OAuthStateStore m, ToJWT (OAuthUser m), MonadIO m, MonadError e m, AsType AuthorizationError e) => OAuthUser m -> JWTSettings -> m AccessTokenId
 generateJWTAccessToken user jwtSettings = do
     accessTokenResult <- liftIO $ makeJWT user jwtSettings Nothing
     case accessTokenResult of
