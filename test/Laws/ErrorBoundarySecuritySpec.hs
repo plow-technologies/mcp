@@ -61,6 +61,7 @@ import Servant.OAuth2.IDP.Errors (
     InvalidClientReason (..),
     InvalidGrantReason (..),
     InvalidRequestReason (..),
+    MalformedReason (..),
     OAuthErrorCode (..),
     OAuthErrorResponse (..),
     UnauthorizedClientReason (..),
@@ -262,7 +263,7 @@ with appropriate HTTP status codes.
 authorizationErrorExposureSpec :: Spec
 authorizationErrorExposureSpec = describe "AuthorizationError Exposure" $ do
     it "returns 400 with JSON for InvalidRequest" $ do
-        let err = AuthorizationErr (InvalidRequest MalformedRequest)
+        let err = AuthorizationErr (InvalidRequest (MalformedRequest (UnparseableBody "test error")))
         (_, mServerErr) <- withMockTracer $ \tracer ->
             domainErrorToServerError @IO @AppM tracer HTTPOAuthBoundary err
 
@@ -277,7 +278,7 @@ authorizationErrorExposureSpec = describe "AuthorizationError Exposure" $ do
                     Nothing -> fail "Failed to parse OAuthErrorResponse JSON"
                     Just oauthErr -> do
                         oauthErrorCode oauthErr `shouldBe` ErrInvalidRequest
-                        oauthErrorDescription oauthErr `shouldBe` Just "Malformed request"
+                        oauthErrorDescription oauthErr `shouldBe` Just "Unparseable request body: test error"
 
     it "returns 401 with JSON for InvalidClient" $ do
         let err = AuthorizationErr (InvalidClient InvalidClientCredentials)
