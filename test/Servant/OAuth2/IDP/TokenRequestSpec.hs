@@ -19,8 +19,6 @@ import Servant.OAuth2.IDP.API (TokenRequest (..))
 import Servant.OAuth2.IDP.Types (
     ResourceIndicator (..),
     mkCodeVerifier,
- )
-import Servant.OAuth2.IDP.Types (
     unsafeAuthCodeId,
     unsafeRefreshTokenId,
  )

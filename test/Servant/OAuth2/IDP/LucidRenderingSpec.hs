@@ -22,7 +22,6 @@ import Servant.OAuth2.IDP.Handlers.HTML (
     ErrorPage (..),
     LoginPage (..),
  )
-import Servant.OAuth2.IDP.Types ()
 import Servant.OAuth2.IDP.Types (unsafeSessionId)
 
 -- | Test suite for Lucid-based HTML rendering

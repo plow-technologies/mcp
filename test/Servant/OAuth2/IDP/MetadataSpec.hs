@@ -25,8 +25,7 @@ import Servant.OAuth2.IDP.Metadata (
     prResource,
     prScopesSupported,
  )
-import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), ResponseType (..), mkScope)
-import Servant.OAuth2.IDP.Types (unsafeScope)
+import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), ResponseType (..), mkScope, unsafeScope)
 import Test.Hspec
 
 spec :: Spec

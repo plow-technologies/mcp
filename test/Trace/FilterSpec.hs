@@ -34,8 +34,7 @@ import Plow.Logging (IOTracer (..), Tracer (..), filterTracer, traceWith)
 import Servant.OAuth2.IDP.Auth.Backend (Username, mkUsername)
 import Servant.OAuth2.IDP.Errors (ValidationError (..))
 import Servant.OAuth2.IDP.Trace (DenialReason (..), OAuthTrace (..), OperationResult (..))
-import Servant.OAuth2.IDP.Types (OAuthGrantType (..))
-import Servant.OAuth2.IDP.Types (unsafeClientId, unsafeRedirectUri)
+import Servant.OAuth2.IDP.Types (OAuthGrantType (..), unsafeClientId, unsafeRedirectUri)
 import Test.Hspec
 
 {- | Test helper: parse URI or fail with descriptive error

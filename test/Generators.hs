@@ -93,8 +93,6 @@ import Servant.OAuth2.IDP.Types (
     unRefreshTokenId,
     unScope,
     unUserId,
- )
-import Servant.OAuth2.IDP.Types (
     unsafeAccessTokenId,
     unsafeAuthCodeId,
     unsafeClientId,

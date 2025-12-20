@@ -23,8 +23,6 @@ import Servant.OAuth2.IDP.Types (
     CodeChallengeMethod (..),
     UserId,
     mkCodeChallenge,
- )
-import Servant.OAuth2.IDP.Types (
     unsafeAuthCodeId,
     unsafeClientId,
     unsafeRedirectUri,

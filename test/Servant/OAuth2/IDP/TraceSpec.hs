@@ -25,8 +25,6 @@ import Servant.OAuth2.IDP.Types (
     SessionId,
     mkRedirectUri,
     mkScope,
- )
-import Servant.OAuth2.IDP.Types (
     unsafeClientId,
     unsafeSessionId,
  )
