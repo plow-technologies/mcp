@@ -101,7 +101,6 @@ import Servant.OAuth2.IDP.Auth.Backend (
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..))
 import Servant.OAuth2.IDP.Store
 import Servant.OAuth2.IDP.Types hiding (OAuthState)
-import Servant.OAuth2.IDP.Types.Internal (unsafeUserId)
 
 -- -----------------------------------------------------------------------------
 -- Test Environment

@@ -24,7 +24,7 @@ import Servant.OAuth2.IDP.Types (
     UserId,
     mkCodeChallenge,
  )
-import Servant.OAuth2.IDP.Types.Internal (
+import Servant.OAuth2.IDP.Types (
     unsafeAuthCodeId,
     unsafeClientId,
     unsafeRedirectUri,

@@ -115,7 +115,7 @@ import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
 import Servant.OAuth2.IDP.Trace (OAuthTrace)
 import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthGrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), UserId (..), unUserId)
-import Servant.OAuth2.IDP.Types.Internal (unsafeScope)
+import Servant.OAuth2.IDP.Types (unsafeScope)
 
 -- | HTML content type for Servant
 data HTML

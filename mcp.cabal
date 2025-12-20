@@ -114,7 +114,6 @@ library
         Servant.OAuth2.IDP.Handlers.Login
         Servant.OAuth2.IDP.Handlers.Token
         Servant.OAuth2.IDP.Test.Internal
-        Servant.OAuth2.IDP.Types.Internal
         Servant.OAuth2.IDP.Auth.Backend
         Servant.OAuth2.IDP.Auth.Demo
         MCP.Trace.Types

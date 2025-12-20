@@ -27,7 +27,7 @@ import Servant.OAuth2.IDP.Types (
     mkRedirectUri,
     mkScope,
  )
-import Servant.OAuth2.IDP.Types.Internal (unsafeAuthCodeId, unsafeClientId, unsafeRefreshTokenId, unsafeSessionId)
+import Servant.OAuth2.IDP.Types (unsafeAuthCodeId, unsafeClientId, unsafeRefreshTokenId, unsafeSessionId)
 import Test.Hspec
 
 -- Test fixture helpers

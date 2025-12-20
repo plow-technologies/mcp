@@ -22,7 +22,7 @@ import Servant.OAuth2.IDP.Auth.Backend (mkUsername)
 import Servant.OAuth2.IDP.Errors (ValidationError (..))
 import Servant.OAuth2.IDP.Trace (DenialReason (..), OAuthTrace (..), OperationResult (..), renderOAuthTrace)
 import Servant.OAuth2.IDP.Types (OAuthGrantType (..))
-import Servant.OAuth2.IDP.Types.Internal (unsafeClientId, unsafeRedirectUri, unsafeScope, unsafeSessionId)
+import Servant.OAuth2.IDP.Types (unsafeClientId, unsafeRedirectUri, unsafeScope, unsafeSessionId)
 import Test.Hspec
 
 spec :: Spec

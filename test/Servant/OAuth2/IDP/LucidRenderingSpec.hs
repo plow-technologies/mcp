@@ -23,7 +23,7 @@ import Servant.OAuth2.IDP.Handlers.HTML (
     LoginPage (..),
  )
 import Servant.OAuth2.IDP.Types ()
-import Servant.OAuth2.IDP.Types.Internal (unsafeSessionId)
+import Servant.OAuth2.IDP.Types (unsafeSessionId)
 
 -- | Test suite for Lucid-based HTML rendering
 spec :: Spec

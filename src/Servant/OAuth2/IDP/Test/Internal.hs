@@ -95,7 +95,7 @@ import Servant.Auth.Server (ToJWT)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (AuthCodeId, ClientId, mkAuthCodeId, unAuthCodeId, unClientId)
-import Servant.OAuth2.IDP.Types.Internal (unsafeAuthCodeId, unsafeClientId)
+import Servant.OAuth2.IDP.Types (unsafeAuthCodeId, unsafeClientId)
 
 -- -----------------------------------------------------------------------------
 -- Test Configuration Types

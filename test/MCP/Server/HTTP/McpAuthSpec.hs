@@ -35,7 +35,7 @@ import MCP.Server.HTTP qualified as HTTP
 import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types (Implementation (..), ServerCapabilities (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..))
-import Servant.OAuth2.IDP.Types.Internal (unsafeUserId)
+import Servant.OAuth2.IDP.Types (unsafeUserId)
 
 -- | Minimal MCPServer instance for testing (uses default implementations)
 instance MCPServer MCPServerM

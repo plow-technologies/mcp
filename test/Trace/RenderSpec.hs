@@ -20,7 +20,7 @@ import MCP.Trace.StdIO (StdIOTrace (..), renderStdIOTrace)
 import MCP.Trace.Types (MCPTrace (..), renderMCPTrace)
 import Network.URI (parseURI)
 import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
-import Servant.OAuth2.IDP.Types.Internal (unsafeClientId, unsafeRedirectUri)
+import Servant.OAuth2.IDP.Types (unsafeClientId, unsafeRedirectUri)
 import Test.Hspec
 
 spec :: Spec

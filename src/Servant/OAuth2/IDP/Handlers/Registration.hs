@@ -44,7 +44,7 @@ import Servant.OAuth2.IDP.Types (
     ClientInfo (..),
     mkClientSecret,
  )
-import Servant.OAuth2.IDP.Types.Internal (unsafeClientId)
+import Servant.OAuth2.IDP.Types (unsafeClientId)
 
 {- | Dynamic client registration endpoint (polymorphic).
 

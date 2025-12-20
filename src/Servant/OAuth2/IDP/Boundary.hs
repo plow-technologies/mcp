@@ -38,18 +38,6 @@ that perform validation. They should ONLY be used when:
 For all other uses, prefer the smart constructors from "Servant.OAuth2.IDP.Types".
 -}
 module Servant.OAuth2.IDP.Boundary (
-    -- * Unsafe Constructors (HTTP boundary only)
-
-    -- | WARNING: These bypass validation. Use only for data from validated HTTP requests.
-    unsafeAuthCodeId,
-    unsafeClientId,
-    unsafeSessionId,
-    unsafeAccessTokenId,
-    unsafeRefreshTokenId,
-    unsafeUserId,
-    unsafeScope,
-    unsafeCodeChallenge,
-
     -- * Extractors (typed → Text)
     authCodeIdToText,
     clientIdToText,
@@ -66,6 +54,10 @@ module Servant.OAuth2.IDP.Boundary (
     domainErrorToServerError,
 
     -- * Re-exports from Servant.OAuth2.IDP.Types
+
+    {- | Note: This includes the unsafe constructors (unsafeAuthCodeId, etc.)
+    that were previously defined in this module.
+    -}
     module Servant.OAuth2.IDP.Types,
 ) where
 
@@ -93,71 +85,14 @@ import Servant.OAuth2.IDP.Errors (
  )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types
-import Servant.OAuth2.IDP.Types.Internal qualified as Internal
 import Servant.Server (ServerError (..), err401, err500)
 
 -- -----------------------------------------------------------------------------
--- Unsafe Constructors
+-- Unsafe Constructors (Re-exported from Types)
 -- -----------------------------------------------------------------------------
 
-{- | Unsafe constructor for AuthCodeId.
-
-WARNING: Bypasses validation. Use only for data from validated HTTP requests.
--}
-unsafeAuthCodeId :: Text -> AuthCodeId
-unsafeAuthCodeId = Internal.unsafeAuthCodeId
-
-{- | Unsafe constructor for ClientId.
-
-WARNING: Bypasses validation. Use only for data from validated HTTP requests.
--}
-unsafeClientId :: Text -> ClientId
-unsafeClientId = Internal.unsafeClientId
-
-{- | Unsafe constructor for SessionId.
-
-WARNING: Bypasses validation (does NOT check UUID format).
-Use only for data from validated HTTP requests.
--}
-unsafeSessionId :: Text -> SessionId
-unsafeSessionId = Internal.unsafeSessionId
-
-{- | Unsafe constructor for AccessTokenId.
-
-WARNING: Bypasses validation. Use only for JWT tokens from validated sources.
--}
-unsafeAccessTokenId :: Text -> AccessTokenId
-unsafeAccessTokenId = Internal.unsafeAccessTokenId
-
-{- | Unsafe constructor for RefreshTokenId.
-
-WARNING: Bypasses validation. Use only for data from validated HTTP requests.
--}
-unsafeRefreshTokenId :: Text -> RefreshTokenId
-unsafeRefreshTokenId = Internal.unsafeRefreshTokenId
-
-{- | Unsafe constructor for UserId.
-
-WARNING: Bypasses validation. Use only for data from validated HTTP requests.
--}
-unsafeUserId :: Text -> UserId
-unsafeUserId = Internal.unsafeUserId
-
-{- | Unsafe constructor for Scope.
-
-WARNING: Bypasses validation (does NOT check for whitespace).
-Use only for data from validated HTTP requests.
--}
-unsafeScope :: Text -> Scope
-unsafeScope = Internal.unsafeScope
-
-{- | Unsafe constructor for CodeChallenge.
-
-WARNING: Bypasses validation (does NOT check base64url charset or length).
-Use only for data from validated HTTP requests.
--}
-unsafeCodeChallenge :: Text -> CodeChallenge
-unsafeCodeChallenge = Internal.unsafeCodeChallenge
+-- Note: These are now just re-exports from Servant.OAuth2.IDP.Types
+-- The actual implementations are in that module using direct constructor access
 
 -- -----------------------------------------------------------------------------
 -- Extractors

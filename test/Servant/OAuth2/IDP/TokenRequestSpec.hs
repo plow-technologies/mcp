@@ -20,7 +20,7 @@ import Servant.OAuth2.IDP.Types (
     ResourceIndicator (..),
     mkCodeVerifier,
  )
-import Servant.OAuth2.IDP.Types.Internal (
+import Servant.OAuth2.IDP.Types (
     unsafeAuthCodeId,
     unsafeRefreshTokenId,
  )

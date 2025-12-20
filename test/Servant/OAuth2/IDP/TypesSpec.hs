@@ -17,7 +17,7 @@ import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Servant.OAuth2.IDP.Types (AccessToken (..), LoginAction (..), OAuthGrantType (..), RefreshToken (..), Scope (..), Scopes (..), TokenType (..), mkClientName, mkClientSecret, mkRedirectUri, mkTokenValidity, parseScopes, serializeScopeSet, unAccessToken, unClientName, unClientSecret, unRefreshToken, unTokenType)
-import Servant.OAuth2.IDP.Types.Internal (unsafeClientName, unsafeClientSecret, unsafeScope)
+import Servant.OAuth2.IDP.Types (unsafeClientName, unsafeClientSecret, unsafeScope)
 import Test.Hspec
 import Web.HttpApiData (parseUrlPiece, toUrlPiece)
 

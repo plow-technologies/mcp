@@ -94,7 +94,7 @@ import Servant.OAuth2.IDP.Types (
     unScope,
     unUserId,
  )
-import Servant.OAuth2.IDP.Types.Internal (
+import Servant.OAuth2.IDP.Types (
     unsafeAccessTokenId,
     unsafeAuthCodeId,
     unsafeClientId,
