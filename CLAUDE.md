@@ -147,13 +147,28 @@ The OAuth implementation uses a **typeclass-based architecture** for pluggable b
 - Re-export of `Control.Monad.Time.MonadTime`
 - Used by OAuthStateStore for expiry checks
 
-### OAuth Modules:
-- **Servant.OAuth2.IDP.Types** - Newtypes: `AuthCodeId`, `ClientId`, `SessionId`, `AccessTokenId`, `RefreshTokenId`, `RedirectUri`, `Scope`, `CodeChallenge`, `CodeVerifier`
+### Servant.OAuth2.IDP Module Structure
+
+**Core Invariant**: All `Servant.OAuth2.IDP.*` modules have **zero MCP dependencies** - this enables future package extraction to standalone OAuth library.
+
+#### Protocol & Configuration
+- **Servant.OAuth2.IDP.Config** - `OAuthEnv` record (protocol-level OAuth configuration: timing, PKCE, token parameters, supported grant types, etc.)
+- **Servant.OAuth2.IDP.Metadata** - `OAuthMetadata`, `ProtectedResourceMetadata` types (RFC 8414/RFC 9728 discovery)
+- **Servant.OAuth2.IDP.PKCE** - PKCE functions (`generateCodeVerifier`, `validateCodeVerifier`, `generateCodeChallenge`)
+
+#### Types & Errors
+- **Servant.OAuth2.IDP.Types** - Core newtypes (`AuthCodeId`, `ClientId`, `SessionId`, `AccessTokenId`, `RefreshTokenId`, `RedirectUri`, `Scope`, `CodeChallenge`, `CodeVerifier`, `OAuthGrantType`)
+- **Servant.OAuth2.IDP.Errors** - Consolidated error types (`ValidationError`, `AuthorizationError`, `LoginFlowError`, `OAuthErrorCode`)
+
+#### State Management
 - **Servant.OAuth2.IDP.Store** - OAuthStateStore typeclass definition
 - **Servant.OAuth2.IDP.Store.InMemory** - TVar-based default implementation
-- **Servant.OAuth2.IDP.Boundary** - Servant handler boundary translation
 - **Servant.OAuth2.IDP.Auth.Backend** - AuthBackend typeclass definition
 - **Servant.OAuth2.IDP.Auth.Demo** - Demo credentials implementation
+
+#### Infrastructure
+- **Servant.OAuth2.IDP.Trace** - `OAuthTrace` ADT with domain types for structured tracing
+- **Servant.OAuth2.IDP.Boundary** - Servant handler boundary translation
 
 ### Composite Types (Three-Layer Cake Pattern)
 
@@ -178,16 +193,37 @@ data AppError
 
 Uses `generic-lens` with `HasType` constraints for composable environment/error access.
 
-### Key Data Types:
+### Configuration Split: OAuthEnv vs MCPOAuthConfig
+
+The OAuth configuration is split into two distinct types:
+
+**OAuthEnv** (`Servant.OAuth2.IDP.Config`) - Protocol-level OAuth settings:
+- **Timing**: `oauthAuthCodeExpiry`, `oauthAccessTokenExpiry`, `oauthLoginSessionExpiry`
+- **OAuth Parameters**: `oauthSupportedScopes`, `oauthSupportedResponseTypes`, `oauthSupportedGrantTypes`, `oauthSupportedAuthMethods`, `oauthSupportedCodeChallengeMethods`
+- **Token Prefixes**: `oauthAuthCodePrefix`, `oauthRefreshTokenPrefix`, `oauthClientIdPrefix`
+- **Security**: `oauthRequireHTTPS`, `oauthBaseUrl`
+- **Resource Server**: `oauthResourceServerBaseUrl`, `oauthResourceServerMetadata`
+- **Branding**: `oauthServerName` (for HTML templates, e.g., "MCP Server", "OAuth Server"), `oauthScopeDescriptions` (human-readable scope descriptions for consent page)
+- **Location**: Lives in `AppEnv.envOAuthEnv` (always present when OAuth wired)
+
+**MCPOAuthConfig** (`MCP.Server.Auth`) - MCP-specific settings:
+- **Demo Mode**: `autoApproveAuth`, `demoUserIdTemplate`, `demoEmailDomain`, `demoUserName`
+- **Providers**: `oauthProviders` (list of external OAuth identity providers)
+- **Templates**: `authorizationSuccessTemplate` (HTML template for success page)
+- **Client Secrets**: `publicClientSecret` (secret returned for public clients)
+- **Location**: Lives in `HTTPServerConfig.httpMCPOAuthConfig :: Maybe MCPOAuthConfig` (presence = OAuth enabled)
+
+**DemoOAuthBundle** - Convenience type for test/demo setups:
+- Bundles `OAuthEnv` + `MCPOAuthConfig` together
+- `defaultDemoOAuthBundle` provides sensible test defaults
+- Exported from `MCP.Server.HTTP` for test convenience
+
+**Other Key Types**:
 - **HTTPServerConfig** - Server config with httpBaseUrl, httpProtocolVersion, httpMCPOAuthConfig
-- **OAuthEnv** - Protocol-level OAuth settings (timing, PKCE, token parameters) in Servant.OAuth2.IDP.Config
-- **MCPOAuthConfig** - MCP-specific OAuth settings (demo mode, providers, user templates) in MCP.Server.Auth
-- **DemoOAuthBundle** - Convenience type bundling OAuthEnv + MCPOAuthConfig for test/demo code
 - **AuthorizationCode user** - PKCE code with expiry, client, user, scopes (parameterized by user type)
 - **ClientInfo** - Registered client metadata (redirect URIs, grant types)
 - **PendingAuthorization** - OAuth params awaiting login approval
 - **AuthUser** - Authenticated user (ToJWT/FromJWT)
-- **ExpiryConfig** - Configurable expiry times
 
 ### Implementing Custom Backends
 
@@ -221,7 +257,7 @@ handleLogin :: (AuthBackend m, OAuthStateStore m,
 
 ### Important Implementation Notes:
 1. **Client Registration**: Returns configurable client_secret (default empty string for public clients)
-2. **PKCE Validation**: Uses validateCodeVerifier from Servant.OAuth2.IDP.Auth
+2. **PKCE Validation**: Uses `validateCodeVerifier` from `Servant.OAuth2.IDP.PKCE`
 3. **Token Generation**:
    - Authorization codes: UUID v4 with configurable prefix (from OAuthEnv)
    - Access tokens: JWT tokens using servant-auth-server's makeJWT
@@ -231,28 +267,36 @@ handleLogin :: (AuthBackend m, OAuthStateStore m,
 6. **JWT Integration**: Proper JWT tokens fix authentication loops with MCP clients
 7. **Production Ready**: All hardcoded values extracted to configuration parameters
 8. **Thread Safety**: In-memory implementation uses STM transactions
+9. **Smart Constructor Hygiene**: All domain newtypes export only smart constructors (not raw constructors) to prevent validation bypass
+10. **Type-Driven Design**: Domain types flow throughout the system without mid-flow Text conversions
 
-### Configuration Options:
+### Configuration Usage
 
-**HTTPServerConfig** includes:
-- `httpBaseUrl`: Base URL for OAuth endpoints (e.g., "https://api.example.com")
-- `httpProtocolVersion`: MCP protocol version (default "2025-06-18")
-- `httpMCPOAuthConfig`: Optional MCPOAuthConfig for MCP-specific OAuth settings
+**For demo/testing**, use `defaultDemoOAuthBundle` (from `MCP.Server.HTTP`):
+```haskell
+let bundle = defaultDemoOAuthBundle
+    oauthEnv = bundleEnv bundle
+    mcpConfig = bundleMCPConfig bundle
+```
 
-**OAuthEnv** (Servant.OAuth2.IDP.Config) includes protocol-level settings:
-- Timing: `oauthAuthCodeExpiry`, `oauthAccessTokenExpiry`, `oauthLoginSessionExpiry`
-- OAuth parameters: `oauthSupportedScopes`, `oauthSupportedResponseTypes`, etc.
-- Token prefixes: `oauthAuthCodePrefix`, `oauthRefreshTokenPrefix`, `oauthClientIdPrefix`
-- Security: `oauthRequireHTTPS`, `oauthBaseUrl`
+**For production**, configure `OAuthEnv` and `MCPOAuthConfig` separately:
+```haskell
+-- Protocol-level configuration (Servant.OAuth2.IDP.Config)
+oauthEnv = OAuthEnv
+  { oauthRequireHTTPS = True
+  , oauthBaseUrl = parseURI "https://api.example.com"
+  , oauthAuthCodeExpiry = 600  -- 10 minutes
+  , oauthAccessTokenExpiry = 3600  -- 1 hour
+  , ...
+  }
 
-**MCPOAuthConfig** (MCP.Server.Auth) includes MCP-specific settings:
-- Demo mode: `autoApproveAuth`, `demoUserIdTemplate`, `demoEmailDomain`, `demoUserName`
-- Providers: `oauthProviders` list of external OAuth identity providers
-- Templates: `authorizationSuccessTemplate` for custom responses
-- Client secrets: `publicClientSecret` configuration
-
-**For demo/testing**, use `defaultDemoOAuthBundle` which provides both OAuthEnv and MCPOAuthConfig.
-**For production**, configure OAuthEnv and MCPOAuthConfig separately according to your security requirements.
+-- MCP-specific configuration (MCP.Server.Auth)
+mcpConfig = MCPOAuthConfig
+  { autoApproveAuth = False  -- Require user approval
+  , demoUserIdTemplate = Nothing  -- Disable demo users
+  , ...
+  }
+```
 
 ### Interactive Login Flow (002-login-auth-page):
 
@@ -328,6 +372,16 @@ curl -i http://localhost:8080/mcp
 - N/A (refactoring only, no data changes) (005-servant-oauth-extraction)
 
 ## Recent Changes
+- 005-servant-oauth-extraction: Extracted OAuth modules from MCP dependencies
+  - Created `Servant.OAuth2.IDP.Config` (OAuthEnv record for protocol-level settings)
+  - Created `Servant.OAuth2.IDP.Metadata` (OAuthMetadata, ProtectedResourceMetadata)
+  - Created `Servant.OAuth2.IDP.PKCE` (PKCE functions with domain newtypes)
+  - Created `Servant.OAuth2.IDP.Errors` (consolidated ValidationError, AuthorizationError, LoginFlowError, OAuthErrorCode)
+  - Created `Servant.OAuth2.IDP.Trace` (OAuthTrace ADT with domain types, renderOAuthTrace)
+  - Split OAuthConfig into OAuthEnv (Servant, protocol) + MCPOAuthConfig (MCP, demo mode)
+  - Added DemoOAuthBundle convenience type for test/demo setups
+  - Enforced smart constructor hygiene (no raw constructor exports)
+  - All `Servant.OAuth2.IDP.*` modules now have **zero MCP dependencies**
 - 004-oauth-auth-typeclasses: Refactored OAuth to typeclass-based architecture
   - Added OAuthStateStore typeclass for pluggable state persistence
   - Added AuthBackend typeclass for pluggable credential validation
