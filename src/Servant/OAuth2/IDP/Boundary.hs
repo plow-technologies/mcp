@@ -52,9 +52,7 @@ module Servant.OAuth2.IDP.Boundary (
 
     -- * Re-exports from Servant.OAuth2.IDP.Types
 
-    {- | Note: This includes the unsafe constructors (unsafeAuthCodeId, etc.)
-    that were previously defined in this module.
-    -}
+    -- | Includes the unsafe constructors (unsafeAuthCodeId, etc.) from Types module.
     module Servant.OAuth2.IDP.Types,
 ) where
 
@@ -88,8 +86,7 @@ import Servant.Server (ServerError (..), err401, err500)
 -- Unsafe Constructors (Re-exported from Types)
 -- -----------------------------------------------------------------------------
 
--- Note: These are now just re-exports from Servant.OAuth2.IDP.Types
--- The actual implementations are in that module using direct constructor access
+-- See Servant.OAuth2.IDP.Types for implementation details
 
 -- -----------------------------------------------------------------------------
 -- Extractors

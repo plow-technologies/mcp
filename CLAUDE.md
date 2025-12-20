@@ -158,7 +158,7 @@ The OAuth implementation uses a **typeclass-based architecture** for pluggable b
 
 #### Types & Errors
 - **Servant.OAuth2.IDP.Types** - Core newtypes (`AuthCodeId`, `ClientId`, `SessionId`, `AccessTokenId`, `RefreshTokenId`, `RedirectUri`, `Scope`, `CodeChallenge`, `CodeVerifier`, `OAuthGrantType`)
-- **Servant.OAuth2.IDP.Errors** - Consolidated error types (`ValidationError`, `AuthorizationError`, `LoginFlowError`, `OAuthErrorCode`)
+- **Servant.OAuth2.IDP.Errors** - Error types (`ValidationError`, `AuthorizationError`, `LoginFlowError`, `OAuthErrorCode`)
 
 #### State Management
 - **Servant.OAuth2.IDP.Store** - OAuthStateStore typeclass definition
@@ -193,9 +193,9 @@ data AppError
 
 Uses `generic-lens` with `HasType` constraints for composable environment/error access.
 
-### Configuration Split: OAuthEnv vs MCPOAuthConfig
+### Configuration Types: OAuthEnv vs MCPOAuthConfig
 
-The OAuth configuration is split into two distinct types:
+The OAuth configuration uses two distinct types:
 
 **OAuthEnv** (`Servant.OAuth2.IDP.Config`) - Protocol-level OAuth settings:
 - **Timing**: `oauthAuthCodeExpiry`, `oauthAccessTokenExpiry`, `oauthLoginSessionExpiry`
@@ -265,7 +265,7 @@ handleLogin :: (AuthBackend m, OAuthStateStore m,
 4. **Expiry Times**: Configurable auth code and access token expiry (in OAuthEnv)
 5. **Demo Mode**: Configurable auto-approval and demo user generation (in MCPOAuthConfig)
 6. **JWT Integration**: Proper JWT tokens fix authentication loops with MCP clients
-7. **Production Ready**: All hardcoded values extracted to configuration parameters
+7. **Production Ready**: All values configurable via parameters
 8. **Thread Safety**: In-memory implementation uses STM transactions
 9. **Smart Constructor Hygiene**: All domain newtypes export only smart constructors (not raw constructors) to prevent validation bypass
 10. **Type-Driven Design**: Domain types flow throughout the system without mid-flow Text conversions
@@ -298,9 +298,9 @@ mcpConfig = MCPOAuthConfig
   }
 ```
 
-### Interactive Login Flow (002-login-auth-page):
+### Interactive Login Flow
 
-The OAuth authorization endpoint now implements an interactive login page instead of auto-approval:
+The OAuth authorization endpoint implements an interactive login page with credential authentication:
 
 **Key Implementation Patterns**:
 1. **Session Management**: Uses session cookies (`mcp_session`) to track pending authorizations
@@ -308,7 +308,7 @@ The OAuth authorization endpoint now implements an interactive login page instea
    - Session IDs are UUIDs tracked in `OAuthState.pendingAuthorizations`
    - Configurable expiry via `loginSessionExpirySeconds` (default: 10 minutes)
 
-2. **Credential Storage**: New `CredentialStore` type with `HashedPassword` (SHA256)
+2. **Credential Storage**: `CredentialStore` type with `HashedPassword` (SHA256)
    - Use `mkHashedPassword` smart constructor for password hashing
    - `validateCredential` performs constant-time comparison
    - `defaultDemoCredentialStore` provides demo/demo123 and admin/admin456
@@ -359,40 +359,14 @@ curl -i http://localhost:8080/mcp
 # To use with script, would need headless browser automation (puppeteer, selenium)
 ```
 
-## Active Technologies
-- Haskell GHC2021 (GHC 9.4+) + servant-server 0.19-0.20, servant-auth-server 0.4, warp 3.3, jose 0.10-0.11, aeson 2.1-2.2 (001-claude-mcp-connector)
-- In-memory (TVar-based state for OAuth codes, tokens, clients) (001-claude-mcp-connector)
-- Haskell GHC2021 (GHC 9.4+) + servant-server 0.19-0.20, warp 3.3, aeson 2.1-2.2, cryptonite 0.30, jose 0.10-0.11 (002-login-auth-page)
-- In-memory (TVar-based state management, consistent with existing OAuth state storage) (002-login-auth-page)
-- N/A (traces emitted to user-provided IOTracer) (003-structured-tracing)
-- Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1) + servant-server 0.19-0.20, servant-auth-server 0.4, jose 0.10-0.11, cryptonite 0.30, stm 2.5, mtl 2.3, aeson 2.1-2.2, generic-lens (to add) (004-oauth-auth-typeclasses)
-- In-memory (TVar-based) for default implementation; typeclass enables PostgreSQL/Redis backends (004-oauth-auth-typeclasses)
-- Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1) + servant-server 0.19-0.20, servant-auth-server 0.4, jose 0.10-0.11, cryptonite 0.30, stm 2.5, mtl 2.3, aeson 2.1-2.2, generic-lens (to add), network-uri (to add) (004-oauth-auth-typeclasses)
-- Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1) + servant-server 0.19-0.20, servant-auth-server 0.4, aeson 2.1-2.2, monad-time, network-uri, cryptonite 0.30, generic-lens (005-servant-oauth-extraction)
-- N/A (refactoring only, no data changes) (005-servant-oauth-extraction)
-
-## Recent Changes
-- 005-servant-oauth-extraction: Extracted OAuth modules from MCP dependencies
-  - Created `Servant.OAuth2.IDP.Config` (OAuthEnv record for protocol-level settings)
-  - Created `Servant.OAuth2.IDP.Metadata` (OAuthMetadata, ProtectedResourceMetadata)
-  - Created `Servant.OAuth2.IDP.PKCE` (PKCE functions with domain newtypes)
-  - Created `Servant.OAuth2.IDP.Errors` (consolidated ValidationError, AuthorizationError, LoginFlowError, OAuthErrorCode)
-  - Created `Servant.OAuth2.IDP.Trace` (OAuthTrace ADT with domain types, renderOAuthTrace)
-  - Split OAuthConfig into OAuthEnv (Servant, protocol) + MCPOAuthConfig (MCP, demo mode)
-  - Added DemoOAuthBundle convenience type for test/demo setups
-  - Enforced smart constructor hygiene (no raw constructor exports)
-  - All `Servant.OAuth2.IDP.*` modules now have **zero MCP dependencies**
-- 004-oauth-auth-typeclasses: Refactored OAuth to typeclass-based architecture
-  - Added OAuthStateStore typeclass for pluggable state persistence
-  - Added AuthBackend typeclass for pluggable credential validation
-  - Created OAuth.Types module with validated newtypes (AuthCodeId, ClientId, SessionId, etc.)
-  - Implemented three-layer cake pattern with AppEnv/AppError composite types
-  - Default implementations: in-memory TVar (OAuthStateStore), demo credentials (AuthBackend)
-  - Uses generic-lens for composable error/environment handling
-- 002-login-auth-page: Implemented interactive login page with credential authentication
-  - Replaced auto-approval OAuth flow with secure login form
-  - Added session cookie management and credential validation
-  - Implemented comprehensive edge case handling (expired sessions, cookies disabled, invalid parameters)
-  - Created reusable HTML rendering patterns for Servant
-  - Security: constant-time password comparison, SHA256 hashing, redirect URI validation
-- 001-claude-mcp-connector: Added Haskell GHC2021 (GHC 9.4+) + servant-server 0.19-0.20, servant-auth-server 0.4, warp 3.3, jose 0.10-0.11, aeson 2.1-2.2
+## Technology Stack
+- **Language**: Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1)
+- **Web Framework**: servant-server 0.19-0.20, servant-auth-server 0.4, warp 3.3
+- **Cryptography**: jose 0.10-0.11, cryptonite 0.30
+- **Serialization**: aeson 2.1-2.2
+- **Concurrency**: stm 2.5
+- **Effects**: mtl 2.3, monad-time
+- **Lenses**: generic-lens
+- **Networking**: network-uri
+- **Storage**: In-memory (TVar-based) by default; typeclass enables PostgreSQL/Redis backends
+- **Tracing**: User-provided IOTracer for structured trace emission

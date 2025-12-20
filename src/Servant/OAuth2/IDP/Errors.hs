@@ -13,10 +13,9 @@ Maintainer  : mpg@mpg.is, alberto.valverde@pakenergy.com
 Stability   : experimental
 Portability : GHC
 
-Consolidated error types for OAuth 2.1 implementation. This module centralizes
-all error types previously scattered across Types and LoginFlowError modules.
+Error types for OAuth 2.1 implementation.
 
-Per FR-004b requirements:
+Error type purposes:
 - ValidationError: semantic validation errors for OAuth handler logic
 - AuthorizationError: OAuth 2.0 protocol errors per RFC 6749
 - LoginFlowError: semantic errors for login flow

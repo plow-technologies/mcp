@@ -34,7 +34,7 @@ oauthServer =
 
 = Module Organization
 
-This module has been refactored into focused submodules:
+This module re-exports focused submodules:
 
 * "Servant.OAuth2.IDP.Handlers.HTML" - HTML rendering for login and error pages
 * "Servant.OAuth2.IDP.Handlers.Helpers" - Helper functions (session extraction, token generation)
