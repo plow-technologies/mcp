@@ -28,7 +28,7 @@ module Servant.OAuth2.IDP.PKCE (
 import Crypto.Hash (hashWith)
 import Crypto.Hash.Algorithms (SHA256 (..))
 import Crypto.Random (getRandomBytes)
-import Data.ByteArray (convert)
+import Data.ByteArray (constEq, convert)
 import Data.ByteString (ByteString)
 import Data.ByteString.Base64.URL qualified as B64URL
 import Data.Text.Encoding qualified as TE
@@ -92,4 +92,6 @@ the original code verifier.
 validateCodeVerifier :: CodeVerifier -> CodeChallenge -> Bool
 validateCodeVerifier verifier challenge =
     let computed = generateCodeChallenge verifier
-     in unCodeChallenge computed == unCodeChallenge challenge
+        computedBytes = TE.encodeUtf8 $ unCodeChallenge computed
+        challengeBytes = TE.encodeUtf8 $ unCodeChallenge challenge
+     in constEq computedBytes challengeBytes
