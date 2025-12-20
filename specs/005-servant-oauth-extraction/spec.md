@@ -35,6 +35,10 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - Q: How should handlers access OAuthTrace tracer without importing MCP.Trace.HTTP? → A: Handlers use `HasType (IOTracer OAuthTrace) env` constraint. MCP's AppEnv provides `IOTracer OAuthTrace` field (constructed via `contramap HTTPOAuth` from main HTTPTrace tracer). Servant modules never import HTTPTrace.
 - Q: How should "MCP Server" branding in HTML templates be handled? → A: Add `oauthServerName :: Text` field to OAuthEnv. HTML templates use this config value for titles ("Sign In - {serverName}"). MCP sets it to "MCP Server"; other users can customize. Scope descriptions (mcp:read etc.) also become configurable via `oauthScopeDescriptions :: Map Scope Text` or similar.
 
+### Session 2025-12-20
+
+- Q: Should UnsupportedCodeChallengeMethod be ValidationError or InvalidRequestReason? → A: Keep in ValidationError (line 126 correct, line 139 was erroneous duplication). Semantically a validation failure (client sent unsupported method), not a protocol-level authorization error.
+
 ## Goals
 
 1. **Package Independence**: `Servant.OAuth2.IDP.*` modules should have zero imports from `MCP.*` namespace
@@ -136,7 +140,7 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 **AuthorizationError Type** (currently in Servant.OAuth2.IDP.Types, move to Errors):
 - Move type and replace Text payloads with precise ADTs
 - `data MalformedReason = InvalidUriSyntax Text | DuplicateParameter Text | UnparseableBody Text` (exhaustive enumeration of malformation causes not covered by other InvalidRequestReason constructors)
-- `data InvalidRequestReason = MissingParameter TokenParameter | InvalidParameterFormat TokenParameter | UnsupportedCodeChallengeMethod CodeChallengeMethod | MalformedRequest MalformedReason`
+- `data InvalidRequestReason = MissingParameter TokenParameter | InvalidParameterFormat TokenParameter | MalformedRequest MalformedReason`
 - `data InvalidClientReason = ClientNotFound ClientId | InvalidClientCredentials | ClientSecretMismatch`
 - `data InvalidGrantReason = CodeNotFound AuthCodeId | CodeExpired AuthCodeId | CodeAlreadyUsed AuthCodeId | RefreshTokenNotFound RefreshTokenId | RefreshTokenExpired RefreshTokenId | RefreshTokenRevoked RefreshTokenId`
 - `data UnauthorizedClientReason = GrantTypeNotAllowed OAuthGrantType | ScopeNotAllowed Scope | RedirectUriNotRegistered RedirectUri`

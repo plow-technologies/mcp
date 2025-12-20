@@ -39,6 +39,7 @@ In plain English: **No module under `Servant.OAuth2.IDP.*` may import any module
 | `stm` | `Control.Concurrent.STM` | STM operations |
 | `mtl` | `Control.Monad.*` | Monad transformers |
 | `transformers` | `Control.Monad.Trans.*` | Transformers |
+| `plow-logging` | `Plow.Logging` | IOTracer abstraction |
 
 ### Internal (Servant.OAuth2.IDP.*)
 
@@ -67,7 +68,8 @@ API.hs            <- Types, Metadata
 | Namespace | Reason |
 |-----------|--------|
 | `MCP.*` | Package extraction goal |
-| `Plow.*` | MCP-specific logging |
+
+**Note**: `Plow.Logging` (IOTracer, traceWith) is ALLOWED in Servant modules. Plow is an external package providing generic tracing infrastructure, not MCP-specific. The `IOTracer` abstraction is protocol-agnostic and suitable for reuse.
 
 ## MCP.* Module Dependencies
 
