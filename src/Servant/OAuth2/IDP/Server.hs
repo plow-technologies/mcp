@@ -85,7 +85,6 @@ import Servant (
  )
 import Servant.Auth.Server (JWTSettings, ToJWT)
 
-import MCP.Trace.HTTP (HTTPTrace)
 import Plow.Logging (IOTracer)
 import Servant.OAuth2.IDP.API (
     ClientRegistrationRequest,
@@ -196,7 +195,6 @@ oauthServer ::
     , AsType ValidationError e
     , AsType AuthorizationError e
     , AsType LoginFlowError e
-    , HasType (IOTracer HTTPTrace) env
     , HasType OAuthEnv env
     , HasType (IOTracer OAuthTrace) env
     , HasType JWTSettings env

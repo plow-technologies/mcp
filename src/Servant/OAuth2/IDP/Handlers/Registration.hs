@@ -21,7 +21,6 @@ import Control.Monad (when)
 import Control.Monad.Error.Class (MonadError, throwError)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, asks)
-import Data.Functor.Contravariant (contramap)
 import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
 import Data.Generics.Sum.Typed (AsType, injectTyped)
@@ -30,19 +29,18 @@ import Data.Set qualified as Set
 import Data.UUID.V4 qualified as UUID
 
 import Data.UUID qualified as UUID
-import MCP.Trace.HTTP (HTTPTrace (..))
 import Plow.Logging (IOTracer, traceWith)
-import Servant.OAuth2.IDP.Config (OAuthEnv (..))
-import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
 import Servant.OAuth2.IDP.API (
     ClientRegistrationRequest (..),
     ClientRegistrationResponse (..),
  )
+import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Errors (
     AuthorizationError (..),
     InvalidRequestReason (..),
  )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
+import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
 import Servant.OAuth2.IDP.Types (
     ClientInfo (..),
     mkClientSecret,
@@ -85,13 +83,13 @@ handleRegister ::
     , MonadError e m
     , AsType AuthorizationError e
     , HasType OAuthEnv env
-    , HasType (IOTracer HTTPTrace) env
+    , HasType (IOTracer OAuthTrace) env
     ) =>
     ClientRegistrationRequest ->
     m ClientRegistrationResponse
 handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqResponses reqAuth) = do
     oauthEnv <- asks (getTyped @OAuthEnv)
-    tracer <- asks (getTyped @(IOTracer HTTPTrace))
+    tracer <- asks (getTyped @(IOTracer OAuthTrace))
 
     -- Validate redirect_uris is not empty
     when (null reqRedirects) $
@@ -123,8 +121,7 @@ handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqR
     storeClient clientId clientInfo
 
     -- Emit trace (use first redirect URI from NonEmpty list)
-    let oauthTracer = contramap HTTPOAuth tracer
-    liftIO $ traceWith oauthTracer $ TraceClientRegistration clientId (NE.head redirectsNE)
+    liftIO $ traceWith tracer $ TraceClientRegistration clientId (NE.head redirectsNE)
 
     let clientSecretNewtype = case mkClientSecret "" of
             Just cs -> cs
