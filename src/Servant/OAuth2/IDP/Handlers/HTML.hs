@@ -66,37 +66,43 @@ import Servant.OAuth2.IDP.Types (Scope, mkScope, unScope)
 {- | Login page data for rendering.
 
 Contains all information needed to render an OAuth login page:
-client name, requested scopes, optional resource, and session ID.
+client name, requested scopes, optional resource, session ID, and branding configuration.
 -}
 data LoginPage = LoginPage
     { loginClientName :: Text
     , loginScopes :: Text
     , loginResource :: Maybe Text
     , loginSessionId :: Text
+    , loginServerName :: Text
+    -- ^ Server name for branding (used in page title)
+    , loginScopeDescriptions :: Map Scope Text
+    -- ^ Map for scope-to-description lookup (currently unused in rendering, but available for future enhancement)
     }
     deriving (Show, Eq)
 
 {- | Error page data for rendering.
 
-Contains error title and message to display to the user.
+Contains error title, message, and branding configuration.
 -}
 data ErrorPage = ErrorPage
     { errorTitle :: Text
     , errorMessage :: Text
+    , errorServerName :: Text
+    -- ^ Server name for branding (used in page title)
     }
     deriving (Show, Eq)
 
 -- -----------------------------------------------------------------------------
--- ToHtml Instances (for backward compatibility - use "MCP Server" as default)
+-- ToHtml Instances (use configured server name from data types)
 -- -----------------------------------------------------------------------------
 
 instance ToHtml LoginPage where
     toHtmlRaw = toHtml
-    toHtml page = toHtml (renderLoginPage "MCP Server" page)
+    toHtml page = toHtml (renderLoginPage (loginServerName page) page)
 
 instance ToHtml ErrorPage where
     toHtmlRaw = toHtml
-    toHtml page = toHtml (renderErrorPage "MCP Server" page)
+    toHtml page = toHtml (renderErrorPage (errorServerName page) page)
 
 -- -----------------------------------------------------------------------------
 -- Rendering Functions

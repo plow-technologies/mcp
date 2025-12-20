@@ -42,10 +42,6 @@ import Data.Time.Clock (nominalDiffTimeToSeconds)
 import Data.UUID qualified as UUID
 import Plow.Logging (IOTracer, traceWith)
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
-import Servant.OAuth2.IDP.Trace (
-    OAuthTrace (..),
-    OperationResult (..),
- )
 import Servant.OAuth2.IDP.Errors (
     AuthorizationError (..),
     InvalidRequestReason (..),
@@ -53,6 +49,10 @@ import Servant.OAuth2.IDP.Errors (
  )
 import Servant.OAuth2.IDP.Handlers.HTML (LoginPage (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
+import Servant.OAuth2.IDP.Trace (
+    OAuthTrace (..),
+    OperationResult (..),
+ )
 import Servant.OAuth2.IDP.Types (
     ClientId,
     ClientInfo (..),
@@ -204,6 +204,8 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
                 , loginScopes = scopesText
                 , loginResource = fmap unResourceIndicator mResource
                 , loginSessionId = sessionIdText
+                , loginServerName = oauthServerName config
+                , loginScopeDescriptions = oauthScopeDescriptions config
                 }
 
     return $ addHeader cookieValue loginPage

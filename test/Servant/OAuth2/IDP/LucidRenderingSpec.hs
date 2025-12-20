@@ -11,6 +11,7 @@ Portability : GHC
 -}
 module Servant.OAuth2.IDP.LucidRenderingSpec (spec) where
 
+import Data.Map.Strict qualified as Map
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Lucid (Html, renderText, toHtml)
@@ -35,6 +36,8 @@ spec = do
                         , loginScopes = "mcp:read mcp:write"
                         , loginResource = Nothing
                         , loginSessionId = "test-session-123"
+                        , loginServerName = "MCP Server"
+                        , loginScopeDescriptions = Map.empty
                         }
             let html = TL.toStrict $ renderText (toHtml page)
 
@@ -50,6 +53,8 @@ spec = do
                         , loginScopes = "mcp:read"
                         , loginResource = Nothing
                         , loginSessionId = "session-456"
+                        , loginServerName = "MCP Server"
+                        , loginScopeDescriptions = Map.empty
                         }
             let html = TL.toStrict $ renderText (toHtml page)
 
@@ -62,6 +67,8 @@ spec = do
                         , loginScopes = "mcp:read mcp:write"
                         , loginResource = Nothing
                         , loginSessionId = "session-789"
+                        , loginServerName = "MCP Server"
+                        , loginScopeDescriptions = Map.empty
                         }
             let html = TL.toStrict $ renderText (toHtml page)
 
@@ -75,6 +82,8 @@ spec = do
                         , loginScopes = "mcp:read"
                         , loginResource = Nothing
                         , loginSessionId = "hidden-session-id"
+                        , loginServerName = "MCP Server"
+                        , loginScopeDescriptions = Map.empty
                         }
             let html = TL.toStrict $ renderText (toHtml page)
 
@@ -88,6 +97,8 @@ spec = do
                         , loginScopes = "mcp:read"
                         , loginResource = Just "https://api.example.com"
                         , loginSessionId = "session-with-resource"
+                        , loginServerName = "MCP Server"
+                        , loginScopeDescriptions = Map.empty
                         }
             let html = TL.toStrict $ renderText (toHtml page)
 
@@ -100,6 +111,8 @@ spec = do
                         , loginScopes = "mcp:read"
                         , loginResource = Nothing
                         , loginSessionId = "session-xss-test"
+                        , loginServerName = "MCP Server"
+                        , loginScopeDescriptions = Map.empty
                         }
             let html = TL.toStrict $ renderText (toHtml page)
 
@@ -110,14 +123,14 @@ spec = do
 
     describe "ErrorPage ToHtml instance" $ do
         it "renders an error page with title and message" $ do
-            let page = ErrorPage "Invalid Request" "The client_id is missing"
+            let page = ErrorPage "Invalid Request" "The client_id is missing" "MCP Server"
             let html = TL.toStrict $ renderText (toHtml page)
 
             html `shouldSatisfy` T.isInfixOf "Invalid Request"
             html `shouldSatisfy` T.isInfixOf "The client_id is missing"
 
         it "includes DOCTYPE and html tags" $ do
-            let page = ErrorPage "Error" "Something went wrong"
+            let page = ErrorPage "Error" "Something went wrong" "MCP Server"
             let html = TL.toStrict $ renderText (toHtml page)
 
             html `shouldSatisfy` T.isInfixOf "<!DOCTYPE HTML>"
@@ -125,7 +138,7 @@ spec = do
             html `shouldSatisfy` T.isInfixOf "</html>"
 
         it "escapes HTML special characters in error messages" $ do
-            let page = ErrorPage "Error" "<script>malicious()</script>"
+            let page = ErrorPage "Error" "<script>malicious()</script>" "MCP Server"
             let html = TL.toStrict $ renderText (toHtml page)
 
             html `shouldNotSatisfy` T.isInfixOf "<script>malicious()</script>"
@@ -139,6 +152,8 @@ spec = do
                         , loginScopes = "mcp:read"
                         , loginResource = Nothing
                         , loginSessionId = "int-session"
+                        , loginServerName = "MCP Server"
+                        , loginScopeDescriptions = Map.empty
                         }
             -- This test verifies the type signature works
             let _htmlValue :: Html () = toHtml page
@@ -146,7 +161,7 @@ spec = do
             True `shouldBe` True
 
         it "can render ErrorPage to Html type" $ do
-            let page = ErrorPage "Test Error" "Test message"
+            let page = ErrorPage "Test Error" "Test message" "MCP Server"
             let _htmlValue :: Html () = toHtml page
             True `shouldBe` True
 
@@ -154,7 +169,7 @@ spec = do
         it "renders error pages with automatic HTML escaping for XSS protection" $ do
             -- CRITICAL: This test verifies that error pages use Lucid's ToHtml
             -- instance (automatic escaping) instead of renderErrorPage (manual, unsafe)
-            let errorPage = ErrorPage "Session Expired" "<script>alert('xss')</script>"
+            let errorPage = ErrorPage "Session Expired" "<script>alert('xss')</script>" "MCP Server"
             let html = TL.toStrict $ renderText (toHtml errorPage)
 
             -- XSS content must be escaped
@@ -164,12 +179,12 @@ spec = do
         it "constructs ErrorPage values instead of calling renderErrorPage" $ do
             -- This test documents the expected pattern:
             -- OLD: throwError $ InvalidRequest $ renderErrorPage "Title" "Message"
-            -- NEW: throwError $ InvalidRequest $ ErrorPage "Title" "Message"
+            -- NEW: throwError $ InvalidRequest $ ErrorPage "Title" "Message" serverName
             --
             -- The ErrorPage will be rendered via ToHtml instance for automatic escaping
-            let errorPage1 = ErrorPage "Cookies Required" "Your browser must have cookies enabled"
-            let errorPage2 = ErrorPage "Session Expired" "Your login session has expired"
-            let errorPage3 = ErrorPage "Invalid Session" "Session not found or has expired"
+            let errorPage1 = ErrorPage "Cookies Required" "Your browser must have cookies enabled" "MCP Server"
+            let errorPage2 = ErrorPage "Session Expired" "Your login session has expired" "MCP Server"
+            let errorPage3 = ErrorPage "Invalid Session" "Session not found or has expired" "MCP Server"
 
             -- Verify all error pages render with proper escaping
             let html1 = TL.toStrict $ renderText (toHtml errorPage1)

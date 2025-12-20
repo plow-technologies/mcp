@@ -44,6 +44,8 @@ spec = do
                         , loginScopes = "test:read"
                         , loginResource = Nothing
                         , loginSessionId = "session-123"
+                        , loginServerName = "Custom Server"
+                        , loginScopeDescriptions = Map.empty
                         }
             let html = TL.toStrict $ renderText (renderLoginPage "Custom Server" page)
 
@@ -58,6 +60,8 @@ spec = do
                         , loginScopes = "mcp:read"
                         , loginResource = Nothing
                         , loginSessionId = "session-456"
+                        , loginServerName = "MCP Server"
+                        , loginScopeDescriptions = Map.empty
                         }
             let html = TL.toStrict $ renderText (renderLoginPage "MCP Server" page)
 
@@ -65,14 +69,14 @@ spec = do
 
     describe "renderErrorPage with configurable serverName" $ do
         it "uses provided serverName in title" $ do
-            let errorPage = ErrorPage "Invalid Request" "Missing client_id"
+            let errorPage = ErrorPage "Invalid Request" "Missing client_id" "My OAuth IDP"
             let html = TL.toStrict $ renderText (renderErrorPage "My OAuth IDP" errorPage)
 
             html `shouldSatisfy` T.isInfixOf "Error - My OAuth IDP"
             html `shouldNotSatisfy` T.isInfixOf "MCP Server"
 
         it "supports MCP Server branding in error pages" $ do
-            let errorPage = ErrorPage "Session Expired" "Your session has expired"
+            let errorPage = ErrorPage "Session Expired" "Your session has expired" "MCP Server"
             let html = TL.toStrict $ renderText (renderErrorPage "MCP Server" errorPage)
 
             html `shouldSatisfy` T.isInfixOf "Error - MCP Server"
