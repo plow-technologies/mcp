@@ -30,6 +30,7 @@ module Servant.OAuth2.IDP.Types.Internal (
     unsafeAuthCodeId,
     unsafeClientId,
     unsafeSessionId,
+    unsafeAccessTokenId,
     unsafeRefreshTokenId,
     unsafeUserId,
     unsafeRedirectUri,
@@ -43,6 +44,7 @@ module Servant.OAuth2.IDP.Types.Internal (
 -- Import types WITH constructors so coerce can work
 -- These constructors are NOT re-exported by this module
 import Servant.OAuth2.IDP.Types (
+    AccessTokenId (..),
     AuthCodeId (..),
     ClientId (..),
     ClientName (..),
@@ -89,6 +91,10 @@ unsafeClientId = unsafeCoerce
 {-# ANN unsafeSessionId ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
 unsafeSessionId :: Text -> SessionId
 unsafeSessionId = unsafeCoerce
+
+{-# ANN unsafeAccessTokenId ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
+unsafeAccessTokenId :: Text -> AccessTokenId
+unsafeAccessTokenId = unsafeCoerce
 
 {-# ANN unsafeRefreshTokenId ("HLint: ignore Avoid unsafeCoerce" :: String) #-}
 unsafeRefreshTokenId :: Text -> RefreshTokenId

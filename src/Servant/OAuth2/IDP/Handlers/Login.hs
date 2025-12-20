@@ -64,8 +64,8 @@ import Servant.OAuth2.IDP.Types (
     pendingRedirectUri,
     pendingScope,
     pendingState,
+    unAuthCodeId,
  )
-import Servant.OAuth2.IDP.Types.Internal (unsafeAuthCodeId)
 
 {- | Login form submission handler (polymorphic).
 
@@ -191,10 +191,9 @@ handleLogin mCookie loginForm = do
                         expiry = addUTCTime expirySeconds codeGenerationTime
                         -- Convert pendingScope from Maybe (Set Scope) to Set Scope
                         scopes = fromMaybe Set.empty (pendingScope pending)
-                        codeId = unsafeAuthCodeId code
                         authCode =
                             AuthorizationCode
-                                { authCodeId = codeId
+                                { authCodeId = code
                                 , authClientId = pendingClientId pending
                                 , authRedirectUri = pendingRedirectUri pending
                                 , authCodeChallenge = pendingCodeChallenge pending
@@ -214,7 +213,7 @@ handleLogin mCookie loginForm = do
                         stateParam = case pendingState pending of
                             Just s -> "&state=" <> toUrlPiece s
                             Nothing -> ""
-                        redirectUrl = RedirectTarget $ toUrlPiece (pendingRedirectUri pending) <> "?code=" <> code <> stateParam
+                        redirectUrl = RedirectTarget $ toUrlPiece (pendingRedirectUri pending) <> "?code=" <> unAuthCodeId code <> stateParam
                         clearCookie = SessionCookie $ "mcp_session=; Max-Age=0; Path=/" <> secureFlag
 
                     return $ addHeader redirectUrl $ addHeader clearCookie NoContent

@@ -30,7 +30,9 @@ module Servant.OAuth2.IDP.Types (
     SessionId,
     mkSessionId,
     unSessionId,
-    AccessTokenId (..),
+    AccessTokenId,
+    mkAccessTokenId,
+    unAccessTokenId,
     RefreshTokenId,
     mkRefreshTokenId,
     unRefreshTokenId,
@@ -179,10 +181,16 @@ instance FromHttpApiData SessionId where
 instance ToHttpApiData SessionId where
     toUrlPiece = unSessionId
 
--- | Access token identifier (JWT-generated, no smart constructor needed)
+-- | Access token identifier (JWT-generated)
 newtype AccessTokenId = AccessTokenId {unAccessTokenId :: Text}
     deriving stock (Eq, Ord, Show, Generic)
     deriving newtype (FromJSON, ToJSON)
+
+-- | Smart constructor for AccessTokenId
+mkAccessTokenId :: Text -> Maybe AccessTokenId
+mkAccessTokenId t
+    | T.null t = Nothing
+    | otherwise = Just (AccessTokenId t)
 
 instance FromHttpApiData AccessTokenId where
     parseUrlPiece t

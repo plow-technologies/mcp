@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
+{-# OPTIONS_GHC -Wno-redundant-constraints #-}
 
 {- |
 Module      : Servant.OAuth2.IDP.Handlers.Helpers
@@ -38,7 +39,13 @@ import Servant.OAuth2.IDP.Errors (
  )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
+    AccessTokenId,
+    AuthCodeId,
+    RefreshTokenId,
     SessionId (..),
+    mkAccessTokenId,
+    mkAuthCodeId,
+    mkRefreshTokenId,
     mkSessionId,
  )
 
@@ -56,25 +63,36 @@ extractSessionFromCookie cookieHeader =
             [] -> Nothing
 
 -- | Generate authorization code with config prefix
-generateAuthCode :: OAuthEnv -> IO Text
+generateAuthCode :: OAuthEnv -> IO AuthCodeId
 generateAuthCode config = do
     uuid <- UUID.nextRandom
     let prefix = oauthAuthCodePrefix config
-    return $ prefix <> UUID.toText uuid
+        codeText = prefix <> UUID.toText uuid
+    -- Use smart constructor; UUID generation ensures non-empty
+    case mkAuthCodeId codeText of
+        Just codeId -> return codeId
+        Nothing -> error "generateAuthCode: UUID generation produced empty text (impossible)"
 
 -- | Generate JWT access token for user
-generateJWTAccessToken :: (OAuthStateStore m, ToJWT (OAuthUser m), MonadIO m, MonadError e m, AsType AuthorizationError e) => OAuthUser m -> JWTSettings -> m Text
+{-# ANN generateJWTAccessToken ("HLint: ignore Redundant constraints" :: String) #-}
+generateJWTAccessToken :: (OAuthStateStore m, ToJWT (OAuthUser m), MonadIO m, MonadError e m, AsType AuthorizationError e) => OAuthUser m -> JWTSettings -> m AccessTokenId
 generateJWTAccessToken user jwtSettings = do
     accessTokenResult <- liftIO $ makeJWT user jwtSettings Nothing
     case accessTokenResult of
         Left err -> throwError $ injectTyped @AuthorizationError $ InvalidRequest $ MalformedRequest $ UnparseableBody $ T.pack $ show err
         Right accessToken -> case TE.decodeUtf8' $ LBS.toStrict accessToken of
             Left decodeErr -> throwError $ injectTyped @AuthorizationError $ InvalidRequest $ MalformedRequest $ UnparseableBody $ T.pack $ show decodeErr
-            Right tokenText -> return tokenText
+            Right tokenText -> case mkAccessTokenId tokenText of
+                Just tokenId -> return tokenId
+                Nothing -> error "generateJWTAccessToken: JWT generation produced empty text (impossible)"
 
 -- | Generate refresh token with configurable prefix
-generateRefreshTokenWithConfig :: OAuthEnv -> IO Text
+generateRefreshTokenWithConfig :: OAuthEnv -> IO RefreshTokenId
 generateRefreshTokenWithConfig config = do
     uuid <- UUID.nextRandom
     let prefix = oauthRefreshTokenPrefix config
-    return $ prefix <> UUID.toText uuid
+        tokenText = prefix <> UUID.toText uuid
+    -- Use smart constructor; UUID generation ensures non-empty
+    case mkRefreshTokenId tokenText of
+        Just tokenId -> return tokenId
+        Nothing -> error "generateRefreshTokenWithConfig: UUID generation produced empty text (impossible)"

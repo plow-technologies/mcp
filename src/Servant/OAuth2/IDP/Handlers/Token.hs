@@ -41,7 +41,6 @@ import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Trace (OAuthTrace (..), OperationResult (..))
 import Servant.OAuth2.IDP.Types (
     AccessToken (..),
-    AccessTokenId (..),
     AuthCodeId,
     AuthorizationCode (..),
     CodeVerifier,
@@ -56,9 +55,9 @@ import Servant.OAuth2.IDP.Types (
     authScopes,
     authUserId,
     mkTokenValidity,
+    unAccessTokenId,
     unRefreshTokenId,
  )
-import Servant.OAuth2.IDP.Types.Internal (unsafeRefreshTokenId)
 
 {- | Token endpoint handler (polymorphic).
 
@@ -176,12 +175,11 @@ handleAuthCodeGrant code codeVerifier _mResource = do
         clientId = authClientId authCode
 
     -- Generate tokens
-    accessTokenText <- generateJWTAccessToken user jwtSettings
-    refreshTokenText <- liftIO $ generateRefreshTokenWithConfig config
-    let refreshToken = unsafeRefreshTokenId refreshTokenText
+    accessToken <- generateJWTAccessToken user jwtSettings
+    refreshToken <- liftIO $ generateRefreshTokenWithConfig config
 
     -- Store tokens (code already deleted by consumeAuthCode)
-    storeAccessToken (AccessTokenId accessTokenText) user
+    storeAccessToken accessToken user
     storeRefreshToken refreshToken (clientId, user)
 
     -- Emit successful token exchange trace
@@ -189,10 +187,10 @@ handleAuthCodeGrant code codeVerifier _mResource = do
 
     return
         TokenResponse
-            { access_token = AccessToken accessTokenText
+            { access_token = AccessToken (unAccessTokenId accessToken)
             , token_type = TokenType "Bearer"
             , expires_in = Just $ mkTokenValidity $ oauthAccessTokenExpiry config
-            , refresh_token = Just (RefreshToken refreshTokenText)
+            , refresh_token = Just (RefreshToken (unRefreshTokenId refreshToken))
             , scope = if Set.null (authScopes authCode) then Nothing else Just (Scopes (authScopes authCode))
             }
 
@@ -246,10 +244,10 @@ handleRefreshTokenGrant refreshTokenId _mResource = do
             throwError $ injectTyped @AuthorizationError $ InvalidGrant (RefreshTokenNotFound refreshTokenId)
 
     -- Generate new JWT access token
-    newAccessTokenText <- generateJWTAccessToken user jwtSettings
+    newAccessToken <- generateJWTAccessToken user jwtSettings
 
     -- Update tokens (keep same refresh token, update with new client/user association)
-    storeAccessToken (AccessTokenId newAccessTokenText) user
+    storeAccessToken newAccessToken user
     updateRefreshToken refreshTokenId (clientId, user)
 
     -- Emit successful token refresh trace
@@ -257,7 +255,7 @@ handleRefreshTokenGrant refreshTokenId _mResource = do
 
     return
         TokenResponse
-            { access_token = AccessToken newAccessTokenText
+            { access_token = AccessToken (unAccessTokenId newAccessToken)
             , token_type = TokenType "Bearer"
             , expires_in = Just $ mkTokenValidity $ oauthAccessTokenExpiry config
             , refresh_token = Just (RefreshToken (unRefreshTokenId refreshTokenId))

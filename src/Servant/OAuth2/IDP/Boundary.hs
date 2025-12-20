@@ -127,7 +127,7 @@ unsafeSessionId = Internal.unsafeSessionId
 WARNING: Bypasses validation. Use only for JWT tokens from validated sources.
 -}
 unsafeAccessTokenId :: Text -> AccessTokenId
-unsafeAccessTokenId = AccessTokenId
+unsafeAccessTokenId = Internal.unsafeAccessTokenId
 
 {- | Unsafe constructor for RefreshTokenId.
 

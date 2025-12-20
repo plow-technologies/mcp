@@ -86,6 +86,7 @@ import Servant.OAuth2.IDP.Types (
     mkCodeChallenge,
     mkCodeVerifier,
     mkScope,
+    unAccessTokenId,
     unAuthCodeId,
     unClientId,
     unRedirectUri,
@@ -94,6 +95,7 @@ import Servant.OAuth2.IDP.Types (
     unUserId,
  )
 import Servant.OAuth2.IDP.Types.Internal (
+    unsafeAccessTokenId,
     unsafeAuthCodeId,
     unsafeClientId,
     unsafeRedirectUri,
@@ -141,8 +143,8 @@ instance Arbitrary RefreshTokenId where
     shrink rt = [unsafeRefreshTokenId (T.pack s) | s <- shrink (T.unpack (unRefreshTokenId rt)), not (null s)]
 
 instance Arbitrary AccessTokenId where
-    arbitrary = AccessTokenId . T.pack . getNonEmpty <$> arbitrary
-    shrink (AccessTokenId t) = [AccessTokenId (T.pack s) | s <- shrink (T.unpack t), not (null s)]
+    arbitrary = unsafeAccessTokenId . T.pack . getNonEmpty <$> arbitrary
+    shrink at = [unsafeAccessTokenId (T.pack s) | s <- shrink (T.unpack (unAccessTokenId at)), not (null s)]
 
 instance Arbitrary Username where
     arbitrary = do
