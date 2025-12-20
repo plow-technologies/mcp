@@ -85,7 +85,6 @@ import Servant.OAuth2.IDP.Types (
     RefreshTokenId,
     Scope (..),
     SessionId (..),
-    unAuthCodeId,
     unClientId,
     unRefreshTokenId,
     unScope,
@@ -386,9 +385,9 @@ renderAuthorizationError = \case
         InvalidClientCredentials -> "Invalid client credentials"
         ClientSecretMismatch -> "Client secret mismatch"
     InvalidGrant reason -> case reason of
-        CodeNotFound codeId -> "Authorization code not found: " <> unAuthCodeId codeId
-        CodeExpired codeId -> "Authorization code expired: " <> unAuthCodeId codeId
-        CodeAlreadyUsed codeId -> "Authorization code already used: " <> unAuthCodeId codeId
+        CodeNotFound _codeId -> "Authorization code is invalid"
+        CodeExpired _codeId -> "Authorization code has expired"
+        CodeAlreadyUsed _codeId -> "Authorization code has already been used"
         RefreshTokenNotFound rtId -> "Refresh token not found: " <> unRefreshTokenId rtId
         RefreshTokenExpired rtId -> "Refresh token expired: " <> unRefreshTokenId rtId
         RefreshTokenRevoked rtId -> "Refresh token revoked: " <> unRefreshTokenId rtId

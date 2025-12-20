@@ -26,8 +26,11 @@ import Servant.OAuth2.IDP.Types (
     SessionId,
     mkRedirectUri,
     mkScope,
+    unsafeAuthCodeId,
+    unsafeClientId,
+    unsafeRefreshTokenId,
+    unsafeSessionId,
  )
-import Servant.OAuth2.IDP.Types (unsafeAuthCodeId, unsafeClientId, unsafeRefreshTokenId, unsafeSessionId)
 import Test.Hspec
 
 -- Test fixture helpers
@@ -449,8 +452,8 @@ spec = do
                 let codeId = unsafeAuthCodeId "code_123"
                     err = InvalidGrant (CodeExpired codeId)
                     rendered = renderAuthorizationError err
-                T.unpack rendered `shouldContain` "code_123"
                 T.unpack rendered `shouldContain` "expired"
+                T.unpack rendered `shouldNotContain` "code_123"
 
             it "renders UnauthorizedClient with GrantTypeNotAllowed" $ do
                 let err = UnauthorizedClient (GrantTypeNotAllowed OAuthAuthorizationCode)
