@@ -36,8 +36,7 @@ import Servant.OAuth2.IDP.API (
  )
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Errors (
-    AuthorizationError (..),
-    InvalidRequestReason (..),
+    ValidationError (..),
  )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
@@ -81,7 +80,7 @@ handleRegister ::
     , MonadIO m
     , MonadReader env m
     , MonadError e m
-    , AsType AuthorizationError e
+    , AsType ValidationError e
     , HasType OAuthEnv env
     , HasType (IOTracer OAuthTrace) env
     ) =>
@@ -94,8 +93,8 @@ handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqR
     -- Validate redirect_uris is not empty
     when (null reqRedirects) $
         throwError $
-            injectTyped @AuthorizationError $
-                InvalidRequest MalformedRequest
+            injectTyped @ValidationError $
+                EmptyRedirectUris
 
     -- Generate client ID
     let prefix = oauthClientIdPrefix oauthEnv

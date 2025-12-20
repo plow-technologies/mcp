@@ -41,6 +41,7 @@ module Servant.OAuth2.IDP.Errors (
     renderAuthorizationError,
 
     -- * Authorization Error Reason ADTs (FR-004c)
+    MalformedReason (..),
     InvalidRequestReason (..),
     InvalidClientReason (..),
     InvalidGrantReason (..),
@@ -262,13 +263,22 @@ validationErrorToResponse = \case
 -- Authorization Error Reason ADTs (FR-004c)
 -- -----------------------------------------------------------------------------
 
+{- | Reasons for malformed requests.
+Enumerates specific structural issues not covered by other InvalidRequestReason constructors.
+-}
+data MalformedReason
+    = InvalidUriSyntax Text
+    | DuplicateParameter Text
+    | UnparseableBody Text
+    deriving stock (Eq, Show, Generic)
+
 {- | Reasons for InvalidRequest errors.
 Replaces Text payload with precise ADT for exhaustive pattern matching.
 -}
 data InvalidRequestReason
     = MissingParameter TokenParameter
     | InvalidParameterFormat TokenParameter
-    | MalformedRequest
+    | MalformedRequest MalformedReason
     deriving stock (Eq, Show, Generic)
 
 {- | Reasons for InvalidClient errors.
@@ -367,7 +377,10 @@ renderAuthorizationError = \case
     InvalidRequest reason -> case reason of
         MissingParameter param -> "Missing required parameter: " <> renderTokenParam param
         InvalidParameterFormat param -> "Invalid parameter format: " <> renderTokenParam param
-        MalformedRequest -> "Malformed request"
+        MalformedRequest malformedReason -> case malformedReason of
+            InvalidUriSyntax detail -> "Invalid URI syntax: " <> detail
+            DuplicateParameter param -> "Duplicate parameter: " <> param
+            UnparseableBody detail -> "Unparseable request body: " <> detail
     InvalidClient reason -> case reason of
         ClientNotFound clientId -> "Client not found: " <> unClientId clientId
         InvalidClientCredentials -> "Invalid client credentials"

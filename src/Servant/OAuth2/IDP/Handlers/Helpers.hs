@@ -34,6 +34,7 @@ import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Errors (
     AuthorizationError (..),
     InvalidRequestReason (..),
+    MalformedReason (..),
  )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Types (
@@ -66,9 +67,9 @@ generateJWTAccessToken :: (OAuthStateStore m, ToJWT (OAuthUser m), MonadIO m, Mo
 generateJWTAccessToken user jwtSettings = do
     accessTokenResult <- liftIO $ makeJWT user jwtSettings Nothing
     case accessTokenResult of
-        Left _err -> throwError $ injectTyped @AuthorizationError $ InvalidRequest MalformedRequest
+        Left err -> throwError $ injectTyped @AuthorizationError $ InvalidRequest $ MalformedRequest $ UnparseableBody $ T.pack $ show err
         Right accessToken -> case TE.decodeUtf8' $ LBS.toStrict accessToken of
-            Left _decodeErr -> throwError $ injectTyped @AuthorizationError $ InvalidRequest MalformedRequest
+            Left decodeErr -> throwError $ injectTyped @AuthorizationError $ InvalidRequest $ MalformedRequest $ UnparseableBody $ T.pack $ show decodeErr
             Right tokenText -> return tokenText
 
 -- | Generate refresh token with configurable prefix

@@ -43,8 +43,6 @@ import Data.UUID qualified as UUID
 import Plow.Logging (IOTracer, traceWith)
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Errors (
-    AuthorizationError (..),
-    InvalidRequestReason (..),
     ValidationError (..),
  )
 import Servant.OAuth2.IDP.Handlers.HTML (LoginPage (..))
@@ -107,7 +105,6 @@ handleAuthorize ::
     , MonadReader env m
     , MonadError e m
     , AsType ValidationError e
-    , AsType AuthorizationError e
     , HasType OAuthEnv env
     , HasType (IOTracer OAuthTrace) env
     ) =>
@@ -133,7 +130,7 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
 
     -- Validate code_challenge_method (only "S256" supported)
     when (codeChallengeMethod /= S256) $ do
-        throwError $ injectTyped @AuthorizationError $ InvalidRequest MalformedRequest
+        throwError $ injectTyped @ValidationError $ UnsupportedCodeChallengeMethod codeChallengeMethod
 
     -- Look up client to verify it's registered
     mClientInfo <- lookupClient clientId

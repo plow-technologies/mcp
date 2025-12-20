@@ -280,10 +280,11 @@ spec = do
                     _ -> expectationFailure "Pattern match failed"
 
             it "MalformedRequest constructs correctly" $ do
-                let reason = MalformedRequest
+                let malformedReason = UnparseableBody "test error"
+                    reason = MalformedRequest malformedReason
                     err = InvalidRequest reason
                 case err of
-                    InvalidRequest MalformedRequest -> return ()
+                    InvalidRequest (MalformedRequest (UnparseableBody detail)) -> detail `shouldBe` "test error"
                     _ -> expectationFailure "Pattern match failed"
 
         describe "InvalidClientReason" $ do
