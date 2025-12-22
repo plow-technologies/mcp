@@ -237,9 +237,8 @@ newtype AppM a = AppM
 
 Executes the ReaderT and ExceptT layers, translating AppError to ServerError.
 
-Uses 'domainErrorToServerError' from OAuth.Boundary for centralized error
-translation with secure logging policy (associated types are logged but
-return generic errors, fixed types are safe to expose).
+Uses 'appErrorToServerError' for centralized error translation that maps
+all AppError constructors to appropriate HTTP responses via oauthErrorToServerError.
 
 @
 handler :: AppEnv -> AppM a -> Handler a
@@ -250,14 +249,7 @@ runAppM :: AppEnv -> AppM a -> Handler a
 runAppM env action = do
     result <- runExceptT $ runReaderT (unAppM action) env
     case result of
-        Left err -> do
-            -- Use domainErrorToServerError for security-conscious error handling
-            -- - OAuthStateError/AuthBackendError: logged but return generic 500/401
-            -- - ValidationError/AuthorizationError: safe to expose with details
-            mServerErr <- liftIO $ domainErrorToServerError @IO @AppM (envTracer env) HTTPOAuthBoundary err
-            case mServerErr of
-                Just serverErr -> throwError serverErr
-                Nothing -> throwError (toServerError err) -- Fallback for non-OAuth errors
+        Left err -> throwError (appErrorToServerError err)
         Right a -> pure a
 
 -- -----------------------------------------------------------------------------
