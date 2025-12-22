@@ -45,6 +45,7 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - Q: Should QuickCheck be a library dependency for Arbitrary instances? → A: Yes. QuickCheck becomes library dependency. GHC dead code elimination removes unused Arbitrary instances from production binaries. QuickCheck is stable and reliable.
 - Q: How should test files construct values without unsafe* constructors? → A: Tests are library consumers - use smart constructors (handle Maybe/Either) and Arbitrary instances. No special test privileges; same API visibility as any other consumer code.
 - Q: Where should generator functions live for constructor access? → A: Move ALL generators to Types.hs. Delete Handlers/Helpers.hs entirely. GOLDEN RULE: The only code requiring audit to verify correct value construction lives in the type-defining module. Future refactoring may split into strongly-connected type modules, but consolidate in Types.hs for now.
+- Q: Should OAuth ID generation use crypto-random instead of UUID.nextRandom? → A: Yes. RFC 6749 Section 10.10 mandates sufficient entropy to prevent guessing. UUID.nextRandom uses system RNG (not crypto-secure). Create generateAuthCodeId, generateClientId, generateRefreshTokenId, generateSessionId in Types.hs using crypton/entropy (128+ bits). Return domain types directly (not Maybe) since crypto generation cannot fail. Eliminates impossible-case error handling. See bead mcp-5wk.96.10.
 
 ## Goals
 
@@ -203,12 +204,35 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
   - `ClientName (..)` → `ClientName` (bypasses non-empty validation)
 - No internal modules with `(..)` exports needed - boundary instances live with types
 **Generator Functions** (move from Helpers.hs to Types.hs, then delete Helpers.hs):
-- `generateAuthCode :: OAuthEnv -> IO AuthCodeId` (was in Helpers.hs returning Text)
-- `generateJWTAccessToken :: OAuthUser m -> JWTSettings -> m AccessTokenId` (was in Helpers.hs returning Text)
-- `generateRefreshTokenWithConfig :: OAuthEnv -> IO RefreshTokenId` (was in Helpers.hs returning Text)
-- `generateClientId :: OAuthEnv -> IO ClientId` (was in Helpers.hs returning Text)
-- All other generator/constructor functions in Helpers.hs move to Types.hs
+- `generateAuthCodeId :: Text -> IO AuthCodeId` (prefix param, crypto-random, returns type directly)
+- `generateRefreshTokenId :: Text -> IO RefreshTokenId` (prefix param, crypto-random, returns type directly)
+- `generateClientId :: Text -> IO ClientId` (prefix param, crypto-random, returns type directly)
+- `generateSessionId :: IO SessionId` (crypto-random, returns type directly)
+- `generateJWTAccessToken :: OAuthUser m -> JWTSettings -> m AccessTokenId` (JWT generation, unchanged)
+- All generators return domain types directly (NOT `Maybe`/`Either`) since crypto generation cannot produce invalid values
 - GOLDEN RULE: Only code in type-defining module needs audit for correct construction
+**Crypto-Random Requirement** (RFC 6749 Section 10.10 compliance):
+- Authorization codes, client IDs, refresh tokens, session IDs MUST use cryptographically secure randomness
+- Current `Data.UUID.V4.nextRandom` uses system RNG - NOT cryptographically secure
+- MUST replace with `System.Entropy.getEntropy` or `Crypto.Random` (128+ bits entropy)
+- Add dependency: `crypton` or `entropy` package
+- Generator signatures return type directly (not `Maybe`) since crypto generation cannot fail or produce empty output
+- Eliminates awkward impossible-case error handling pattern:
+  ```haskell
+  -- BEFORE (anti-pattern):
+  case mkAuthCodeId codeText of
+      Just cid -> cid
+      Nothing -> error "impossible: UUID never empty"
+
+  -- AFTER (clean):
+  generateAuthCodeId prefix  -- returns AuthCodeId directly
+  ```
+- Locations requiring update:
+  - `Handlers/Helpers.hs:69-75` (generateAuthCode) → move to Types.hs with crypto
+  - `Handlers/Helpers.hs:94-102` (generateRefreshTokenWithConfig) → move to Types.hs with crypto
+  - `Handlers/Registration.hs:101-106` (client ID generation) → use generateClientId from Types.hs
+  - `Handlers/Authorization.hs:158` (session ID generation) → use generateSessionId from Types.hs
+- Verification: `rg 'UUID.nextRandom' src/` returns empty (except test helpers if needed)
 **Type Threading** (MUST NOT convert to Text mid-flow):
 - Domain types flow from generation to storage to response without unwrapping
 - Storage maps use domain types as keys: `Map AuthCodeId (AuthorizationCode user)` not `Map Text ...`
@@ -318,6 +342,7 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - `network-uri` package for URI type in OAuthEnv
 - `base` package for NonEmpty from Data.List.NonEmpty (used in OAuthEnv supported* fields)
 - `QuickCheck` package for Arbitrary instances in type-defining modules (GHC DCE removes from production)
+- `crypton` or `entropy` package for crypto-secure random generation (RFC 6749 Section 10.10 compliance for OAuth IDs)
 
 ## Files Created (WIP - already exist)
 
