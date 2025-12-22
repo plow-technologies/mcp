@@ -47,7 +47,7 @@ import System.IO (hFlush, stdout)
 import MCP.Protocol
 import MCP.Server
 import MCP.Server.Auth
-import MCP.Server.HTTP (DemoOAuthBundle (..), HTTPServerConfig (..), defaultDemoOAuthBundle, mcpAppWithOAuth, runServerHTTP)
+import MCP.Server.HTTP (DemoOAuthBundle (..), HTTPServerConfig (..), mcpAppWithOAuth, mkDemoOAuthBundleFromText, runServerHTTP)
 import MCP.Server.HTTP.AppEnv (AppEnv (..), runAppM)
 import MCP.Trace.HTTP (HTTPTrace (..))
 import MCP.Trace.Types (MCPTrace (..), isOAuthTrace, renderMCPTrace)
@@ -208,7 +208,9 @@ main = do
         mcpOAuthConfig =
             if optEnableOAuth
                 then
-                    let bundle = defaultDemoOAuthBundle
+                    let bundle = case mkDemoOAuthBundleFromText baseUrl of
+                            Just b -> b
+                            Nothing -> Prelude.error $ "Invalid base URL: " ++ T.unpack baseUrl
                         baseMCPConfig = bundleMCPConfig bundle
                      in Just $
                             baseMCPConfig
@@ -312,7 +314,9 @@ main = do
                 stateVar <- newTVarIO $ initialServerState (httpCapabilities config)
 
                 -- Create AppEnv with configured settings (including stateVar)
-                let bundle = defaultDemoOAuthBundle
+                let bundle = case mkDemoOAuthBundleFromText baseUrl of
+                        Just b -> b
+                        Nothing -> Prelude.error $ "Invalid base URL: " ++ T.unpack baseUrl
                     oauthCfgEnv = bundleEnv bundle -- Use OAuthEnv from bundle
                     oauthTracer = contramap HTTPOAuth httpTracer -- Route OAuth traces through HTTP tracer
                     appEnv =
