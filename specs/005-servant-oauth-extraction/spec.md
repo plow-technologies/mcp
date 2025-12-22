@@ -42,6 +42,8 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 ### Session 2025-12-22
 
 - Q: Should unsafe* constructors be eliminated and how? → A: Delete Boundary module entirely; delete ALL unsafe* exports from Types. Typeclass instances (ToJSON, FromJSON, ToHttpApiData, FromHttpApiData) ARE the boundary and MUST live in type-defining modules. Arbitrary instances MUST also live in type-defining modules. Module cohesion follows from which types need to "see" each other's internals for instance definitions. Only export type names (not constructors) except for types structurally unable to encode invalid values (NonEmpty, Bool, etc.).
+- Q: How should all OAuth errors be unified for ServerError conversion? → A: Single `OAuthError m` sum type with constructors `OAuthValidation ValidationError | OAuthAuthorization AuthorizationError | OAuthLoginFlow LoginFlowError | OAuthStore (OAuthStateError m)`. Define `oauthErrorToServerError :: OAuthError m -> ServerError` in same module (Servant.OAuth2.IDP.Errors). Enables exhaustive pattern matching and single error-handling boundary.
+- Q: How should oauthErrorToServerError render error bodies? → A: OAuthAuthorization → JSON OAuthErrorResponse per RFC 6749; OAuthValidation → descriptive text (safe to expose client errors); OAuthLoginFlow → descriptive text; OAuthStore → generic "Internal Server Error" (no backend detail leakage). Requires Show constraint on OAuthStateError m for logging (not for response body).
 - Q: Should QuickCheck be a library dependency for Arbitrary instances? → A: Yes. QuickCheck becomes library dependency. GHC dead code elimination removes unused Arbitrary instances from production binaries. QuickCheck is stable and reliable.
 - Q: How should test files construct values without unsafe* constructors? → A: Tests are library consumers - use smart constructors (handle Maybe/Either) and Arbitrary instances. No special test privileges; same API visibility as any other consumer code.
 - Q: Where should generator functions live for constructor access? → A: Move ALL generators to Types.hs. Delete Handlers/Helpers.hs entirely. GOLDEN RULE: The only code requiring audit to verify correct value construction lives in the type-defining module. Future refactoring may split into strongly-connected type modules, but consolidate in Types.hs for now.
@@ -163,6 +165,20 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 **New Supporting Types**:
 - `data TokenParameter = TokenParamCode | TokenParamCodeVerifier | TokenParamRefreshToken deriving (Eq, Show)`
 - `data OAuthErrorCode = ErrInvalidRequest | ErrInvalidClient | ErrInvalidGrant | ErrUnauthorizedClient | ErrUnsupportedGrantType | ErrInvalidScope | ErrAccessDenied | ErrUnsupportedResponseType | ErrServerError | ErrTemporarilyUnavailable` (RFC 6749 error codes with ToJSON to snake_case)
+**Unified OAuthError Type** (root error type for all OAuth errors):
+- `data OAuthError m = OAuthValidation ValidationError | OAuthAuthorization AuthorizationError | OAuthLoginFlow LoginFlowError | OAuthStore (OAuthStateError m)`
+- `oauthErrorToServerError :: Show (OAuthStateError m) => OAuthError m -> ServerError` (exhaustive pattern matching to HTTP status codes)
+  - `OAuthValidation` → 400 Bad Request
+  - `OAuthAuthorization` → varies (400/401/403 depending on error code per RFC 6749)
+  - `OAuthLoginFlow` → varies (400/401/404 depending on cause)
+  - `OAuthStore` → 500 Internal Server Error (storage failures)
+- **Error Body Rendering**:
+  - `OAuthAuthorization` → JSON `OAuthErrorResponse` per RFC 6749 (`{"error":"...","error_description":"..."}`)
+  - `OAuthValidation` → descriptive plain text (client errors safe to expose)
+  - `OAuthLoginFlow` → descriptive plain text (user-facing errors)
+  - `OAuthStore` → generic "Internal Server Error" text (no backend detail leakage; `Show` constraint used for logging only)
+- Lives in `Servant.OAuth2.IDP.Errors` alongside other error types
+- Handlers use `ExceptT (OAuthError m) m a` for uniform error handling
 **Type Precision Fixes**:
 - Change `OAuthErrorResponse.oauthErrorCode :: Text` to `OAuthErrorResponse.oauthErrorCode :: OAuthErrorCode`
 - Update `authorizationErrorToResponse` to use OAuthErrorCode ADT (enables exhaustiveness checking)
