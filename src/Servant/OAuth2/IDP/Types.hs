@@ -88,20 +88,6 @@ module Servant.OAuth2.IDP.Types (
     AuthorizationCode (..),
     ClientInfo (..),
     PendingAuthorization (..),
-
-    -- * Unsafe Constructors (for tests and boundary modules only)
-    unsafeAuthCodeId,
-    unsafeClientId,
-    unsafeSessionId,
-    unsafeAccessTokenId,
-    unsafeRefreshTokenId,
-    unsafeUserId,
-    unsafeRedirectUri,
-    unsafeScope,
-    unsafeCodeChallenge,
-    unsafeCodeVerifier,
-    unsafeClientSecret,
-    unsafeClientName,
 ) where
 
 import Control.Monad (forM_, guard, when)
@@ -1002,69 +988,3 @@ instance ToJSON PendingAuthorization where
             , "pending_created_at" .= pendingCreatedAt
             ]
 
--- -----------------------------------------------------------------------------
--- Unsafe constructors (INTERNAL USE ONLY)
--- -----------------------------------------------------------------------------
-
-{- | Unsafe constructor functions that bypass validation.
-
-These functions are intended ONLY for internal use by modules like Boundary.hs
-that need to create validated types at the HTTP boundary, or by test generators
-that create arbitrary instances.
-
-WARNING: These bypass all smart constructor validation. Use ONLY when:
-1. Data has already been validated by the HTTP layer (FromHttpApiData instances)
-2. Generating test data where validation isn't required
-3. Translating from boundary types that have already been validated
-
-Per Constitution Principle II: These are exported to support boundary translation,
-but should NOT be used in application code. Use the smart constructors instead.
--}
-
--- | Bypass AuthCodeId validation (internal use only)
-unsafeAuthCodeId :: Text -> AuthCodeId
-unsafeAuthCodeId = AuthCodeId
-
--- | Bypass ClientId validation (internal use only)
-unsafeClientId :: Text -> ClientId
-unsafeClientId = ClientId
-
--- | Bypass SessionId validation (internal use only)
-unsafeSessionId :: Text -> SessionId
-unsafeSessionId = SessionId
-
--- | Bypass AccessTokenId validation (internal use only)
-unsafeAccessTokenId :: Text -> AccessTokenId
-unsafeAccessTokenId = AccessTokenId
-
--- | Bypass RefreshTokenId validation (internal use only)
-unsafeRefreshTokenId :: Text -> RefreshTokenId
-unsafeRefreshTokenId = RefreshTokenId
-
--- | Bypass UserId validation (internal use only)
-unsafeUserId :: Text -> UserId
-unsafeUserId = UserId
-
--- | Bypass RedirectUri validation (internal use only)
-unsafeRedirectUri :: URI -> RedirectUri
-unsafeRedirectUri = RedirectUri
-
--- | Bypass Scope validation (internal use only)
-unsafeScope :: Text -> Scope
-unsafeScope = Scope
-
--- | Bypass CodeChallenge validation (internal use only)
-unsafeCodeChallenge :: Text -> CodeChallenge
-unsafeCodeChallenge = CodeChallenge
-
--- | Bypass CodeVerifier validation (internal use only)
-unsafeCodeVerifier :: Text -> CodeVerifier
-unsafeCodeVerifier = CodeVerifier
-
--- | Bypass ClientSecret validation (internal use only)
-unsafeClientSecret :: Text -> ClientSecret
-unsafeClientSecret = ClientSecret
-
--- | Bypass ClientName validation (internal use only)
-unsafeClientName :: Text -> ClientName
-unsafeClientName = ClientName
