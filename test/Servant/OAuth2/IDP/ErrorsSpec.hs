@@ -633,7 +633,7 @@ spec = do
                     serverErr = oauthErrorToServerError err
                 errHTTPCode serverErr `shouldBe` 400
                 errBody serverErr `shouldSatisfy` \body ->
-                    containsText "<!DOCTYPE html>" body
+                    containsText "<!DOCTYPE HTML>" body
                         && containsText "Cookies Required" body
                 errHeaders serverErr `shouldContain` [("Content-Type", "text/html; charset=utf-8")]
 
@@ -642,7 +642,7 @@ spec = do
                     serverErr = oauthErrorToServerError err
                 errHTTPCode serverErr `shouldBe` 400
                 errBody serverErr `shouldSatisfy` \body ->
-                    containsText "<!DOCTYPE html>" body
+                    containsText "<!DOCTYPE HTML>" body
                         && containsText "Session Expired" body
                 errHeaders serverErr `shouldContain` [("Content-Type", "text/html; charset=utf-8")]
 

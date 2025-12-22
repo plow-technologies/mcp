@@ -62,9 +62,12 @@ module Servant.OAuth2.IDP.Errors (
     oauthErrorToServerError,
 ) where
 
-import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), encode, object, withObject, withText, (.:), (.:?), (.=))
+import Data.ByteString.Lazy qualified as LBS
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
+import Data.Text.Lazy qualified as TL
 import GHC.Generics (Generic)
 import Lucid (
     ToHtml (..),
@@ -77,11 +80,12 @@ import Lucid (
     head_,
     meta_,
     p_,
+    renderText,
     style_,
     title_,
  )
-import Network.HTTP.Types.Status (Status, status400, status401, status403)
-import Servant (ServerError)
+import Network.HTTP.Types.Status (Status, status400, status401, status403, status500, statusCode)
+import Servant (ServerError (..))
 import Servant.OAuth2.IDP.Store (OAuthStateError)
 import Servant.OAuth2.IDP.Types (
     AuthCodeId,
@@ -553,4 +557,46 @@ Maps each error type to appropriate HTTP status:
 The Show constraint on OAuthStateError is used for logging only, not in response bodies.
 -}
 oauthErrorToServerError :: OAuthError m -> ServerError
-oauthErrorToServerError = error "oauthErrorToServerError: not implemented"
+oauthErrorToServerError = \case
+    OAuthValidation validationErr ->
+        let (status, message) = validationErrorToResponse validationErr
+         in toServerErrorPlain status message
+    OAuthAuthorization authzErr ->
+        let (status, oauthResp) = authorizationErrorToResponse authzErr
+         in toServerErrorOAuth status oauthResp
+    OAuthLoginFlow loginErr ->
+        toServerErrorLoginFlow loginErr
+    OAuthStore _storeErr ->
+        -- Never leak backend error details to clients
+        toServerErrorPlain status500 "Internal Server Error"
+  where
+    -- Convert Status + Text to ServerError with plain text body
+    toServerErrorPlain :: Status -> Text -> ServerError
+    toServerErrorPlain status message =
+        ServerError
+            { errHTTPCode = fromIntegral $ statusCode status
+            , errReasonPhrase = ""
+            , errBody = LBS.fromStrict $ TE.encodeUtf8 message
+            , errHeaders = [("Content-Type", "text/plain; charset=utf-8")]
+            }
+
+    -- Convert Status + OAuthErrorResponse to ServerError with JSON body
+    toServerErrorOAuth :: Status -> OAuthErrorResponse -> ServerError
+    toServerErrorOAuth status oauthResp =
+        ServerError
+            { errHTTPCode = fromIntegral $ statusCode status
+            , errReasonPhrase = ""
+            , errBody = encode oauthResp
+            , errHeaders = [("Content-Type", "application/json; charset=utf-8")]
+            }
+
+    -- Convert LoginFlowError to ServerError with HTML body using ToHtml instance
+    toServerErrorLoginFlow :: LoginFlowError -> ServerError
+    toServerErrorLoginFlow loginErr =
+        let htmlBytes = LBS.fromStrict $ TE.encodeUtf8 $ TL.toStrict $ renderText $ toHtml loginErr
+         in ServerError
+                { errHTTPCode = 400
+                , errReasonPhrase = ""
+                , errBody = htmlBytes
+                , errHeaders = [("Content-Type", "text/html; charset=utf-8")]
+                }
