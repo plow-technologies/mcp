@@ -128,8 +128,14 @@ The OAuth implementation uses a **typeclass-based architecture** for pluggable b
 - **Servant.OAuth2.IDP.PKCE** - PKCE functions (`generateCodeVerifier`, `validateCodeVerifier`, `generateCodeChallenge`)
 
 #### Types & Errors
-- **Servant.OAuth2.IDP.Types** - Core newtypes (`AuthCodeId`, `ClientId`, `SessionId`, `AccessTokenId`, `RefreshTokenId`, `RedirectUri`, `Scope`, `CodeChallenge`, `CodeVerifier`, `OAuthGrantType`)
-- **Servant.OAuth2.IDP.Errors** - Error types (`ValidationError`, `AuthorizationError`, `LoginFlowError`, `OAuthErrorCode`)
+- **Servant.OAuth2.IDP.Types** - Core newtypes (`AuthCodeId`, `ClientId`, `SessionId`, `AccessTokenId`, `RefreshTokenId`, `RedirectUri`, `Scope`, `CodeChallenge`, `CodeVerifier`, `OAuthGrantType`) with crypto-random ID generators
+- **Servant.OAuth2.IDP.Errors** - Comprehensive error types:
+  - `ValidationError` - Semantic validation errors
+  - `AuthorizationError` - OAuth protocol errors with reason ADTs
+  - `LoginFlowError` - Login flow errors (HTML rendering)
+  - `OAuthErrorCode` - RFC 6749 compliant error codes
+  - `OAuthError m` - Unified error type for all OAuth errors
+  - `oauthErrorToServerError` - Converts to Servant `ServerError`
 
 #### State Management
 - **Servant.OAuth2.IDP.Store** - OAuthStateStore typeclass definition
@@ -137,32 +143,62 @@ The OAuth implementation uses a **typeclass-based architecture** for pluggable b
 - **Servant.OAuth2.IDP.Auth.Backend** - AuthBackend typeclass definition
 - **Servant.OAuth2.IDP.Auth.Demo** - Demo credentials implementation
 
+#### Handlers
+- **Servant.OAuth2.IDP.Handlers** - Re-exports all handlers
+- **Servant.OAuth2.IDP.Handlers.Authorization** - OAuth /authorize endpoint
+- **Servant.OAuth2.IDP.Handlers.Login** - Interactive login flow
+- **Servant.OAuth2.IDP.Handlers.Metadata** - OAuth metadata discovery endpoints
+- **Servant.OAuth2.IDP.Handlers.Registration** - Dynamic client registration
+- **Servant.OAuth2.IDP.Handlers.Token** - Token exchange endpoint
+- **Servant.OAuth2.IDP.Handlers.HTML** - HTML rendering (login page, error pages)
+
 #### Infrastructure
 - **Servant.OAuth2.IDP.Trace** - `OAuthTrace` ADT with domain types for structured tracing
-- **Servant.OAuth2.IDP.Boundary** - Servant handler boundary translation
+- **Servant.OAuth2.IDP.Server** - OAuth API composition and server wiring
+- **Servant.OAuth2.IDP.API** - Servant API type definitions
+- **Servant.OAuth2.IDP.Test.Internal** - Test-only unsafe constructors (for testing)
 
 ### Composite Types (Three-Layer Cake Pattern)
 
 **AppEnv** (`MCP.Server.HTTP.AppEnv`):
 ```haskell
 data AppEnv = AppEnv
-  { envOAuth  :: OAuthTVarEnv        -- OAuth state storage
-  , envAuth   :: DemoCredentialEnv   -- Credential authentication
-  , envConfig :: HTTPServerConfig    -- Server config
-  , envTracer :: IOTracer HTTPTrace  -- Structured tracing
+  { envOAuth       :: OAuthTVarEnv           -- OAuth state storage
+  , envAuth        :: DemoCredentialEnv      -- Credential authentication
+  , envConfig      :: HTTPServerConfig       -- Server config
+  , envTracer      :: IOTracer HTTPTrace     -- HTTP-level tracing
+  , envOAuthEnv    :: OAuthEnv               -- Protocol-level OAuth config
+  , envOAuthTracer :: IOTracer OAuthTrace    -- OAuth-specific tracing
+  , envJWT         :: JWTSettings            -- JWT signing/validation
+  , envServerState :: TVar ServerState       -- MCP server state
+  , envTimeProvider :: Maybe (TVar UTCTime)  -- Test time control (Nothing = real time)
   }
 ```
 
 **AppError** (Sum type for all error sources):
 ```haskell
 data AppError
-  = OAuthStoreErr OAuthStoreError  -- Storage errors → 500
-  | AuthBackendErr DemoAuthError   -- Auth failures → 401
-  | ValidationErr Text             -- Input errors → 400
-  | ServerErr ServerError          -- Servant passthrough
+  = OAuthStoreErr OAuthStoreError       -- Storage errors → 500
+  | AuthBackendErr DemoAuthError        -- Auth failures → 401
+  | ValidationErr ValidationError       -- Semantic validation → 400
+  | AuthorizationErr AuthorizationError -- OAuth protocol errors → 400/401/403
+  | LoginFlowErr LoginFlowError         -- Login flow errors → 400 (HTML)
 ```
 
 Uses `generic-lens` with `HasType` constraints for composable environment/error access.
+
+**OAuthError** (`Servant.OAuth2.IDP.Errors`) - Unified error type for OAuth handlers:
+```haskell
+data OAuthError m
+  = OAuthValidation ValidationError     -- Semantic validation → 400
+  | OAuthAuthorization AuthorizationError -- OAuth protocol → 400/401/403
+  | OAuthLoginFlow LoginFlowError         -- Login flow → 400 (HTML)
+  | OAuthStore (OAuthStateError m)        -- Storage backend → 500
+```
+
+- Parameterized by monad `m` for associated `OAuthStateError` type
+- `oauthErrorToServerError` converts to Servant `ServerError` with proper HTTP status/body
+- `appErrorToServerError` in `MCP.Server.HTTP.AppEnv` wraps `oauthErrorToServerError` for MCP layer
 
 ### Configuration Types: OAuthEnv vs MCPOAuthConfig
 

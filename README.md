@@ -315,15 +315,32 @@ src/
 │   ├── Types.hs          # Core MCP data types
 │   ├── Protocol.hs       # JSON-RPC protocol messages
 │   ├── Server.hs         # Core server infrastructure
-│   └── Server/
-│       ├── StdIO.hs      # StdIO transport implementation
-│       └── HTTP.hs       # HTTP transport implementation
+│   ├── Server/
+│   │   ├── StdIO.hs      # StdIO transport implementation
+│   │   ├── HTTP.hs       # HTTP transport implementation
+│   │   ├── HTTP/
+│   │   │   └── AppEnv.hs # Composite environment and error types
+│   │   └── Auth.hs       # MCP-specific OAuth configuration
+│   └── Trace/
+│       └── HTTP.hs       # HTTP tracing types
+├── Servant/
+│   └── OAuth2/
+│       └── IDP/          # Reusable OAuth 2.1 library (MCP-independent)
+│           ├── Types.hs      # Core domain newtypes
+│           ├── Config.hs     # OAuthEnv configuration
+│           ├── Errors.hs     # Error types and conversions
+│           ├── PKCE.hs       # RFC 7636 PKCE implementation
+│           ├── Metadata.hs   # RFC 8414/9728 metadata types
+│           ├── Store.hs      # OAuthStateStore typeclass
+│           ├── Trace.hs      # OAuthTrace ADT
+│           ├── Server.hs     # OAuth API composition
+│           └── Handlers/     # OAuth endpoint handlers
 
 app/
 └── Main.hs               # Example MCP server (StdIO mode)
 
-test/
-└── Main.hs               # Test suite (placeholder)
+examples/
+└── http-server.hs        # HTTP server example with OAuth
 ```
 
 ## Development
