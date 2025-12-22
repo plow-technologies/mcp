@@ -297,6 +297,7 @@ test-suite mcp-test
         Servant.OAuth2.IDP.LucidRenderingSpec
         Servant.OAuth2.IDP.TypesSpec
         Servant.OAuth2.IDP.CryptoEntropySpec
+        Servant.OAuth2.IDP.BearerMethodSpec
         Servant.OAuth2.IDP.ErrorsSpec
         Servant.OAuth2.IDP.Handlers.MetadataSpec
         Servant.OAuth2.IDP.MetadataSpec

@@ -111,7 +111,7 @@ import Servant.OAuth2.IDP.Errors (
     OAuthErrorResponse (..),
     ValidationError (..),
  )
-import Servant.OAuth2.IDP.Metadata (mkProtectedResourceMetadata, mkProtectedResourceMetadataForDemo)
+import Servant.OAuth2.IDP.Metadata (BearerMethod (..), mkProtectedResourceMetadata, mkProtectedResourceMetadataForDemo)
 import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI, oauthServer)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
@@ -696,12 +696,11 @@ data DemoOAuthBundle = DemoOAuthBundle
 -- | Create a demo OAuth bundle with a custom base URL
 mkDemoOAuthBundle :: URI -> DemoOAuthBundle
 mkDemoOAuthBundle baseUri =
-    let baseUrlText = T.pack $ show baseUri
-        resourceMetadata = case mkProtectedResourceMetadataForDemo
-            baseUrlText
-            [baseUrlText]
+    let resourceMetadata = case mkProtectedResourceMetadataForDemo
+            baseUri
+            (baseUri :| [])
             (Just [mkKnownScope "mcp:read", mkKnownScope "mcp:write"])
-            (Just ["header"])
+            (Just (BearerHeader :| []))
             Nothing
             Nothing of
             Just m -> m
@@ -753,13 +752,13 @@ defaultDemoOAuthBundle =
         Nothing -> Prelude.error "Invalid hardcoded base URL in defaultDemoOAuthBundle"
 
 -- | Default protected resource metadata for a given base URL
-defaultProtectedResourceMetadata :: Text -> ProtectedResourceMetadata
+defaultProtectedResourceMetadata :: URI -> ProtectedResourceMetadata
 defaultProtectedResourceMetadata baseUrl =
     case mkProtectedResourceMetadata
         baseUrl
-        [baseUrl]
+        (baseUrl :| [])
         (Just [mkKnownScope "mcp:read", mkKnownScope "mcp:write"])
-        (Just ["header"])
+        (Just (BearerHeader :| []))
         Nothing
         Nothing of
         Just metadata -> metadata
@@ -826,7 +825,9 @@ demoMcpApp = do
                 , httpMCPOAuthConfig = Just mcpConfig
                 , httpJWK = Just jwk
                 , httpProtocolVersion = "2025-06-18"
-                , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata "http://localhost:8080")
+                , httpProtectedResourceMetadata = case parseURI "http://localhost:8080" of
+                    Just uri -> Just (defaultProtectedResourceMetadata uri)
+                    Nothing -> Nothing
                 }
 
     -- Create demo credential environment

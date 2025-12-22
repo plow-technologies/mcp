@@ -46,8 +46,10 @@ import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVa
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, ReaderT, ask)
 import Data.Functor.Contravariant (contramap)
+import Data.Maybe (fromJust)
 import Data.Time.Clock (UTCTime, addUTCTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeOrError)
+import Network.URI (parseURI)
 import Plow.Logging (IOTracer (..), Tracer (..))
 
 import MCP.Trace.HTTP (HTTPTrace (..))
@@ -121,7 +123,7 @@ mkTestEnv timeTVar = do
                 , httpMCPOAuthConfig = Just (bundleMCPConfig bundle)
                 , httpJWK = Nothing -- Will be generated
                 , httpProtocolVersion = "2025-06-18"
-                , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata "http://localhost:8080")
+                , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata (fromJust $ parseURI "http://localhost:8080"))
                 }
 
     -- Null tracer for tests (discards all traces)

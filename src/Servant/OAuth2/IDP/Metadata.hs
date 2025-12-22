@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
@@ -47,10 +48,17 @@ module Servant.OAuth2.IDP.Metadata (
     prBearerMethodsSupported,
     prResourceName,
     prResourceDocumentation,
+
+    -- * Bearer Token Methods (RFC 6750)
+    BearerMethod (..),
 ) where
 
 import Control.Monad (guard)
-import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.Types (Pair, Parser)
+import Data.Foldable (toList)
+import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Text (Text)
 import Data.Text qualified as T
 import GHC.Generics (Generic)
@@ -62,6 +70,62 @@ import Servant.OAuth2.IDP.Types (
     ResponseType,
     Scope,
  )
+
+-- -----------------------------------------------------------------------------
+-- Bearer Token Methods (RFC 6750)
+-- -----------------------------------------------------------------------------
+
+{- | Bearer token presentation methods per RFC 6750 Section 2.
+
+OAuth 2.0 Bearer tokens can be presented to resource servers using
+different HTTP methods. This type represents the supported methods.
+-}
+data BearerMethod
+    = -- | Authorization header (RFC 6750 Section 2.1)
+      BearerHeader
+    | -- | Form-encoded body parameter (RFC 6750 Section 2.2)
+      BearerBody
+    | -- | URI query parameter (RFC 6750 Section 2.3, NOT RECOMMENDED)
+      BearerUri
+    deriving (Eq, Show, Generic)
+
+-- | ToJSON instance mapping to RFC 6750 string values
+instance ToJSON BearerMethod where
+    toJSON BearerHeader = toJSON ("header" :: Text)
+    toJSON BearerBody = toJSON ("body" :: Text)
+    toJSON BearerUri = toJSON ("query" :: Text)
+
+-- | FromJSON instance parsing RFC 6750 string values
+instance FromJSON BearerMethod where
+    parseJSON = withText "BearerMethod" $ \case
+        "header" -> pure BearerHeader
+        "body" -> pure BearerBody
+        "query" -> pure BearerUri
+        other -> fail $ "Invalid bearer method: " <> T.unpack other
+
+-- -----------------------------------------------------------------------------
+-- JSON Helper Functions
+-- -----------------------------------------------------------------------------
+
+-- | Convert URI to Text for JSON serialization
+uriToText :: URI -> Text
+uriToText = T.pack . show
+
+-- | Parse Text as URI for JSON deserialization
+textToURI :: Text -> Parser URI
+textToURI t = case parseURI (T.unpack t) of
+    Just uri -> pure uri
+    Nothing -> fail $ "Invalid URI: " <> T.unpack t
+
+-- | Helper to conditionally include optional JSON fields
+optional :: (ToJSON a) => Text -> Maybe a -> [Pair]
+optional _ Nothing = []
+optional key (Just val) = [Key.fromText key .= val]
+
+-- | Parse a list into NonEmpty, failing if empty
+parseNonEmptyList :: [a] -> Parser (NonEmpty a)
+parseNonEmptyList [] = fail "Expected non-empty list"
+parseNonEmptyList (x : xs) = pure (x :| xs)
 
 -- -----------------------------------------------------------------------------
 -- URI Validation Helper
@@ -265,16 +329,14 @@ Required fields:
 Optional fields provide additional resource server information.
 -}
 data ProtectedResourceMetadata = ProtectedResourceMetadata
-    { prResource :: Text -- FIXME: Use URI
-
+    { prResource :: URI
     -- ^ Protected resource identifier (MUST be absolute URI with https)
-    , prAuthorizationServers :: [Text] -- FIXME: Use NonEmpty URI
-
-    -- ^ List of authorization server issuer identifiers
+    , prAuthorizationServers :: NonEmpty URI
+    -- ^ List of authorization server issuer identifiers (≥1 required per RFC)
     , prScopesSupported :: Maybe [Scope]
     -- ^ Scope values the resource server understands
-    , prBearerMethodsSupported :: Maybe [Text]
-    -- ^ Token presentation methods (default: ["header"]) --FIXME: Use ADT
+    , prBearerMethodsSupported :: Maybe (NonEmpty BearerMethod)
+    -- ^ Token presentation methods (default: ["header"])
     , prResourceName :: Maybe Text
     -- ^ Human-readable name for display
     , prResourceDocumentation :: Maybe Text
@@ -284,31 +346,41 @@ data ProtectedResourceMetadata = ProtectedResourceMetadata
 
 -- | Custom ToJSON instance with snake_case field names per RFC 9728
 instance ToJSON ProtectedResourceMetadata where
-    toJSON ProtectedResourceMetadata{..} =
+    toJSON prm =
         object $
-            [ "resource" .= prResource
-            , "authorization_servers" .= prAuthorizationServers
+            [ "resource" .= uriToText (prResource prm)
+            , "authorization_servers" .= fmap uriToText (toList $ prAuthorizationServers prm)
             ]
-                ++ optionalFields
-      where
-        optionalFields =
-            concat
-                [ maybe [] (\v -> ["scopes_supported" .= v]) prScopesSupported
-                , maybe [] (\v -> ["bearer_methods_supported" .= v]) prBearerMethodsSupported
-                , maybe [] (\v -> ["resource_name" .= v]) prResourceName
-                , maybe [] (\v -> ["resource_documentation" .= v]) prResourceDocumentation
-                ]
+                ++ optional "scopes_supported" (prScopesSupported prm)
+                ++ optional "bearer_methods_supported" (toList <$> prBearerMethodsSupported prm)
+                ++ optional "resource_name" (prResourceName prm)
+                ++ optional "resource_documentation" (prResourceDocumentation prm)
 
 -- | Custom FromJSON instance with snake_case field names per RFC 9728
 instance FromJSON ProtectedResourceMetadata where
-    parseJSON = withObject "ProtectedResourceMetadata" $ \v ->
-        ProtectedResourceMetadata
-            <$> v .: "resource"
-            <*> v .: "authorization_servers"
-            <*> v .:? "scopes_supported"
-            <*> v .:? "bearer_methods_supported"
-            <*> v .:? "resource_name"
-            <*> v .:? "resource_documentation"
+    parseJSON = withObject "ProtectedResourceMetadata" $ \o -> do
+        resource <- o .: "resource" >>= textToURI
+        authServers <- o .: "authorization_servers" >>= parseNonEmptyURIs
+        scopesSupp <- o .:? "scopes_supported"
+        bearerMethodsSupp <- o .:? "bearer_methods_supported" >>= traverse parseNonEmptyList
+        resourceName <- o .:? "resource_name"
+        resourceDoc <- o .:? "resource_documentation"
+        pure $
+            ProtectedResourceMetadata
+                { prResource = resource
+                , prAuthorizationServers = authServers
+                , prScopesSupported = scopesSupp
+                , prBearerMethodsSupported = bearerMethodsSupp
+                , prResourceName = resourceName
+                , prResourceDocumentation = resourceDoc
+                }
+      where
+        parseNonEmptyURIs :: [Text] -> Parser (NonEmpty URI)
+        parseNonEmptyURIs [] = fail "authorization_servers must contain at least one URI"
+        parseNonEmptyURIs (x : xs) = do
+            first <- textToURI x
+            rest <- mapM textToURI xs
+            pure (first :| rest)
 
 {- | Smart constructor for ProtectedResourceMetadata.
 
@@ -316,36 +388,33 @@ Validates that resource URI and optional documentation URI are absolute HTTPS UR
 Returns Nothing if any URI validation fails.
 -}
 mkProtectedResourceMetadata ::
-    Text -> -- FIXME: See above
-    [Text] -> -- FIXME: See above
-    Maybe [Scope] -> -- FIXME: See above
-    Maybe [Text] -> -- FIXME: See above
+    URI ->
+    NonEmpty URI ->
+    Maybe [Scope] ->
+    Maybe (NonEmpty BearerMethod) ->
     Maybe Text ->
     Maybe Text ->
     Maybe ProtectedResourceMetadata
-mkProtectedResourceMetadata
-    res
-    authzServers
-    scopesSupp
-    bearerMethodsSupp
-    resName
-    resDoc = do
-        -- Validate required resource URI
-        guard (isAbsoluteHttpsUri res)
-        -- Validate optional documentation URI
-        case resDoc of
-            Nothing -> pure ()
-            Just uri -> guard (isAbsoluteHttpsUri uri)
-        -- All validations passed, construct the value
-        pure $
-            ProtectedResourceMetadata
-                { prResource = res
-                , prAuthorizationServers = authzServers
-                , prScopesSupported = scopesSupp
-                , prBearerMethodsSupported = bearerMethodsSupp
-                , prResourceName = resName
-                , prResourceDocumentation = resDoc
-                }
+mkProtectedResourceMetadata resource authServers scopesSupp bearerMethodsSupp resourceName resourceDoc = do
+    -- Validate resource URI is HTTPS
+    guard $ uriScheme resource == "https:"
+    guard $ isAbsoluteURI $ show resource
+
+    -- Validate documentation URI is HTTPS if provided
+    case resourceDoc of
+        Just doc -> guard $ isAbsoluteHttpsUri doc
+        Nothing -> pure ()
+
+    -- All validations passed, construct the metadata
+    pure $
+        ProtectedResourceMetadata
+            { prResource = resource
+            , prAuthorizationServers = authServers
+            , prScopesSupported = scopesSupp
+            , prBearerMethodsSupported = bearerMethodsSupp
+            , prResourceName = resourceName
+            , prResourceDocumentation = resourceDoc
+            }
 
 {- | Smart constructor for ProtectedResourceMetadata for demo/development use.
 
@@ -361,33 +430,29 @@ Unlike 'mkProtectedResourceMetadata', this function:
 Returns Nothing if URI format validation fails.
 -}
 mkProtectedResourceMetadataForDemo ::
-    Text -> -- FIXME: See above
-    [Text] -> -- FIXME: See above
-    Maybe [Scope] -> -- FIXME: See above
-    Maybe [Text] -> -- FIXME: See above
+    URI ->
+    NonEmpty URI ->
+    Maybe [Scope] ->
+    Maybe (NonEmpty BearerMethod) ->
     Maybe Text ->
     Maybe Text ->
     Maybe ProtectedResourceMetadata
-mkProtectedResourceMetadataForDemo
-    res
-    authzServers
-    scopesSupp
-    bearerMethodsSupp
-    resName
-    resDoc = do
-        -- Validate required resource URI (allow HTTP for demo)
-        guard (isAbsoluteURI (T.unpack res))
-        -- Validate optional documentation URI (allow HTTP for demo)
-        case resDoc of
-            Nothing -> pure ()
-            Just uri -> guard (isAbsoluteURI (T.unpack uri))
-        -- All validations passed, construct the value
-        pure $
-            ProtectedResourceMetadata
-                { prResource = res
-                , prAuthorizationServers = authzServers
-                , prScopesSupported = scopesSupp
-                , prBearerMethodsSupported = bearerMethodsSupp
-                , prResourceName = resName
-                , prResourceDocumentation = resDoc
-                }
+mkProtectedResourceMetadataForDemo resource authServers scopesSupp bearerMethodsSupp resourceName resourceDoc = do
+    -- Validate resource URI is absolute (HTTP or HTTPS allowed for demo)
+    guard $ isAbsoluteURI $ show resource
+
+    -- Validate documentation URI is absolute if provided (HTTP or HTTPS allowed for demo)
+    case resourceDoc of
+        Just doc -> guard $ isAbsoluteURI $ T.unpack doc
+        Nothing -> pure ()
+
+    -- All validations passed, construct the metadata
+    pure $
+        ProtectedResourceMetadata
+            { prResource = resource
+            , prAuthorizationServers = authServers
+            , prScopesSupported = scopesSupp
+            , prBearerMethodsSupported = bearerMethodsSupp
+            , prResourceName = resourceName
+            , prResourceDocumentation = resourceDoc
+            }

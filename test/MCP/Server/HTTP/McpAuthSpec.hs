@@ -32,6 +32,7 @@ import Servant.Server.Internal.Handler (runHandler)
 import Test.Hspec
 
 import Data.Maybe (fromJust)
+import Network.URI (parseURI)
 import MCP.Server (MCPServer (..), MCPServerM, initialServerState)
 import MCP.Server.HTTP (DemoOAuthBundle (..), HTTPServerConfig (..), defaultDemoOAuthBundle, defaultProtectedResourceMetadata)
 import MCP.Server.HTTP qualified as HTTP
@@ -56,7 +57,7 @@ testConfig =
             , httpMCPOAuthConfig = Just (bundleMCPConfig bundle)
             , httpJWK = Nothing
             , httpProtocolVersion = "2025-06-18"
-            , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata "http://localhost:8080")
+            , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata (fromJust $ parseURI "http://localhost:8080"))
             }
 
 -- | Null tracer for tests (discards all traces)

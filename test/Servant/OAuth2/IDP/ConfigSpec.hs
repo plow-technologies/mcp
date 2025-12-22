@@ -4,6 +4,7 @@ module Servant.OAuth2.IDP.ConfigSpec (spec) where
 
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Map.Strict qualified as Map
+import Data.Maybe (fromJust)
 import Network.URI (URI, parseURI)
 import Test.Hspec (Spec, describe, it, shouldBe)
 
@@ -33,8 +34,8 @@ testScope = case mkScope "read" of
 -- Helper for test resource metadata
 testResourceMetadata :: ProtectedResourceMetadata
 testResourceMetadata = case mkProtectedResourceMetadata
-    "https://example.com"
-    ["https://example.com"]
+    (fromJust $ parseURI "https://example.com")
+    (fromJust (parseURI "https://example.com") :| [])
     Nothing
     Nothing
     Nothing
