@@ -18,9 +18,13 @@ module Servant.OAuth2.IDP.ErrorsSpec (spec) where
 
 import Control.Monad.Reader (ReaderT)
 import Data.Aeson (decode, encode)
-import Data.Maybe (fromJust)
+import Data.ByteString.Lazy qualified as LBS
+import Data.ByteString.Lazy.Char8 qualified as LBS8
+import Data.List (isInfixOf)
+import Data.Maybe (fromJust, isJust)
 import Data.Text qualified as T
 import Network.HTTP.Types.Status (status400)
+import Servant (ServerError (..))
 import Servant.OAuth2.IDP.Errors
 import Servant.OAuth2.IDP.Store.InMemory (OAuthStoreError (..), OAuthTVarEnv)
 import Servant.OAuth2.IDP.Types (
@@ -55,6 +59,10 @@ testScope = case mkScope "read" of
 
 testSessionId :: SessionId
 testSessionId = fromJust $ mkSessionId "12345678-1234-1234-1234-123456789abc"
+
+-- Helper to check if a ByteString contains a substring
+containsText :: String -> LBS.ByteString -> Bool
+containsText needle haystack = needle `isInfixOf` LBS8.unpack haystack
 
 spec :: Spec
 spec = do
@@ -566,3 +574,99 @@ spec = do
                 classify authErr `shouldBe` "authorization"
                 classify loginErr `shouldBe` "login"
                 classify storeErr `shouldBe` "store"
+
+    describe "oauthErrorToServerError" $ do
+        describe "OAuthValidation errors map to 400 with plain text" $ do
+            it "ClientNotRegistered returns 400 with descriptive plain text" $ do
+                let err = OAuthValidation (ClientNotRegistered testClientId) :: OAuthError (ReaderT OAuthTVarEnv IO)
+                    serverErr = oauthErrorToServerError err
+                errHTTPCode serverErr `shouldBe` 400
+                errBody serverErr `shouldSatisfy` \body ->
+                    containsText "client_id not registered" body
+                        && containsText "test_client_123" body
+                errHeaders serverErr `shouldContain` [("Content-Type", "text/plain; charset=utf-8")]
+
+            it "EmptyRedirectUris returns 400 with descriptive plain text" $ do
+                let err = OAuthValidation EmptyRedirectUris :: OAuthError (ReaderT OAuthTVarEnv IO)
+                    serverErr = oauthErrorToServerError err
+                errHTTPCode serverErr `shouldBe` 400
+                errBody serverErr `shouldSatisfy` \body ->
+                    containsText "redirect_uri" body
+                        && containsText "at least one" body
+                errHeaders serverErr `shouldContain` [("Content-Type", "text/plain; charset=utf-8")]
+
+        describe "OAuthAuthorization errors map to correct status with JSON" $ do
+            it "ExpiredCode returns 400 with JSON OAuth error response" $ do
+                let err = OAuthAuthorization ExpiredCode :: OAuthError (ReaderT OAuthTVarEnv IO)
+                    serverErr = oauthErrorToServerError err
+                errHTTPCode serverErr `shouldBe` 400
+                let decoded = decode (errBody serverErr) :: Maybe OAuthErrorResponse
+                decoded `shouldSatisfy` isJust
+                let Just oauthResp = decoded
+                oauthErrorCode oauthResp `shouldBe` ErrInvalidGrant
+                oauthErrorDescription oauthResp `shouldBe` Just "Authorization code has expired"
+                errHeaders serverErr `shouldContain` [("Content-Type", "application/json; charset=utf-8")]
+
+            it "InvalidClient returns 401 with JSON OAuth error response" $ do
+                let err = OAuthAuthorization (InvalidClient (ClientNotFound testClientId)) :: OAuthError (ReaderT OAuthTVarEnv IO)
+                    serverErr = oauthErrorToServerError err
+                errHTTPCode serverErr `shouldBe` 401
+                let decoded = decode (errBody serverErr) :: Maybe OAuthErrorResponse
+                decoded `shouldSatisfy` isJust
+                let Just oauthResp = decoded
+                oauthErrorCode oauthResp `shouldBe` ErrInvalidClient
+                errHeaders serverErr `shouldContain` [("Content-Type", "application/json; charset=utf-8")]
+
+            it "AccessDenied returns 403 with JSON OAuth error response" $ do
+                let err = OAuthAuthorization (AccessDenied UserDenied) :: OAuthError (ReaderT OAuthTVarEnv IO)
+                    serverErr = oauthErrorToServerError err
+                errHTTPCode serverErr `shouldBe` 403
+                let decoded = decode (errBody serverErr) :: Maybe OAuthErrorResponse
+                decoded `shouldSatisfy` isJust
+                let Just oauthResp = decoded
+                oauthErrorCode oauthResp `shouldBe` ErrAccessDenied
+                errHeaders serverErr `shouldContain` [("Content-Type", "application/json; charset=utf-8")]
+
+        describe "OAuthLoginFlow errors map to 400 with HTML" $ do
+            it "CookiesRequired returns 400 with HTML error page" $ do
+                let err = OAuthLoginFlow CookiesRequired :: OAuthError (ReaderT OAuthTVarEnv IO)
+                    serverErr = oauthErrorToServerError err
+                errHTTPCode serverErr `shouldBe` 400
+                errBody serverErr `shouldSatisfy` \body ->
+                    containsText "<!DOCTYPE html>" body
+                        && containsText "Cookies Required" body
+                errHeaders serverErr `shouldContain` [("Content-Type", "text/html; charset=utf-8")]
+
+            it "SessionExpired returns 400 with HTML error page" $ do
+                let err = OAuthLoginFlow (SessionExpired testSessionId) :: OAuthError (ReaderT OAuthTVarEnv IO)
+                    serverErr = oauthErrorToServerError err
+                errHTTPCode serverErr `shouldBe` 400
+                errBody serverErr `shouldSatisfy` \body ->
+                    containsText "<!DOCTYPE html>" body
+                        && containsText "Session Expired" body
+                errHeaders serverErr `shouldContain` [("Content-Type", "text/html; charset=utf-8")]
+
+        describe "OAuthStore errors map to 500 with generic message" $ do
+            it "StoreUnavailable returns 500 with generic error (no backend leakage)" $ do
+                let err = OAuthStore (StoreUnavailable "Database connection failed") :: OAuthError (ReaderT OAuthTVarEnv IO)
+                    serverErr = oauthErrorToServerError err
+                errHTTPCode serverErr `shouldBe` 500
+                -- Must NOT leak backend error details
+                errBody serverErr `shouldNotSatisfy` \body ->
+                    containsText "Database connection failed" body
+                -- Should have generic message
+                errBody serverErr `shouldSatisfy` \body ->
+                    containsText "Internal Server Error" body
+                errHeaders serverErr `shouldContain` [("Content-Type", "text/plain; charset=utf-8")]
+
+            it "StoreInternalError returns 500 with generic error (no backend leakage)" $ do
+                let err = OAuthStore (StoreInternalError "Redis timeout") :: OAuthError (ReaderT OAuthTVarEnv IO)
+                    serverErr = oauthErrorToServerError err
+                errHTTPCode serverErr `shouldBe` 500
+                -- Must NOT leak backend error details
+                errBody serverErr `shouldNotSatisfy` \body ->
+                    containsText "Redis timeout" body
+                -- Should have generic message
+                errBody serverErr `shouldSatisfy` \body ->
+                    containsText "Internal Server Error" body
+                errHeaders serverErr `shouldContain` [("Content-Type", "text/plain; charset=utf-8")]

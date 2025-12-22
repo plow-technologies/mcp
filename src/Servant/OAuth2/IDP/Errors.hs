@@ -57,6 +57,9 @@ module Servant.OAuth2.IDP.Errors (
 
     -- * Error Response
     OAuthErrorResponse (..),
+
+    -- * ServerError Conversion
+    oauthErrorToServerError,
 ) where
 
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
@@ -78,6 +81,7 @@ import Lucid (
     title_,
  )
 import Network.HTTP.Types.Status (Status, status400, status401, status403)
+import Servant (ServerError)
 import Servant.OAuth2.IDP.Store (OAuthStateError)
 import Servant.OAuth2.IDP.Types (
     AuthCodeId,
@@ -533,3 +537,20 @@ data OAuthError m
     | -- | Storage backend error (500)
       OAuthStore (OAuthStateError m)
     deriving stock (Generic)
+
+-- -----------------------------------------------------------------------------
+-- ServerError Conversion
+-- -----------------------------------------------------------------------------
+
+{- | Convert OAuthError to Servant ServerError with proper HTTP status codes.
+
+Maps each error type to appropriate HTTP status:
+- OAuthValidation: 400 Bad Request (plain text)
+- OAuthAuthorization: varies (400/401/403) per RFC 6749 (JSON)
+- OAuthLoginFlow: varies (400/401/404) per cause (HTML)
+- OAuthStore: 500 Internal Server Error (generic message, no backend leakage)
+
+The Show constraint on OAuthStateError is used for logging only, not in response bodies.
+-}
+oauthErrorToServerError :: OAuthError m -> ServerError
+oauthErrorToServerError = error "oauthErrorToServerError: not implemented"
