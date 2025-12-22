@@ -10,7 +10,7 @@ Prepare `Servant.OAuth2.IDP.*` modules for extraction to a separate package by r
 ## Technical Context
 
 **Language/Version**: Haskell GHC2021 (GHC 9.4+ via base ^>=4.18.2.1)
-**Primary Dependencies**: servant-server 0.19-0.20, servant-auth-server 0.4, aeson 2.1-2.2, monad-time, network-uri, cryptonite 0.30, generic-lens
+**Primary Dependencies**: servant-server 0.19-0.20, servant-auth-server 0.4, aeson 2.1-2.2, monad-time, network-uri, cryptonite 0.30, generic-lens, QuickCheck >= 2.14 (library dep for Arbitrary instances in type modules)
 **Storage**: N/A (refactoring only, no data changes)
 **Testing**: cabal test (HSpec test suite)
 **Target Platform**: Linux server
@@ -34,6 +34,22 @@ Reference: `.specify/memory/constitution.md`
 | V. Pure Core, Impure Shell | :white_check_mark: | All new modules are pure (`Trace`, `Config`, `Metadata`, `PKCE`); impure operations remain at boundary in handlers |
 | VI. Property-Based Testing | :white_check_mark: | Existing tests preserved; PKCE round-trip testable: `validateCodeVerifier (generateCodeVerifier) (generateCodeChallenge verifier) == True` |
 
+## GOLDEN RULE: Smart Constructor Hygiene
+
+> **Only code in the type-defining module needs audit for correct construction.**
+
+This rule emerged from the 2025-12-22 cleanup session and drives the following architectural decisions:
+
+1. **Typeclass instances ARE the boundary** - `FromJSON`, `FromHttpApiData`, etc. live in the type-defining module and go through smart constructors. No separate `Boundary.hs` needed.
+
+2. **Arbitrary instances live with types** - QuickCheck's `Arbitrary` instances belong in the type-defining module (e.g., `Types.hs`), not a separate `test/Generators.hs`. GHC dead code elimination removes unused instances from production binaries.
+
+3. **No `unsafe*` exports** - Smart constructors (`mkFoo`) are the ONLY way to construct validated types. Tests use the same public API as production code—no special privileges.
+
+4. **Generators live with types** - ID generation functions (`generateAuthCodeId`, `generateClientId`, etc.) live in `Types.hs` where they can use internal constructors correctly.
+
+**Audit scope**: When reviewing code safety, you only need to audit the type-defining module. If the smart constructor is correct, all consumers are correct by construction.
+
 ## Project Structure
 
 ### Documentation (this feature)
@@ -56,11 +72,11 @@ src/
 │   ├── Auth/
 │   │   ├── Backend.hs      # MODIFY: Smart constructor hygiene (Username export)
 │   │   └── Demo.hs         # UNCHANGED
-│   ├── Boundary.hs         # UNCHANGED
+│   ├── Boundary.hs         # (DELETED - typeclass instances are the boundary)
 │   ├── Config.hs           # NEW: OAuthEnv record
 │   ├── Handlers/
 │   │   ├── Authorization.hs  # MODIFY: Use OAuthEnv, OAuthTrace
-│   │   ├── Helpers.hs        # MODIFY: Use OAuthEnv, OAuthTrace
+│   │   ├── Helpers.hs        # (DELETED - generators moved to Types.hs)
 │   │   ├── HTML.hs           # UNCHANGED
 │   │   ├── Login.hs          # MODIFY: Use OAuthEnv, OAuthTrace
 │   │   ├── Metadata.hs       # MODIFY: Use OAuthEnv, import from Servant
@@ -86,7 +102,7 @@ src/
     │   └── Time.hs           # UNCHANGED
     └── Trace/
         ├── HTTP.hs           # UNCHANGED (still uses MCP.Trace.OAuth)
-        └── OAuth.hs          # UNCHANGED (stays as MCP-specific trace embedding)
+        └── OAuth.hs          # (DELETED - OAuthTrace moved to Servant.OAuth2.IDP.Trace)
 ```
 
 **Structure Decision**: Single library structure. New modules added under `Servant.OAuth2.IDP.*` namespace to maintain package extraction path.
