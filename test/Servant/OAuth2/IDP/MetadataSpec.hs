@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{- HLINT ignore "Avoid partial function" -}
+
 {- |
 Module      : Servant.OAuth2.IDP.MetadataSpec
 Description : Tests for OAuth metadata types per RFC 8414 and RFC 9728
@@ -13,6 +15,7 @@ module Servant.OAuth2.IDP.MetadataSpec (spec) where
 
 import Data.Aeson (decode, encode, object, (.=))
 import Data.Aeson qualified as Aeson
+import Data.Maybe (fromJust)
 import Data.Text (Text)
 import Servant.OAuth2.IDP.Metadata (
     mkOAuthMetadata,
@@ -25,7 +28,7 @@ import Servant.OAuth2.IDP.Metadata (
     prResource,
     prScopesSupported,
  )
-import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), ResponseType (..), mkScope, unsafeScope)
+import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), ResponseType (..), mkScope)
 import Test.Hspec
 
 spec :: Spec
@@ -158,8 +161,8 @@ spec = do
                         decode encoded `shouldBe` Just expected
 
             it "serializes all optional fields with snake_case keys" $ do
-                let openidScope = unsafeScope "openid"
-                    profileScope = unsafeScope "profile"
+                let openidScope = fromJust $ mkScope "openid"
+                    profileScope = fromJust $ mkScope "profile"
                 case mkOAuthMetadata
                     "https://auth.example.com"
                     "https://auth.example.com/authorize"
@@ -193,7 +196,7 @@ spec = do
                         decode encoded `shouldBe` Just expected
 
             it "round-trips through JSON with snake_case fields" $ do
-                let openidScope = unsafeScope "openid"
+                let openidScope = fromJust $ mkScope "openid"
                 case mkOAuthMetadata
                     "https://auth.example.com"
                     "https://auth.example.com/authorize"
@@ -301,8 +304,8 @@ spec = do
                         decode encoded `shouldBe` Just expected
 
             it "serializes all optional fields with snake_case keys" $ do
-                let openidScope = unsafeScope "openid"
-                    profileScope = unsafeScope "profile"
+                let openidScope = fromJust $ mkScope "openid"
+                    profileScope = fromJust $ mkScope "profile"
                 case mkProtectedResourceMetadata
                     "https://api.example.com"
                     ["https://auth.example.com", "https://auth2.example.com"]
@@ -326,7 +329,7 @@ spec = do
                         decode encoded `shouldBe` Just expected
 
             it "round-trips through JSON with snake_case fields" $ do
-                let openidScope = unsafeScope "openid"
+                let openidScope = fromJust $ mkScope "openid"
                 case mkProtectedResourceMetadata
                     "https://api.example.com"
                     ["https://auth.example.com"]

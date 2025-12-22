@@ -50,6 +50,8 @@ import Network.URI (URI)
 import Test.QuickCheck
 
 -- OAuth domain types
+
+import Data.Maybe (fromJust)
 import Servant.OAuth2.IDP.Auth.Backend (
     CredentialStore (..),
     HashedPassword,
@@ -82,11 +84,17 @@ import Servant.OAuth2.IDP.Types (
     Scope,
     SessionId,
     UserId,
+    mkAccessTokenId,
+    mkAuthCodeId,
+    mkClientId,
     mkClientName,
     mkCodeChallenge,
     mkCodeVerifier,
     mkRedirectUri,
+    mkRefreshTokenId,
     mkScope,
+    mkSessionId,
+    mkUserId,
     unAccessTokenId,
     unAuthCodeId,
     unClientId,
@@ -94,29 +102,32 @@ import Servant.OAuth2.IDP.Types (
     unRefreshTokenId,
     unScope,
     unUserId,
-    unsafeAccessTokenId,
-    unsafeAuthCodeId,
-    unsafeClientId,
-    unsafeRefreshTokenId,
-    unsafeSessionId,
-    unsafeUserId,
  )
 
 -- ============================================================================
 -- Identity Newtypes (non-empty text)
 -- ============================================================================
 
+{- HLINT ignore "Avoid partial function" -}
 instance Arbitrary AuthCodeId where
-    arbitrary = unsafeAuthCodeId . T.pack . getNonEmpty <$> arbitrary
-    shrink ac = [unsafeAuthCodeId (T.pack s) | s <- shrink (T.unpack (unAuthCodeId ac)), not (null s)]
+    arbitrary = fromJust . mkAuthCodeId . T.pack . getNonEmpty <$> arbitrary
+    shrink ac =
+        [ fromJust (mkAuthCodeId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unAuthCodeId ac))
+        , not (null s)
+        ]
 
 instance Arbitrary ClientId where
-    arbitrary = unsafeClientId . T.pack . getNonEmpty <$> arbitrary
-    shrink cid = [unsafeClientId (T.pack s) | s <- shrink (T.unpack (unClientId cid)), not (null s)]
+    arbitrary = fromJust . mkClientId . T.pack . getNonEmpty <$> arbitrary
+    shrink cid =
+        [ fromJust (mkClientId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unClientId cid))
+        , not (null s)
+        ]
 
 -- SessionId requires UUID format: 8-4-4-4-12 hex pattern
 instance Arbitrary SessionId where
-    arbitrary = unsafeSessionId <$> genUUID
+    arbitrary = fromJust . mkSessionId <$> genUUID
       where
         genUUID :: Gen Text
         genUUID = do
@@ -133,16 +144,28 @@ instance Arbitrary SessionId where
     shrink _ = [] -- Don't shrink UUIDs (they must maintain format)
 
 instance Arbitrary UserId where
-    arbitrary = unsafeUserId . T.pack . getNonEmpty <$> arbitrary
-    shrink uid = [unsafeUserId (T.pack s) | s <- shrink (T.unpack (unUserId uid)), not (null s)]
+    arbitrary = fromJust . mkUserId . T.pack . getNonEmpty <$> arbitrary
+    shrink uid =
+        [ fromJust (mkUserId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unUserId uid))
+        , not (null s)
+        ]
 
 instance Arbitrary RefreshTokenId where
-    arbitrary = unsafeRefreshTokenId . T.pack . getNonEmpty <$> arbitrary
-    shrink rt = [unsafeRefreshTokenId (T.pack s) | s <- shrink (T.unpack (unRefreshTokenId rt)), not (null s)]
+    arbitrary = fromJust . mkRefreshTokenId . T.pack . getNonEmpty <$> arbitrary
+    shrink rt =
+        [ fromJust (mkRefreshTokenId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unRefreshTokenId rt))
+        , not (null s)
+        ]
 
 instance Arbitrary AccessTokenId where
-    arbitrary = unsafeAccessTokenId . T.pack . getNonEmpty <$> arbitrary
-    shrink at = [unsafeAccessTokenId (T.pack s) | s <- shrink (T.unpack (unAccessTokenId at)), not (null s)]
+    arbitrary = fromJust . mkAccessTokenId . T.pack . getNonEmpty <$> arbitrary
+    shrink at =
+        [ fromJust (mkAccessTokenId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unAccessTokenId at))
+        , not (null s)
+        ]
 
 instance Arbitrary Username where
     arbitrary = do

@@ -24,12 +24,12 @@ import Servant.OAuth2.IDP.Types (
     AuthorizationCode (..),
     CodeChallengeMethod (..),
     UserId,
+    mkAuthCodeId,
+    mkClientId,
     mkCodeChallenge,
     mkRedirectUri,
-    unsafeAuthCodeId,
-    unsafeClientId,
-    unsafeScope,
-    unsafeUserId,
+    mkScope,
+    mkUserId,
  )
 
 -- | Test that AuthorizationCode is a Functor
@@ -49,7 +49,7 @@ spec = describe "AuthorizationCode Functor" $ do
 
     -- Practical use case: map userId to a different type
     it "can map UserId to String" $ do
-        let authCode = mkTestAuthCode (unsafeUserId "user123")
+        let authCode = mkTestAuthCode (fromJust $ mkUserId "user123")
             mapped = fmap (const "mapped") authCode
         authUserId mapped `shouldBe` ("mapped" :: String)
 
@@ -57,14 +57,14 @@ spec = describe "AuthorizationCode Functor" $ do
 mkTestAuthCode :: userId -> AuthorizationCode userId
 mkTestAuthCode userId =
     AuthorizationCode
-        { authCodeId = unsafeAuthCodeId "code_test123"
-        , authClientId = unsafeClientId "client_test"
+        { authCodeId = fromJust $ mkAuthCodeId "code_test123"
+        , authClientId = fromJust $ mkClientId "client_test"
         , authRedirectUri = testRedirectUri
         , authCodeChallenge = case mkCodeChallenge "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM" of
             Just cc -> cc
             Nothing -> error "Invalid test CodeChallenge"
         , authCodeChallengeMethod = S256
-        , authScopes = Set.fromList [unsafeScope "read", unsafeScope "write"]
+        , authScopes = Set.fromList [fromJust $ mkScope "read", fromJust $ mkScope "write"]
         , authUserId = userId
         , authExpiry = testTime
         }

@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{- HLINT ignore "Avoid partial function" -}
+
 {- |
 Module      : Servant.OAuth2.IDP.TraceSpec
 Description : Tests for OAuthTrace ADT with domain newtypes
@@ -14,6 +16,7 @@ Per TDD protocol: these tests are written FIRST and will fail until implementati
 -}
 module Servant.OAuth2.IDP.TraceSpec (spec) where
 
+import Data.Maybe (fromJust)
 import Servant.OAuth2.IDP.Auth.Backend (Username, mkUsername)
 import Servant.OAuth2.IDP.Errors (ValidationError (..))
 import Servant.OAuth2.IDP.Trace
@@ -23,16 +26,16 @@ import Servant.OAuth2.IDP.Types (
     RedirectUri,
     Scope,
     SessionId,
+    mkClientId,
     mkRedirectUri,
     mkScope,
-    unsafeClientId,
-    unsafeSessionId,
+    mkSessionId,
  )
 import Test.Hspec
 
 -- Test fixtures
 testClientId :: ClientId
-testClientId = unsafeClientId "test_client_123"
+testClientId = fromJust $ mkClientId "test_client_123"
 
 testRedirectUri :: RedirectUri
 testRedirectUri = case mkRedirectUri "https://example.com/callback" of
@@ -45,7 +48,7 @@ testScope = case mkScope "read" of
     Nothing -> error "Test fixture: invalid scope"
 
 testSessionId :: SessionId
-testSessionId = unsafeSessionId "12345678-1234-1234-1234-123456789abc"
+testSessionId = fromJust $ mkSessionId "12345678-1234-1234-1234-123456789abc"
 
 testUsername :: Username
 testUsername = case mkUsername "testuser" of

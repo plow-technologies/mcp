@@ -22,7 +22,7 @@ import MCP.Trace.Types (MCPTrace (..), renderMCPTrace)
 import Servant.OAuth2.IDP.Auth.Backend (mkUsername)
 import Servant.OAuth2.IDP.Errors (ValidationError (..))
 import Servant.OAuth2.IDP.Trace (DenialReason (..), OAuthTrace (..), OperationResult (..), renderOAuthTrace)
-import Servant.OAuth2.IDP.Types (OAuthGrantType (..), mkRedirectUri, unsafeClientId, unsafeScope, unsafeSessionId)
+import Servant.OAuth2.IDP.Types (OAuthGrantType (..), mkClientId, mkRedirectUri, mkScope, mkSessionId)
 import Test.Hspec
 
 spec :: Spec
@@ -159,20 +159,20 @@ spec = do
         describe "OAuthTrace golden outputs (via renderOAuthTrace)" $ do
             it "TraceClientRegistration produces expected format" $ do
                 let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
-                    trace = TraceClientRegistration (unsafeClientId "client-xyz") redirectUri
+                    trace = TraceClientRegistration (fromJust $ mkClientId "client-xyz") redirectUri
                 renderOAuthTrace trace `shouldBe` "Client registered: client-xyz (http://localhost/callback)"
 
             it "TraceAuthorizationRequest with scopes produces expected format" $ do
-                let trace = TraceAuthorizationRequest (unsafeClientId "client-123") [unsafeScope "read", unsafeScope "write"] Success
+                let trace = TraceAuthorizationRequest (fromJust $ mkClientId "client-123") [fromJust $ mkScope "read", fromJust $ mkScope "write"] Success
                 renderOAuthTrace trace `shouldBe` "Authorization request from client-123 for scopes [read, write]: SUCCESS"
 
             it "TraceAuthorizationRequest without scopes produces expected format" $ do
-                let trace = TraceAuthorizationRequest (unsafeClientId "client-456") [] Failure
+                let trace = TraceAuthorizationRequest (fromJust $ mkClientId "client-456") [] Failure
                 renderOAuthTrace trace `shouldBe` "Authorization request from client-456 for scopes (none): FAILED"
 
             it "TraceLoginPageServed produces expected format" $ do
-                let trace = TraceLoginPageServed (unsafeSessionId "sess-abc")
-                renderOAuthTrace trace `shouldBe` "Login page served for session sess-abc"
+                let trace = TraceLoginPageServed (fromJust $ mkSessionId "12345678-1234-5678-1234-567812345678")
+                renderOAuthTrace trace `shouldBe` "Login page served for session 12345678-1234-5678-1234-567812345678"
 
             it "TraceLoginAttempt success produces expected format" $ do
                 let trace = TraceLoginAttempt (fromJust $ mkUsername "demo") Success
@@ -183,11 +183,11 @@ spec = do
                 renderOAuthTrace trace `shouldBe` "Login attempt for user admin: FAILED"
 
             it "TraceAuthorizationGranted produces expected format" $ do
-                let trace = TraceAuthorizationGranted (unsafeClientId "client-789") (fromJust $ mkUsername "user-456")
+                let trace = TraceAuthorizationGranted (fromJust $ mkClientId "client-789") (fromJust $ mkUsername "user-456")
                 renderOAuthTrace trace `shouldBe` "Authorization granted to client client-789 by user user-456"
 
             it "TraceAuthorizationDenied produces expected format" $ do
-                let trace = TraceAuthorizationDenied (unsafeClientId "client-999") UserDenied
+                let trace = TraceAuthorizationDenied (fromJust $ mkClientId "client-999") UserDenied
                 renderOAuthTrace trace `shouldBe` "Authorization denied for client client-999: User denied"
 
             it "TraceTokenExchange success produces expected format" $ do
@@ -207,12 +207,12 @@ spec = do
                 renderOAuthTrace trace `shouldBe` "Token refresh: FAILED"
 
             it "TraceSessionExpired produces expected format" $ do
-                let trace = TraceSessionExpired (unsafeSessionId "sess-expired")
-                renderOAuthTrace trace `shouldBe` "Session expired: sess-expired"
+                let trace = TraceSessionExpired (fromJust $ mkSessionId "87654321-4321-8765-4321-876543218765")
+                renderOAuthTrace trace `shouldBe` "Session expired: 87654321-4321-8765-4321-876543218765"
 
             it "TraceValidationError produces expected format" $ do
                 let redirectUri = fromJust $ mkRedirectUri "https://wrong.com/callback"
-                    trace = TraceValidationError (RedirectUriMismatch (unsafeClientId "client-1") redirectUri)
+                    trace = TraceValidationError (RedirectUriMismatch (fromJust $ mkClientId "client-1") redirectUri)
                 renderOAuthTrace trace `shouldBe` "Validation error: Redirect URI mismatch for client client-1: https://wrong.com/callback"
 
         describe "MCPTrace golden outputs (via renderMCPTrace delegation)" $ do
@@ -234,5 +234,5 @@ spec = do
 
             it "MCPHttp with nested OAuth delegates correctly" $ do
                 let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
-                    trace = MCPHttp $ HTTPOAuth $ TraceClientRegistration (unsafeClientId "client-golden") redirectUri
+                    trace = MCPHttp $ HTTPOAuth $ TraceClientRegistration (fromJust $ mkClientId "client-golden") redirectUri
                 renderMCPTrace trace `shouldBe` "[HTTP:OAuth] Client registered: client-golden (http://localhost/callback)"

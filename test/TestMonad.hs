@@ -85,6 +85,7 @@ import Data.ByteArray qualified as BA
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
+import Data.Maybe (fromJust)
 import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (UTCTime, addUTCTime)
 import MCP.Server.Time
@@ -329,7 +330,8 @@ instance AuthBackend TestM where
                 let candidateHash = mkHashedPassword (storeSalt store) password
                 if storedHash == candidateHash -- Constant-time via ScrubbedBytes Eq
                     then do
-                        let userId = unsafeUserId (usernameText username)
+                        {- HLINT ignore "Avoid partial function" -}
+                        let userId = fromJust (mkUserId (usernameText username)) -- Known-good: username already validated
                         let authUser =
                                 AuthUser
                                     { userUserId = userId

@@ -1,4 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
+
+{- HLINT ignore "Avoid partial function" -}
 
 {- |
 Module      : Servant.OAuth2.IDP.TokenRequestSpec
@@ -11,6 +14,7 @@ Portability : GHC
 -}
 module Servant.OAuth2.IDP.TokenRequestSpec (spec) where
 
+import Data.Maybe (fromJust)
 import Data.Text (Text)
 import Test.Hspec
 import Web.FormUrlEncoded (urlDecodeAsForm, urlEncodeAsForm)
@@ -18,9 +22,9 @@ import Web.FormUrlEncoded (urlDecodeAsForm, urlEncodeAsForm)
 import Servant.OAuth2.IDP.API (TokenRequest (..))
 import Servant.OAuth2.IDP.Types (
     ResourceIndicator (..),
+    mkAuthCodeId,
     mkCodeVerifier,
-    unsafeAuthCodeId,
-    unsafeRefreshTokenId,
+    mkRefreshTokenId,
  )
 
 spec :: Spec
@@ -38,7 +42,7 @@ spec = do
                 case urlDecodeAsForm encoded of
                     Left err -> expectationFailure $ "Failed to parse: " <> show err
                     Right (AuthorizationCodeGrant code verifier mResource) -> do
-                        code `shouldBe` unsafeAuthCodeId "code_abc123"
+                        code `shouldBe` fromJust (mkAuthCodeId "code_abc123")
                         case mkCodeVerifier "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~" of
                             Just expected -> verifier `shouldBe` expected
                             Nothing -> expectationFailure "Invalid test CodeVerifier"
@@ -57,7 +61,7 @@ spec = do
                 case urlDecodeAsForm encoded of
                     Left err -> expectationFailure $ "Failed to parse: " <> show err
                     Right (AuthorizationCodeGrant code verifier mResource) -> do
-                        code `shouldBe` unsafeAuthCodeId "code_xyz789"
+                        code `shouldBe` fromJust (mkAuthCodeId "code_xyz789")
                         case mkCodeVerifier "1234567890abcdefghijklmnopqrstuvwxyz-._~ABCDEFGHIJKLMNOPQRSTUVWXYZ" of
                             Just expected -> verifier `shouldBe` expected
                             Nothing -> expectationFailure "Invalid test CodeVerifier"
@@ -109,7 +113,7 @@ spec = do
                 case urlDecodeAsForm encoded of
                     Left err -> expectationFailure $ "Failed to parse: " <> show err
                     Right (RefreshTokenGrant refreshToken mResource) -> do
-                        refreshToken `shouldBe` unsafeRefreshTokenId "rt_refresh123"
+                        refreshToken `shouldBe` fromJust (mkRefreshTokenId "rt_refresh123")
                         mResource `shouldBe` Nothing
                     Right other -> expectationFailure $ "Expected RefreshTokenGrant, got: " <> show other
 
@@ -124,7 +128,7 @@ spec = do
                 case urlDecodeAsForm encoded of
                     Left err -> expectationFailure $ "Failed to parse: " <> show err
                     Right (RefreshTokenGrant refreshToken mResource) -> do
-                        refreshToken `shouldBe` unsafeRefreshTokenId "rt_refresh456"
+                        refreshToken `shouldBe` fromJust (mkRefreshTokenId "rt_refresh456")
                         mResource `shouldBe` Just (ResourceIndicator "https://api.example.com")
                     Right other -> expectationFailure $ "Expected RefreshTokenGrant, got: " <> show other
 

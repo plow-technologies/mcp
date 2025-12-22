@@ -1,6 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
+{- HLINT ignore "Avoid partial function" -}
+
 {- |
 Module      : MCP.Server.HTTP.McpAuthSpec
 Description : Tests for MCP endpoint JWT authentication
@@ -29,13 +31,14 @@ import Servant.Server (ServerError (..))
 import Servant.Server.Internal.Handler (runHandler)
 import Test.Hspec
 
+import Data.Maybe (fromJust)
 import MCP.Server (MCPServer (..), MCPServerM, initialServerState)
 import MCP.Server.HTTP (DemoOAuthBundle (..), HTTPServerConfig (..), defaultDemoOAuthBundle, defaultProtectedResourceMetadata)
 import MCP.Server.HTTP qualified as HTTP
 import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types (Implementation (..), ServerCapabilities (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..))
-import Servant.OAuth2.IDP.Types (unsafeUserId)
+import Servant.OAuth2.IDP.Types (mkUserId)
 
 -- | Minimal MCPServer instance for testing (uses default implementations)
 instance MCPServer MCPServerM
@@ -64,7 +67,7 @@ testTracer = IOTracer (Tracer (\_ -> pure ()))
 testAuthUser :: AuthUser
 testAuthUser =
     AuthUser
-        { userUserId = unsafeUserId "test-user-123"
+        { userUserId = fromJust $ mkUserId "test-user-123"
         , userUserEmail = Just "test@example.com"
         , userUserName = Just "Test User"
         }

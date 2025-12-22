@@ -1,5 +1,8 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
+
+{- HLINT ignore "Avoid partial function" -}
 
 {- |
 Module      : Servant.OAuth2.IDP.APISpec
@@ -16,7 +19,7 @@ import Data.Aeson (decode, encode)
 import Data.Aeson.KeyMap qualified as KM
 import Data.Aeson.Types (Value (..))
 import Data.List.NonEmpty (NonEmpty (..))
-import Data.Maybe (isJust, isNothing)
+import Data.Maybe (fromJust, isJust, isNothing)
 import Data.Set qualified as Set
 import Servant.OAuth2.IDP.API (ClientRegistrationRequest (..), ClientRegistrationResponse (..), TokenResponse (..))
 import Servant.OAuth2.IDP.Types (
@@ -36,20 +39,15 @@ import Servant.OAuth2.IDP.Types (
  )
 import Test.Hspec
 
--- Helper to unwrap Maybe in tests (partial function safe only for valid test data)
-unsafeMk :: Maybe a -> a
-unsafeMk (Just x) = x
-unsafeMk Nothing = error "unsafeMk: test data construction failed - this should never happen with valid literals"
-
 spec :: Spec
 spec = do
     describe "FR-062: ClientRegistrationResponse with type-safe newtypes" $ do
         context "ToJSON instance unwraps newtypes correctly" $ do
             it "serializes client_id as unwrapped Text" $ do
-                let clientId = unsafeMk $ mkClientId "client_abc123"
-                    clientSecret = unsafeMk $ mkClientSecret ""
-                    clientName = unsafeMk $ mkClientName "Test Client"
-                    redirectUri = unsafeMk $ mkRedirectUri "https://example.com/callback"
+                let clientId = fromJust $ mkClientId "client_abc123"
+                    clientSecret = fromJust $ mkClientSecret ""
+                    clientName = fromJust $ mkClientName "Test Client"
+                    redirectUri = fromJust $ mkRedirectUri "https://example.com/callback"
                     response = ClientRegistrationResponse clientId clientSecret clientName (redirectUri :| []) (GrantAuthorizationCode :| []) (ResponseCode :| []) AuthNone
                     encoded = encode response
                     decoded = decode encoded :: Maybe Value
@@ -62,10 +60,10 @@ spec = do
                     _ -> expectationFailure "Expected JSON object"
 
             it "serializes client_secret as unwrapped Text (empty for public clients)" $ do
-                let clientId = unsafeMk $ mkClientId "client_public"
-                    clientSecret = unsafeMk $ mkClientSecret "" -- Empty for public clients
-                    clientName = unsafeMk $ mkClientName "Public Client"
-                    redirectUri = unsafeMk $ mkRedirectUri "https://example.com/callback"
+                let clientId = fromJust $ mkClientId "client_public"
+                    clientSecret = fromJust $ mkClientSecret "" -- Empty for public clients
+                    clientName = fromJust $ mkClientName "Public Client"
+                    redirectUri = fromJust $ mkRedirectUri "https://example.com/callback"
                     response = ClientRegistrationResponse clientId clientSecret clientName (redirectUri :| []) (GrantAuthorizationCode :| []) (ResponseCode :| []) AuthNone
                     encoded = encode response
                     decoded = decode encoded :: Maybe Value
@@ -76,10 +74,10 @@ spec = do
                     _ -> expectationFailure "Expected JSON object"
 
             it "serializes client_name as unwrapped Text" $ do
-                let clientId = unsafeMk $ mkClientId "client_xyz"
-                    clientSecret = unsafeMk $ mkClientSecret "secret_confidential"
-                    clientName = unsafeMk $ mkClientName "My Application"
-                    redirectUri = unsafeMk $ mkRedirectUri "https://app.example.com/auth"
+                let clientId = fromJust $ mkClientId "client_xyz"
+                    clientSecret = fromJust $ mkClientSecret "secret_confidential"
+                    clientName = fromJust $ mkClientName "My Application"
+                    redirectUri = fromJust $ mkRedirectUri "https://app.example.com/auth"
                     response = ClientRegistrationResponse clientId clientSecret clientName (redirectUri :| []) (GrantAuthorizationCode :| []) (ResponseCode :| []) AuthNone
                     encoded = encode response
                     decoded = decode encoded :: Maybe Value
@@ -207,8 +205,8 @@ spec = do
             it "serializes scope as space-delimited string when present" $ do
                 let accessToken = AccessToken "access_with_scope"
                     tokenType = TokenType "Bearer"
-                    scope1 = unsafeMk $ mkScope "mcp:read"
-                    scope2 = unsafeMk $ mkScope "mcp:write"
+                    scope1 = fromJust $ mkScope "mcp:read"
+                    scope2 = fromJust $ mkScope "mcp:write"
                     scopes = Set.fromList [scope1, scope2]
                     response = TokenResponse accessToken tokenType (Just (mkTokenValidity 3600)) Nothing (Just (Scopes scopes))
                     encoded = encode response

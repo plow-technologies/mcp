@@ -1,4 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
+
+{- HLINT ignore "Avoid partial function" -}
 
 {- |
 Module      : Servant.OAuth2.IDP.LucidRenderingSpec
@@ -17,12 +20,13 @@ import Data.Text.Lazy qualified as TL
 import Lucid (Html, renderText, toHtml)
 import Test.Hspec
 
+import Data.Maybe (fromJust)
 import Servant.OAuth2.IDP.Errors (LoginFlowError (..))
 import Servant.OAuth2.IDP.Handlers.HTML (
     ErrorPage (..),
     LoginPage (..),
  )
-import Servant.OAuth2.IDP.Types (unsafeSessionId)
+import Servant.OAuth2.IDP.Types (mkSessionId)
 
 -- | Test suite for Lucid-based HTML rendering
 spec :: Spec
@@ -216,7 +220,7 @@ spec = do
             html `shouldSatisfy` T.isInfixOf "cookie mismatch"
 
         it "renders SessionNotFound error with session ID" $ do
-            let err = SessionNotFound (unsafeSessionId "test-session-123")
+            let err = SessionNotFound (fromJust $ mkSessionId "test-session-123")
             let html = TL.toStrict $ renderText (toHtml (err :: LoginFlowError))
 
             html `shouldSatisfy` T.isInfixOf "Invalid Session"
@@ -224,7 +228,7 @@ spec = do
             html `shouldSatisfy` T.isInfixOf "expired"
 
         it "renders SessionExpired error with session ID" $ do
-            let err = SessionExpired (unsafeSessionId "expired-session-456")
+            let err = SessionExpired (fromJust $ mkSessionId "expired-session-456")
             let html = TL.toStrict $ renderText (toHtml (err :: LoginFlowError))
 
             html `shouldSatisfy` T.isInfixOf "Session Expired"
@@ -233,7 +237,7 @@ spec = do
         it "uses Lucid's automatic HTML escaping" $ do
             -- The ToHtml instance uses Lucid which automatically escapes HTML
             -- This test verifies the instance compiles and renders valid HTML
-            let err = SessionNotFound (unsafeSessionId "test-session")
+            let err = SessionNotFound (fromJust $ mkSessionId "test-session")
             let html = TL.toStrict $ renderText (toHtml (err :: LoginFlowError))
 
             -- Should produce valid HTML structure

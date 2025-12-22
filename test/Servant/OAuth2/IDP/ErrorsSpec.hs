@@ -1,4 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
+
+{- HLINT ignore "Avoid partial function" -}
 
 {- |
 Module      : Servant.OAuth2.IDP.ErrorsSpec
@@ -14,6 +17,7 @@ Test suite for consolidated OAuth error types in Servant.OAuth2.IDP.Errors.
 module Servant.OAuth2.IDP.ErrorsSpec (spec) where
 
 import Data.Aeson (decode, encode)
+import Data.Maybe (fromJust)
 import Data.Text qualified as T
 import Network.HTTP.Types.Status (status400)
 import Servant.OAuth2.IDP.Errors
@@ -24,18 +28,18 @@ import Servant.OAuth2.IDP.Types (
     RedirectUri,
     Scope,
     SessionId,
+    mkAuthCodeId,
+    mkClientId,
     mkRedirectUri,
+    mkRefreshTokenId,
     mkScope,
-    unsafeAuthCodeId,
-    unsafeClientId,
-    unsafeRefreshTokenId,
-    unsafeSessionId,
+    mkSessionId,
  )
 import Test.Hspec
 
 -- Test fixture helpers
 testClientId :: ClientId
-testClientId = unsafeClientId "test_client_123"
+testClientId = fromJust $ mkClientId "test_client_123"
 
 testRedirectUri :: RedirectUri
 testRedirectUri = case mkRedirectUri "https://example.com/callback" of
@@ -48,7 +52,7 @@ testScope = case mkScope "read" of
     Nothing -> error "Test fixture: invalid scope"
 
 testSessionId :: SessionId
-testSessionId = unsafeSessionId "12345678-1234-1234-1234-123456789abc"
+testSessionId = fromJust $ mkSessionId "12345678-1234-1234-1234-123456789abc"
 
 spec :: Spec
 spec = do
@@ -314,7 +318,7 @@ spec = do
 
         describe "InvalidGrantReason" $ do
             it "CodeNotFound constructs correctly" $ do
-                let codeId = unsafeAuthCodeId "code_123"
+                let codeId = fromJust $ mkAuthCodeId "code_123"
                     reason = CodeNotFound codeId
                     err = InvalidGrant reason
                 case err of
@@ -322,7 +326,7 @@ spec = do
                     _ -> expectationFailure "Pattern match failed"
 
             it "CodeExpired constructs correctly" $ do
-                let codeId = unsafeAuthCodeId "code_123"
+                let codeId = fromJust $ mkAuthCodeId "code_123"
                     reason = CodeExpired codeId
                     err = InvalidGrant reason
                 case err of
@@ -330,7 +334,7 @@ spec = do
                     _ -> expectationFailure "Pattern match failed"
 
             it "CodeAlreadyUsed constructs correctly" $ do
-                let codeId = unsafeAuthCodeId "code_123"
+                let codeId = fromJust $ mkAuthCodeId "code_123"
                     reason = CodeAlreadyUsed codeId
                     err = InvalidGrant reason
                 case err of
@@ -338,7 +342,7 @@ spec = do
                     _ -> expectationFailure "Pattern match failed"
 
             it "RefreshTokenNotFound constructs correctly" $ do
-                let rtId = unsafeRefreshTokenId "rt_123"
+                let rtId = fromJust $ mkRefreshTokenId "rt_123"
                     reason = RefreshTokenNotFound rtId
                     err = InvalidGrant reason
                 case err of
@@ -346,7 +350,7 @@ spec = do
                     _ -> expectationFailure "Pattern match failed"
 
             it "RefreshTokenExpired constructs correctly" $ do
-                let rtId = unsafeRefreshTokenId "rt_123"
+                let rtId = fromJust $ mkRefreshTokenId "rt_123"
                     reason = RefreshTokenExpired rtId
                     err = InvalidGrant reason
                 case err of
@@ -354,7 +358,7 @@ spec = do
                     _ -> expectationFailure "Pattern match failed"
 
             it "RefreshTokenRevoked constructs correctly" $ do
-                let rtId = unsafeRefreshTokenId "rt_123"
+                let rtId = fromJust $ mkRefreshTokenId "rt_123"
                     reason = RefreshTokenRevoked rtId
                     err = InvalidGrant reason
                 case err of
@@ -449,7 +453,7 @@ spec = do
                 T.unpack rendered `shouldContain` "not found"
 
             it "renders InvalidGrant with CodeExpired" $ do
-                let codeId = unsafeAuthCodeId "code_123"
+                let codeId = fromJust $ mkAuthCodeId "code_123"
                     err = InvalidGrant (CodeExpired codeId)
                     rendered = renderAuthorizationError err
                 T.unpack rendered `shouldContain` "expired"

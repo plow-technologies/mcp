@@ -1,4 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
+
+{- HLINT ignore "Avoid partial function" -}
 
 {- |
 Module      : Servant.OAuth2.IDP.TypesSpec
@@ -13,10 +16,10 @@ module Servant.OAuth2.IDP.TypesSpec (spec) where
 
 import Data.Aeson (decode, encode)
 import Data.Either (isLeft)
-import Data.Maybe (isJust)
+import Data.Maybe (fromJust, isJust)
 import Data.Set qualified as Set
 import Data.Text (Text)
-import Servant.OAuth2.IDP.Types (AccessToken (..), LoginAction (..), OAuthGrantType (..), RefreshToken (..), Scope (..), Scopes (..), TokenType (..), mkClientName, mkClientSecret, mkRedirectUri, mkTokenValidity, parseScopes, serializeScopeSet, unAccessToken, unClientName, unClientSecret, unRefreshToken, unTokenType, unsafeClientName, unsafeClientSecret, unsafeScope)
+import Servant.OAuth2.IDP.Types (AccessToken (..), LoginAction (..), OAuthGrantType (..), RefreshToken (..), Scope (..), Scopes (..), TokenType (..), mkClientName, mkClientSecret, mkRedirectUri, mkScope, mkTokenValidity, parseScopes, serializeScopeSet, unAccessToken, unClientName, unClientSecret, unRefreshToken, unTokenType)
 import Test.Hspec
 import Web.HttpApiData (parseUrlPiece, toUrlPiece)
 
@@ -112,7 +115,7 @@ spec = do
     describe "FR-060: Scope parsing and serialization" $ do
         context "Scope newtype single value" $ do
             it "accepts valid single scope via FromHttpApiData" $
-                parseUrlPiece "openid" `shouldBe` Right (unsafeScope "openid")
+                parseUrlPiece "openid" `shouldBe` Right (fromJust $ mkScope "openid")
 
             it "rejects empty scope" $
                 (parseUrlPiece "" :: Either Text Scope) `shouldSatisfy` isLeft
@@ -121,58 +124,58 @@ spec = do
                 (parseUrlPiece "open id" :: Either Text Scope) `shouldSatisfy` isLeft
 
             it "round-trips through ToHttpApiData" $
-                let scope = unsafeScope "profile"
+                let scope = fromJust (mkScope "profile")
                  in parseUrlPiece (toUrlPiece scope) `shouldBe` Right scope
 
         context "Space-delimited scope list parsing (RFC 6749 Section 3.3)" $ do
             it "parses space-delimited scopes into Set" $
                 parseScopes "openid profile email"
-                    `shouldBe` Just (Set.fromList [unsafeScope "openid", unsafeScope "profile", unsafeScope "email"])
+                    `shouldBe` Just (Set.fromList [fromJust (mkScope "openid"), fromJust (mkScope "profile"), fromJust (mkScope "email")])
 
             it "handles single scope" $
-                parseScopes "openid" `shouldBe` Just (Set.fromList [unsafeScope "openid"])
+                parseScopes "openid" `shouldBe` Just (Set.fromList [fromJust (mkScope "openid")])
 
             it "handles empty string" $
                 parseScopes "" `shouldBe` Just Set.empty
 
             it "filters out empty scopes from consecutive spaces" $
-                parseScopes "openid  profile" `shouldBe` Just (Set.fromList [unsafeScope "openid", unsafeScope "profile"])
+                parseScopes "openid  profile" `shouldBe` Just (Set.fromList [fromJust (mkScope "openid"), fromJust (mkScope "profile")])
 
             it "trims whitespace around scopes" $
-                parseScopes "  openid   profile  " `shouldBe` Just (Set.fromList [unsafeScope "openid", unsafeScope "profile"])
+                parseScopes "  openid   profile  " `shouldBe` Just (Set.fromList [fromJust (mkScope "openid"), fromJust (mkScope "profile")])
 
         context "Set Scope serialization to space-delimited string" $ do
             it "serializes Set to space-delimited string" $
-                let scopes = Set.fromList [unsafeScope "email", unsafeScope "openid", unsafeScope "profile"]
+                let scopes = Set.fromList [fromJust (mkScope "email"), fromJust (mkScope "openid"), fromJust (mkScope "profile")]
                  in serializeScopeSet scopes `shouldSatisfy` (\s -> s `elem` ["email openid profile", "email profile openid", "openid email profile", "openid profile email", "profile email openid", "profile openid email"])
 
             it "handles empty Set" $
                 serializeScopeSet Set.empty `shouldBe` ""
 
             it "handles single scope Set" $
-                serializeScopeSet (Set.fromList [unsafeScope "openid"]) `shouldBe` "openid"
+                serializeScopeSet (Set.fromList [fromJust (mkScope "openid")]) `shouldBe` "openid"
 
         context "Scopes newtype for HTTP API (FR-060)" $ do
             it "parses space-delimited scopes via FromHttpApiData" $
                 parseUrlPiece "openid profile"
-                    `shouldBe` Right (Scopes (Set.fromList [unsafeScope "openid", unsafeScope "profile"]))
+                    `shouldBe` Right (Scopes (Set.fromList [fromJust (mkScope "openid"), fromJust (mkScope "profile")]))
 
             it "parses single scope" $
-                parseUrlPiece "openid" `shouldBe` Right (Scopes (Set.fromList [unsafeScope "openid"]))
+                parseUrlPiece "openid" `shouldBe` Right (Scopes (Set.fromList [fromJust (mkScope "openid")]))
 
             it "parses empty string to empty Set" $
                 parseUrlPiece "" `shouldBe` Right (Scopes Set.empty)
 
             it "handles multiple spaces between scopes" $
                 parseUrlPiece "openid  profile"
-                    `shouldBe` Right (Scopes (Set.fromList [unsafeScope "openid", unsafeScope "profile"]))
+                    `shouldBe` Right (Scopes (Set.fromList [fromJust (mkScope "openid"), fromJust (mkScope "profile")]))
 
             it "serializes to space-delimited via ToHttpApiData" $
-                let scopeList = Scopes (Set.fromList [unsafeScope "openid", unsafeScope "profile"])
+                let scopeList = Scopes (Set.fromList [fromJust (mkScope "openid"), fromJust (mkScope "profile")])
                  in toUrlPiece scopeList `shouldSatisfy` (\s -> s `elem` ["openid profile", "profile openid"])
 
             it "round-trips through FromHttpApiData and ToHttpApiData" $
-                let original = Scopes (Set.fromList [unsafeScope "email", unsafeScope "openid"])
+                let original = Scopes (Set.fromList [fromJust (mkScope "email"), fromJust (mkScope "openid")])
                     serialized = toUrlPiece original
                     parsed = parseUrlPiece serialized
                  in parsed `shouldBe` Right original
@@ -192,13 +195,13 @@ spec = do
 
         context "JSON serialization" $ do
             it "round-trips through JSON" $
-                let secret = unsafeClientSecret "secret-value"
+                let secret = fromJust (mkClientSecret "secret-value")
                     encoded = encode secret
                     decoded = decode encoded
                  in decoded `shouldBe` Just secret
 
             it "serializes empty secret" $
-                let secret = unsafeClientSecret ""
+                let secret = fromJust (mkClientSecret "")
                     encoded = encode secret
                     decoded = decode encoded
                  in decoded `shouldBe` Just secret
@@ -224,7 +227,7 @@ spec = do
 
         context "JSON serialization" $ do
             it "round-trips through JSON" $
-                let name = unsafeClientName "My Application"
+                let name = fromJust (mkClientName "My Application")
                     encoded = encode name
                     decoded = decode encoded
                  in decoded `shouldBe` Just name
