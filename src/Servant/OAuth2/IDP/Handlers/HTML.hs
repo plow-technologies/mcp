@@ -149,7 +149,7 @@ renderLoginPage serverName LoginPage{..} = doctypehtml_ $ do
             label_ $ do
                 "Password:"
                 input_ [type_ "password", name_ "password"]
-            button_ [type_ "submit", name_ "action", value_ "login"] "Sign In"
+            button_ [type_ "submit", name_ "action", value_ "approve"] "Sign In"
             button_ [type_ "submit", name_ "action", value_ "deny"] "Deny"
 
 -- | Render error page with configurable server name
