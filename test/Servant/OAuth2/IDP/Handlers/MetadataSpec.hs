@@ -15,7 +15,6 @@ module Servant.OAuth2.IDP.Handlers.MetadataSpec (spec) where
 
 import Control.Monad.Reader (runReaderT)
 import Data.List.NonEmpty (NonEmpty ((:|)))
-import Data.Maybe (fromJust)
 import GHC.Generics (Generic)
 import Network.URI (URI, parseURI)
 import Test.Hspec (Spec, describe, it, shouldBe)
@@ -45,17 +44,19 @@ import Servant.OAuth2.IDP.Types (
     mkScope,
  )
 
+-- | Parse a URI from a string, error on invalid (test-only)
+unsafeParseURI :: String -> URI
+unsafeParseURI s = case parseURI s of
+    Just uri -> uri
+    Nothing -> error $ "Test URI parse failed: " <> s
+
 -- Helper to get test URI (pattern match safe in test context)
 testUri :: URI
-testUri = case parseURI "https://example.com" of
-    Just uri -> uri
-    Nothing -> error "Failed to parse test URI"
+testUri = unsafeParseURI "https://example.com"
 
 -- Helper to get test resource server URI
 testResourceUri :: URI
-testResourceUri = case parseURI "https://resource.example.com" of
-    Just uri -> uri
-    Nothing -> error "Failed to parse test resource URI"
+testResourceUri = unsafeParseURI "https://resource.example.com"
 
 -- Helper to get test scope (pattern match safe in test context)
 testScope :: Scope
@@ -73,7 +74,9 @@ spec :: Spec
 spec = do
     describe "handleMetadata" $ do
         it "constructs OAuthMetadata from OAuthEnv without HTTPServerConfig" $ do
-            let expectedMetadata = case mkProtectedResourceMetadata (fromJust $ parseURI "https://resource.example.com") (fromJust (parseURI "https://example.com") :| [])
+            let expectedMetadata = case mkProtectedResourceMetadata
+                    (unsafeParseURI "https://resource.example.com")
+                    (unsafeParseURI "https://example.com" :| [])
                     Nothing
                     Nothing
                     Nothing
@@ -119,7 +122,9 @@ spec = do
 
     describe "handleProtectedResourceMetadata" $ do
         it "returns resource server metadata directly from OAuthEnv" $ do
-            let expectedMetadata = case mkProtectedResourceMetadata (fromJust $ parseURI "https://resource.example.com") (fromJust (parseURI "https://example.com") :| [])
+            let expectedMetadata = case mkProtectedResourceMetadata
+                    (unsafeParseURI "https://resource.example.com")
+                    (unsafeParseURI "https://example.com" :| [])
                     Nothing
                     Nothing
                     Nothing
@@ -153,5 +158,5 @@ spec = do
             -- This should fail until we implement the new fields
             result <- runReaderT handleProtectedResourceMetadata env
 
-            prResource result `shouldBe` (fromJust $ parseURI "https://resource.example.com")
-            prAuthorizationServers result `shouldBe` (fromJust (parseURI "https://example.com") :| [])
+            prResource result `shouldBe` unsafeParseURI "https://resource.example.com"
+            prAuthorizationServers result `shouldBe` (unsafeParseURI "https://example.com" :| [])

@@ -46,10 +46,9 @@ import Control.Concurrent.STM (TVar, atomically, modifyTVar', newTVarIO, readTVa
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, ReaderT, ask)
 import Data.Functor.Contravariant (contramap)
-import Data.Maybe (fromJust)
 import Data.Time.Clock (UTCTime, addUTCTime)
 import Data.Time.Format (defaultTimeLocale, parseTimeOrError)
-import Network.URI (parseURI)
+import Network.URI (URI, parseURI)
 import Plow.Logging (IOTracer (..), Tracer (..))
 
 import MCP.Trace.HTTP (HTTPTrace (..))
@@ -64,6 +63,19 @@ import MCP.Types (Implementation (..), ServerCapabilities (..), ToolsCapability 
 import Servant.OAuth2.IDP.Auth.Demo (DemoCredentialEnv (..), defaultDemoCredentialStore)
 import Servant.OAuth2.IDP.Store.InMemory (defaultExpiryConfig, newOAuthTVarEnv)
 import Servant.OAuth2.IDP.Test.Internal (TestConfig (..), TestCredentials (..))
+
+-- -----------------------------------------------------------------------------
+-- Test Helpers
+-- -----------------------------------------------------------------------------
+
+{- | Parse a URI from a string, error on invalid (test-only).
+
+Used in test fixtures where a valid URI is guaranteed.
+-}
+unsafeParseURI :: String -> URI
+unsafeParseURI s = case parseURI s of
+    Just uri -> uri
+    Nothing -> error $ "Test URI parse failed: " <> s
 
 -- -----------------------------------------------------------------------------
 -- Default Test Values
@@ -123,7 +135,7 @@ mkTestEnv timeTVar = do
                 , httpMCPOAuthConfig = Just (bundleMCPConfig bundle)
                 , httpJWK = Nothing -- Will be generated
                 , httpProtocolVersion = "2025-06-18"
-                , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata (fromJust $ parseURI "http://localhost:8080"))
+                , httpProtectedResourceMetadata = Just (defaultProtectedResourceMetadata (unsafeParseURI "http://localhost:8080"))
                 }
 
     -- Null tracer for tests (discards all traces)

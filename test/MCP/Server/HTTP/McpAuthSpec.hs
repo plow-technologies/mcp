@@ -32,12 +32,12 @@ import Servant.Server.Internal.Handler (runHandler)
 import Test.Hspec
 
 import Data.Maybe (fromJust)
-import Network.URI (parseURI)
 import MCP.Server (MCPServer (..), MCPServerM, initialServerState)
 import MCP.Server.HTTP (DemoOAuthBundle (..), HTTPServerConfig (..), defaultDemoOAuthBundle, defaultProtectedResourceMetadata)
 import MCP.Server.HTTP qualified as HTTP
 import MCP.Trace.HTTP (HTTPTrace)
 import MCP.Types (Implementation (..), ServerCapabilities (..))
+import Network.URI (parseURI)
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser (..))
 import Servant.OAuth2.IDP.Types (mkUserId)
 

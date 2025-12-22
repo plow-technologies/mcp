@@ -4,7 +4,6 @@ module Servant.OAuth2.IDP.ConfigSpec (spec) where
 
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromJust)
 import Network.URI (URI, parseURI)
 import Test.Hspec (Spec, describe, it, shouldBe)
 
@@ -19,11 +18,15 @@ import Servant.OAuth2.IDP.Types (
     mkScope,
  )
 
+-- | Parse a URI from a string, error on invalid (test-only)
+unsafeParseURI :: String -> URI
+unsafeParseURI s = case parseURI s of
+    Just uri -> uri
+    Nothing -> error $ "Test URI parse failed: " <> s
+
 -- Helper to get test URI (pattern match safe in test context)
 testUri :: URI
-testUri = case parseURI "https://example.com" of
-    Just uri -> uri
-    Nothing -> error "Failed to parse test URI"
+testUri = unsafeParseURI "https://example.com"
 
 -- Helper to get test scope (pattern match safe in test context)
 testScope :: Scope
@@ -34,8 +37,8 @@ testScope = case mkScope "read" of
 -- Helper for test resource metadata
 testResourceMetadata :: ProtectedResourceMetadata
 testResourceMetadata = case mkProtectedResourceMetadata
-    (fromJust $ parseURI "https://example.com")
-    (fromJust (parseURI "https://example.com") :| [])
+    (unsafeParseURI "https://example.com")
+    (unsafeParseURI "https://example.com" :| [])
     Nothing
     Nothing
     Nothing
