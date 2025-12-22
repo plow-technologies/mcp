@@ -5,6 +5,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 {- |
 Module      : Servant.OAuth2.IDP.Types
@@ -104,6 +105,10 @@ module Servant.OAuth2.IDP.Types (
     unsafeScope,
     unsafeClientName,
     unsafeClientSecret,
+
+    -- * QuickCheck Helpers (monomorphic, no orphans)
+    arbitraryUTCTime,
+    shrinkUTCTime,
 ) where
 
 import Control.Monad (forM_, guard, when)
@@ -1156,16 +1161,28 @@ These Arbitrary instances live in the type-defining module to:
 3. Allow tests to be library consumers using smart constructors only
 -}
 
--- | UTCTime instance (orphan but standard library type)
-instance Arbitrary UTCTime where
-    arbitrary = do
-        -- Generate times within 10 years from 2020-01-01
-        days <- chooseInt (0, 365 * 10)
-        secs <- chooseInt (0, 86400) -- Seconds in a day
-        let baseDay = fromGregorian 2020 1 1
-        pure $ UTCTime (addDays (fromIntegral days) baseDay) (secondsToDiffTime (fromIntegral secs))
-    shrink (UTCTime day time) =
-        [UTCTime day' time | day' <- take 5 [addDays (-1) day, addDays 1 day]]
+-- NO ORPHANS!!!!!!!!!!!!!!!!!!!!!!!!
+--
+-- ============================================================================
+-- QuickCheck Helper Functions (monomorphic, no orphan instances)
+-- ============================================================================
+
+{- | Generate arbitrary UTCTime within reasonable range (monomorphic, no orphan)
+Uses a 10-year range from 2020-01-01 to avoid extreme edge cases.
+-}
+arbitraryUTCTime :: Gen UTCTime
+arbitraryUTCTime = do
+    days <- chooseInt (0, 365 * 10)
+    secs <- chooseInt (0, 86400)
+    let baseDay = fromGregorian 2020 1 1
+    pure $ UTCTime (addDays (fromIntegral days) baseDay) (secondsToDiffTime (fromIntegral secs))
+
+{- | Shrink UTCTime (monomorphic, no orphan)
+Shrinks by adjusting the day forward/backward by one day.
+-}
+shrinkUTCTime :: UTCTime -> [UTCTime]
+shrinkUTCTime (UTCTime day time) =
+    [UTCTime day' time | day' <- take 5 [addDays (-1) day, addDays 1 day]]
 
 -- ============================================================================
 -- Identity Newtypes (non-empty text)
@@ -1319,7 +1336,7 @@ instance (Arbitrary userId) => Arbitrary (AuthorizationCode userId) where
         -- Scopes: generate 0-5 scopes
         authScopes <- Set.fromList <$> listOf arbitrary `suchThat` (\xs -> length xs <= 5)
         authUserId <- arbitrary
-        authExpiry <- arbitrary
+        authExpiry <- arbitraryUTCTime
         pure AuthorizationCode{..}
 
 instance Arbitrary ClientInfo where
@@ -1351,7 +1368,7 @@ instance Arbitrary PendingAuthorization where
         pendingState <- frequency [(1, pure Nothing), (3, Just . OAuthState . T.pack . getNonEmpty <$> arbitrary)]
         -- Optional resource URI
         pendingResource <- frequency [(1, pure Nothing), (2, Just <$> genResourceURI)]
-        pendingCreatedAt <- arbitrary
+        pendingCreatedAt <- arbitraryUTCTime
         pure PendingAuthorization{..}
       where
         genResourceURI :: Gen URI

@@ -19,7 +19,6 @@ import Data.Time.Format (defaultTimeLocale, parseTimeM)
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
 
-import Generators ()
 import Servant.OAuth2.IDP.Types (
     AuthorizationCode (..),
     CodeChallengeMethod (..),
