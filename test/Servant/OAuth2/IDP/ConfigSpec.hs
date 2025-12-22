@@ -2,8 +2,8 @@
 
 module Servant.OAuth2.IDP.ConfigSpec (spec) where
 
-import qualified Data.Map.Strict as Map
 import Data.List.NonEmpty (NonEmpty ((:|)))
+import Data.Map.Strict qualified as Map
 import Network.URI (URI, parseURI)
 import Test.Hspec (Spec, describe, it, shouldBe)
 
@@ -107,31 +107,35 @@ spec = do
             oauthSupportedScopes env `shouldBe` []
 
         it "supports multiple response types" $ do
-            let env = mkTestOAuthEnv
-                    { oauthRequireHTTPS = False
-                    , oauthSupportedResponseTypes = ResponseCode :| [ResponseToken]
-                    }
+            let env =
+                    mkTestOAuthEnv
+                        { oauthRequireHTTPS = False
+                        , oauthSupportedResponseTypes = ResponseCode :| [ResponseToken]
+                        }
 
             length (oauthSupportedResponseTypes env) `shouldBe` 2
 
         it "supports multiple grant types" $ do
-            let env = mkTestOAuthEnv
-                    { oauthSupportedGrantTypes = OAuthAuthorizationCode :| [OAuthClientCredentials]
-                    }
+            let env =
+                    mkTestOAuthEnv
+                        { oauthSupportedGrantTypes = OAuthAuthorizationCode :| [OAuthClientCredentials]
+                        }
 
             length (oauthSupportedGrantTypes env) `shouldBe` 2
 
         it "supports multiple auth methods" $ do
-            let env = mkTestOAuthEnv
-                    { oauthSupportedAuthMethods = AuthNone :| [AuthClientSecretPost, AuthClientSecretBasic]
-                    }
+            let env =
+                    mkTestOAuthEnv
+                        { oauthSupportedAuthMethods = AuthNone :| [AuthClientSecretPost, AuthClientSecretBasic]
+                        }
 
             length (oauthSupportedAuthMethods env) `shouldBe` 3
 
         it "supports multiple code challenge methods" $ do
-            let env = mkTestOAuthEnv
-                    { oauthSupportedCodeChallengeMethods = S256 :| [Plain]
-                    }
+            let env =
+                    mkTestOAuthEnv
+                        { oauthSupportedCodeChallengeMethods = S256 :| [Plain]
+                        }
 
             length (oauthSupportedCodeChallengeMethods env) `shouldBe` 2
 
@@ -164,10 +168,11 @@ spec = do
                 writeScope = case mkScope "write" of
                     Just s -> s
                     Nothing -> error "Failed to create write scope"
-                descriptions = Map.fromList
-                    [ (readScope, "Read access to your data")
-                    , (writeScope, "Write access to your data")
-                    ]
+                descriptions =
+                    Map.fromList
+                        [ (readScope, "Read access to your data")
+                        , (writeScope, "Write access to your data")
+                        ]
                 env =
                     OAuthEnv
                         { oauthRequireHTTPS = True

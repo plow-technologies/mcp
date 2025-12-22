@@ -21,6 +21,7 @@ module Servant.OAuth2.IDP.Metadata (
     -- * OAuth Authorization Server Metadata (RFC 8414)
     OAuthMetadata (..),
     mkOAuthMetadata,
+
     -- ** Field Accessors
     oauthIssuer,
     oauthAuthorizationEndpoint,
@@ -37,6 +38,7 @@ module Servant.OAuth2.IDP.Metadata (
     -- * OAuth Protected Resource Metadata (RFC 9728)
     ProtectedResourceMetadata,
     mkProtectedResourceMetadata,
+
     -- ** Field Accessors
     prResource,
     prAuthorizationServers,
@@ -49,9 +51,9 @@ module Servant.OAuth2.IDP.Metadata (
 import Control.Monad (guard)
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), (.=))
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import GHC.Generics (Generic)
-import Network.URI (URI(..), isAbsoluteURI, parseURI)
+import Network.URI (URI (..), isAbsoluteURI, parseURI)
 import Servant.OAuth2.IDP.Types (
     ClientAuthMethod,
     CodeChallengeMethod,
@@ -231,19 +233,20 @@ mkOAuthMetadata
             Nothing -> pure ()
             Just uri -> guard (isAbsoluteHttpsUri uri)
         -- All validations passed, construct the value
-        pure $ OAuthMetadata
-            { issuer = iss
-            , authorizationEndpoint = authzEndpoint
-            , tokenEndpoint = tokEndpoint
-            , registrationEndpoint = regEndpoint
-            , userInfoEndpoint = userInfoEp
-            , jwksUri = jwksU
-            , scopesSupported = scopesSupp
-            , responseTypesSupported = responseTypesSupp
-            , grantTypesSupported = grantTypesSupp
-            , tokenEndpointAuthMethodsSupported = tokenAuthMethodsSupp
-            , codeChallengeMethodsSupported = challengeMethodsSupp
-            }
+        pure $
+            OAuthMetadata
+                { issuer = iss
+                , authorizationEndpoint = authzEndpoint
+                , tokenEndpoint = tokEndpoint
+                , registrationEndpoint = regEndpoint
+                , userInfoEndpoint = userInfoEp
+                , jwksUri = jwksU
+                , scopesSupported = scopesSupp
+                , responseTypesSupported = responseTypesSupp
+                , grantTypesSupported = grantTypesSupp
+                , tokenEndpointAuthMethodsSupported = tokenAuthMethodsSupp
+                , codeChallengeMethodsSupported = challengeMethodsSupp
+                }
 
 -- -----------------------------------------------------------------------------
 -- OAuth Protected Resource Metadata (RFC 9728)
@@ -331,11 +334,12 @@ mkProtectedResourceMetadata
             Nothing -> pure ()
             Just uri -> guard (isAbsoluteHttpsUri uri)
         -- All validations passed, construct the value
-        pure $ ProtectedResourceMetadata
-            { prResource = res
-            , prAuthorizationServers = authzServers
-            , prScopesSupported = scopesSupp
-            , prBearerMethodsSupported = bearerMethodsSupp
-            , prResourceName = resName
-            , prResourceDocumentation = resDoc
-            }
+        pure $
+            ProtectedResourceMetadata
+                { prResource = res
+                , prAuthorizationServers = authzServers
+                , prScopesSupported = scopesSupp
+                , prBearerMethodsSupported = bearerMethodsSupp
+                , prResourceName = resName
+                , prResourceDocumentation = resDoc
+                }

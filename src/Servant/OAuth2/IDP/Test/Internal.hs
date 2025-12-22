@@ -94,7 +94,7 @@ import Control.Monad.Time (MonadTime)
 import Servant.Auth.Server (ToJWT)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
-import Servant.OAuth2.IDP.Types (AuthCodeId, ClientId, mkAuthCodeId, unAuthCodeId, unClientId, unsafeAuthCodeId, unsafeClientId)
+import Servant.OAuth2.IDP.Types (AuthCodeId, ClientId, mkAuthCodeId, mkClientId, unAuthCodeId, unClientId)
 
 -- -----------------------------------------------------------------------------
 -- Test Configuration Types
@@ -374,7 +374,7 @@ withRegisteredClient _config action = do
             Object obj ->
                 case KM.lookup "client_id" obj of
                     Just (String clientIdText) ->
-                        Right (unsafeClientId clientIdText)
+                        maybe (Left "Invalid ClientId") Right $ mkClientId clientIdText
                     Just other ->
                         Left $ "client_id was not a string: " <> show other
                     Nothing ->
@@ -838,7 +838,7 @@ tokenExchangeSpec config = with (withFreshAppNoTime config) $ do
         it "exchanges valid code for tokens" $ do
             withRegisteredClient config $ \clientId -> do
                 withAuthorizedUser config clientId $ \code verifier -> do
-                    let body = tokenExchangeBody clientId code verifier
+                    let body = tokenExchangeBody (unClientId clientId) (unAuthCodeId code) verifier
                     resp <- request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict body)
                     liftIO $ do
                         simpleStatus resp `shouldSatisfy` (== status200)
@@ -852,12 +852,12 @@ tokenExchangeSpec config = with (withFreshAppNoTime config) $ do
         it "returns 400 for invalid PKCE verifier" $ do
             withRegisteredClient config $ \clientId -> do
                 withAuthorizedUser config clientId $ \code _ -> do
-                    let body = tokenExchangeBody clientId code "wrong_verifier"
+                    let body = tokenExchangeBody (unClientId clientId) (unAuthCodeId code) "wrong_verifier"
                     request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict body) `shouldRespondWith` 400
 
         it "returns 400 for invalid authorization code" $ do
             withRegisteredClient config $ \clientId -> do
-                let body = tokenExchangeBody clientId (unsafeAuthCodeId "invalid") "verifier"
+                let body = tokenExchangeBody (unClientId clientId) "invalid" "verifier"
                 request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict body) `shouldRespondWith` 400
 
 {- | Helper to create application/x-www-form-urlencoded token exchange request body.
@@ -882,14 +882,14 @@ let body = tokenExchangeBody clientId code verifier
 post "/token" (LBS.fromStrict body)
 @
 -}
-tokenExchangeBody :: ClientId -> AuthCodeId -> Text -> ByteString
+tokenExchangeBody :: Text -> Text -> Text -> ByteString
 tokenExchangeBody clientId code verifier =
     renderSimpleQuery
         False
         [ ("grant_type", "authorization_code")
-        , ("code", TE.encodeUtf8 $ unAuthCodeId code)
+        , ("code", TE.encodeUtf8 code)
         , ("redirect_uri", "http://localhost/callback")
-        , ("client_id", TE.encodeUtf8 $ unClientId clientId)
+        , ("client_id", TE.encodeUtf8 clientId)
         , ("code_verifier", TE.encodeUtf8 verifier)
         ]
 
@@ -934,7 +934,7 @@ expirySpec config = describe "Expiry behavior" $ do
                     withAuthorizedUser config clientId $ \code verifier -> do
                         -- Advance time past the 10-minute authorization code expiry
                         liftIO $ advanceTime (11 * 60) -- 11 minutes = 660 seconds
-                        let body = tokenExchangeBody clientId code verifier
+                        let body = tokenExchangeBody (unClientId clientId) (unAuthCodeId code) verifier
                         request methodPost "/token" [(hContentType, "application/x-www-form-urlencoded")] (LBS.fromStrict body) `shouldRespondWith` 400
 
     describe "with fresh app for expired login session test" $ do

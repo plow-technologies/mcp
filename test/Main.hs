@@ -68,8 +68,8 @@ import Servant.OAuth2.IDP.BrandingSpec qualified as BrandingSpec
 import Servant.OAuth2.IDP.ConfigSpec qualified as ConfigSpec
 import Servant.OAuth2.IDP.CryptoEntropySpec qualified as CryptoEntropySpec
 import Servant.OAuth2.IDP.ErrorsSpec qualified as ErrorsSpec
-import Servant.OAuth2.IDP.LucidRenderingSpec qualified as LucidRenderingSpec
 import Servant.OAuth2.IDP.Handlers.MetadataSpec qualified as HandlersMetadataSpec
+import Servant.OAuth2.IDP.LucidRenderingSpec qualified as LucidRenderingSpec
 import Servant.OAuth2.IDP.MetadataSpec qualified as MetadataSpec
 import Servant.OAuth2.IDP.PKCESpec qualified as PKCESpec
 import Servant.OAuth2.IDP.TokenRequestSpec qualified as TokenRequestSpec

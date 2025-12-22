@@ -84,7 +84,7 @@ import Servant.OAuth2.IDP.Auth.Backend (
     mkUsername,
     usernameText,
  )
-import Servant.OAuth2.IDP.Types (UserId, unsafeUserId)
+import Servant.OAuth2.IDP.Types (UserId, mkUserId)
 
 -- -----------------------------------------------------------------------------
 -- User Types
@@ -164,20 +164,20 @@ instance (MonadIO m) => AuthBackend (ReaderT DemoCredentialEnv m) where
         let storedHash = Map.lookup username (storeCredentials store)
         case storedHash of
             Nothing -> pure Nothing -- User not found (same as invalid password)
-            Just hash -> do
+            Just hash ->
                 let candidateHash = mkHashedPassword (storeSalt store) password
-                -- ScrubbedBytes Eq is constant-time
-                if hash == candidateHash
-                    then do
-                        let userId = unsafeUserId (usernameText username)
-                        let authUser =
-                                AuthUser
-                                    { userUserId = userId
-                                    , userUserEmail = Just (usernameText username <> "@demo.local")
-                                    , userUserName = Just (usernameText username)
-                                    }
-                        pure $ Just authUser
-                    else pure Nothing
+                 in pure $ case mkUserId (usernameText username) of
+                        Just userId
+                            -- ScrubbedBytes Eq is constant-time
+                            | hash == candidateHash ->
+                                let authUser =
+                                        AuthUser
+                                            { userUserId = userId
+                                            , userUserEmail = Just (usernameText username <> "@demo.local")
+                                            , userUserName = Just (usernameText username)
+                                            }
+                                 in Just authUser
+                        _ -> Nothing
 
 -- -----------------------------------------------------------------------------
 -- Default Credentials

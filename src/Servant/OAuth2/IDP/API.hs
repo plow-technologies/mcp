@@ -70,9 +70,9 @@ import Servant (
 import Servant.HTML.Lucid (HTML)
 import Web.FormUrlEncoded (FromForm (..), parseUnique)
 
-import Servant.OAuth2.IDP.Metadata (OAuthMetadata, ProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Auth.Backend (PlaintextPassword, Username, mkPlaintextPassword, mkUsername)
 import Servant.OAuth2.IDP.Handlers.HTML (LoginPage)
+import Servant.OAuth2.IDP.Metadata (OAuthMetadata, ProtectedResourceMetadata)
 import Servant.OAuth2.IDP.Types (
     AccessToken,
     AuthCodeId,
