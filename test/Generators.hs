@@ -81,7 +81,6 @@ import Servant.OAuth2.IDP.Types (
     RefreshTokenId,
     ResourceIndicator (..),
     ResponseType (..),
-    Scope,
     SessionId,
     UserId,
     mkAccessTokenId,
@@ -92,7 +91,6 @@ import Servant.OAuth2.IDP.Types (
     mkCodeVerifier,
     mkRedirectUri,
     mkRefreshTokenId,
-    mkScope,
     mkSessionId,
     mkUserId,
     unAccessTokenId,
@@ -100,7 +98,6 @@ import Servant.OAuth2.IDP.Types (
     unClientId,
     unRedirectUri,
     unRefreshTokenId,
-    unScope,
     unUserId,
  )
 
@@ -206,15 +203,8 @@ instance Arbitrary RedirectUri where
 
     shrink _ = [] -- Don't shrink URIs (complex validation)
 
--- Scope: non-empty text without whitespace
-instance Arbitrary Scope where
-    arbitrary = do
-        -- Generate valid scope values (alphanumeric + colon/dot)
-        let validChars = ['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9'] ++ [':', '.', '-', '_']
-        len <- chooseInt (1, 30)
-        scopeText <- T.pack <$> vectorOf len (elements validChars)
-        maybe arbitrary pure (mkScope scopeText) -- Retry if validation fails
-    shrink scope = [s | str <- shrink (T.unpack (unScope scope)), not (null str), Just s <- [mkScope (T.pack str)]]
+-- Scope: Arbitrary instance now in Servant.OAuth2.IDP.Types (library)
+-- (Removed from here to avoid duplicate instance)
 
 -- CodeChallenge: base64url charset, 43-128 chars
 instance Arbitrary CodeChallenge where

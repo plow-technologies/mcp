@@ -160,7 +160,8 @@ library
         hspec >= 2.10 && < 2.12,
         hspec-wai >= 0.11 && < 0.12,
         lucid >= 2.11 && < 2.12,
-        servant-lucid >= 0.9 && < 0.10
+        servant-lucid >= 0.9 && < 0.10,
+        QuickCheck >= 2.14 && < 2.16
 
     -- Directories containing source files.
     hs-source-dirs:   src

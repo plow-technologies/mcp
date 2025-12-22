@@ -124,6 +124,7 @@ import Data.Time.Clock (NominalDiffTime, UTCTime)
 import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Network.URI (URI, parseURI, uriAuthority, uriRegName, uriScheme, uriToString)
+import Test.QuickCheck (Arbitrary (..), chooseInt, elements, vectorOf)
 import Web.HttpApiData (FromHttpApiData (..), ToHttpApiData (..))
 
 -- -----------------------------------------------------------------------------
@@ -591,6 +592,16 @@ instance FromHttpApiData Scope where
 
 instance ToHttpApiData Scope where
     toUrlPiece = unScope
+
+-- | QuickCheck Arbitrary instance for Scope (generates valid scope values)
+instance Arbitrary Scope where
+    arbitrary = do
+        -- Generate valid scope values (alphanumeric + colon/dot)
+        let validChars = ['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9'] ++ [':', '.', '-', '_']
+        len <- chooseInt (1, 30)
+        scopeText <- T.pack <$> vectorOf len (elements validChars)
+        maybe arbitrary pure (mkScope scopeText) -- Retry if validation fails
+    shrink scope = [s | str <- shrink (T.unpack (unScope scope)), not (null str), Just s <- [mkScope (T.pack str)]]
 
 {- | Parse space-delimited scope list into Set of Scope values (RFC 6749 Section 3.3).
 Empty string returns empty Set. Invalid scopes cause entire parse to fail.
