@@ -28,6 +28,8 @@ module MCP.Server.HTTP (
 
     -- * Demo Configuration Helpers
     DemoOAuthBundle (..),
+    mkDemoOAuthBundle,
+    mkDemoOAuthBundleFromText,
     defaultDemoOAuthBundle,
     defaultProtectedResourceMetadata,
 
@@ -78,7 +80,7 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
 import Network.HTTP.Media ((//), (/:))
-import Network.URI (parseURI)
+import Network.URI (URI, parseURI)
 import Network.Wai (Application)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
@@ -109,7 +111,7 @@ import Servant.OAuth2.IDP.Errors (
     OAuthErrorResponse (..),
     ValidationError (..),
  )
-import Servant.OAuth2.IDP.Metadata (mkProtectedResourceMetadata)
+import Servant.OAuth2.IDP.Metadata (mkProtectedResourceMetadata, mkProtectedResourceMetadataForDemo)
 import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI, oauthServer)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
@@ -691,14 +693,11 @@ data DemoOAuthBundle = DemoOAuthBundle
     }
     deriving (Generic)
 
--- | Default demo OAuth bundle for testing purposes
-defaultDemoOAuthBundle :: DemoOAuthBundle
-defaultDemoOAuthBundle =
-    let baseUri = case parseURI "http://localhost:8080" of
-            Just uri -> uri
-            Nothing -> Prelude.error "Invalid hardcoded base URL in defaultDemoOAuthBundle"
-        baseUrlText = "http://localhost:8080"
-        resourceMetadata = case mkProtectedResourceMetadata
+-- | Create a demo OAuth bundle with a custom base URL
+mkDemoOAuthBundle :: URI -> DemoOAuthBundle
+mkDemoOAuthBundle baseUri =
+    let baseUrlText = T.pack $ show baseUri
+        resourceMetadata = case mkProtectedResourceMetadataForDemo
             baseUrlText
             [baseUrlText]
             (Just [mkKnownScope "mcp:read", mkKnownScope "mcp:write"])
@@ -706,7 +705,7 @@ defaultDemoOAuthBundle =
             Nothing
             Nothing of
             Just m -> m
-            Nothing -> Prelude.error "Invalid hardcoded resource metadata in defaultDemoOAuthBundle"
+            Nothing -> Prelude.error $ "Invalid base URL for resource metadata: " ++ show baseUri
         oauthEnv =
             OAuthEnv
                 { oauthRequireHTTPS = False -- For demo only
@@ -736,6 +735,22 @@ defaultDemoOAuthBundle =
             { bundleEnv = oauthEnv
             , bundleMCPConfig = defaultDemoMCPOAuthConfig
             }
+
+{- | Create a demo OAuth bundle from a Text base URL
+
+This is a convenience wrapper for cases where you have a Text URL
+(e.g., from configuration or CLI arguments).
+-}
+mkDemoOAuthBundleFromText :: Text -> Maybe DemoOAuthBundle
+mkDemoOAuthBundleFromText baseUrlText =
+    mkDemoOAuthBundle <$> parseURI (T.unpack baseUrlText)
+
+-- | Default demo OAuth bundle for testing purposes (uses localhost:8080)
+defaultDemoOAuthBundle :: DemoOAuthBundle
+defaultDemoOAuthBundle =
+    case parseURI "http://localhost:8080" of
+        Just uri -> mkDemoOAuthBundle uri
+        Nothing -> Prelude.error "Invalid hardcoded base URL in defaultDemoOAuthBundle"
 
 -- | Default protected resource metadata for a given base URL
 defaultProtectedResourceMetadata :: Text -> ProtectedResourceMetadata

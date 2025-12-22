@@ -38,6 +38,7 @@ module Servant.OAuth2.IDP.Metadata (
     -- * OAuth Protected Resource Metadata (RFC 9728)
     ProtectedResourceMetadata,
     mkProtectedResourceMetadata,
+    mkProtectedResourceMetadataForDemo,
 
     -- ** Field Accessors
     prResource,
@@ -264,14 +265,16 @@ Required fields:
 Optional fields provide additional resource server information.
 -}
 data ProtectedResourceMetadata = ProtectedResourceMetadata
-    { prResource :: Text
+    { prResource :: Text -- FIXME: Use URI
+
     -- ^ Protected resource identifier (MUST be absolute URI with https)
-    , prAuthorizationServers :: [Text]
+    , prAuthorizationServers :: [Text] -- FIXME: Use NonEmpty URI
+
     -- ^ List of authorization server issuer identifiers
     , prScopesSupported :: Maybe [Scope]
     -- ^ Scope values the resource server understands
     , prBearerMethodsSupported :: Maybe [Text]
-    -- ^ Token presentation methods (default: ["header"])
+    -- ^ Token presentation methods (default: ["header"]) --FIXME: Use ADT
     , prResourceName :: Maybe Text
     -- ^ Human-readable name for display
     , prResourceDocumentation :: Maybe Text
@@ -313,10 +316,10 @@ Validates that resource URI and optional documentation URI are absolute HTTPS UR
 Returns Nothing if any URI validation fails.
 -}
 mkProtectedResourceMetadata ::
-    Text ->
-    [Text] ->
-    Maybe [Scope] ->
-    Maybe [Text] ->
+    Text -> -- FIXME: See above
+    [Text] -> -- FIXME: See above
+    Maybe [Scope] -> -- FIXME: See above
+    Maybe [Text] -> -- FIXME: See above
     Maybe Text ->
     Maybe Text ->
     Maybe ProtectedResourceMetadata
@@ -333,6 +336,51 @@ mkProtectedResourceMetadata
         case resDoc of
             Nothing -> pure ()
             Just uri -> guard (isAbsoluteHttpsUri uri)
+        -- All validations passed, construct the value
+        pure $
+            ProtectedResourceMetadata
+                { prResource = res
+                , prAuthorizationServers = authzServers
+                , prScopesSupported = scopesSupp
+                , prBearerMethodsSupported = bearerMethodsSupp
+                , prResourceName = resName
+                , prResourceDocumentation = resDoc
+                }
+
+{- | Smart constructor for ProtectedResourceMetadata for demo/development use.
+
+WARNING: This function is for DEMO and DEVELOPMENT use only. It allows HTTP URLs
+for local testing. Production deployments MUST use 'mkProtectedResourceMetadata'
+which enforces HTTPS per RFC 9728.
+
+Unlike 'mkProtectedResourceMetadata', this function:
+- Accepts both HTTP and HTTPS URIs (for localhost testing)
+- Still validates that URIs are well-formed absolute URIs
+- Should NOT be used in production environments
+
+Returns Nothing if URI format validation fails.
+-}
+mkProtectedResourceMetadataForDemo ::
+    Text -> -- FIXME: See above
+    [Text] -> -- FIXME: See above
+    Maybe [Scope] -> -- FIXME: See above
+    Maybe [Text] -> -- FIXME: See above
+    Maybe Text ->
+    Maybe Text ->
+    Maybe ProtectedResourceMetadata
+mkProtectedResourceMetadataForDemo
+    res
+    authzServers
+    scopesSupp
+    bearerMethodsSupp
+    resName
+    resDoc = do
+        -- Validate required resource URI (allow HTTP for demo)
+        guard (isAbsoluteURI (T.unpack res))
+        -- Validate optional documentation URI (allow HTTP for demo)
+        case resDoc of
+            Nothing -> pure ()
+            Just uri -> guard (isAbsoluteURI (T.unpack uri))
         -- All validations passed, construct the value
         pure $
             ProtectedResourceMetadata
