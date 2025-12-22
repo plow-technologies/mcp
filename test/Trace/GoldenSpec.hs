@@ -19,11 +19,10 @@ import MCP.Trace.Protocol (ProtocolTrace (..), renderProtocolTrace)
 import MCP.Trace.Server (ServerTrace (..), renderServerTrace)
 import MCP.Trace.StdIO (StdIOTrace (..), renderStdIOTrace)
 import MCP.Trace.Types (MCPTrace (..), renderMCPTrace)
-import Network.URI (parseURI)
 import Servant.OAuth2.IDP.Auth.Backend (mkUsername)
 import Servant.OAuth2.IDP.Errors (ValidationError (..))
 import Servant.OAuth2.IDP.Trace (DenialReason (..), OAuthTrace (..), OperationResult (..), renderOAuthTrace)
-import Servant.OAuth2.IDP.Types (OAuthGrantType (..), unsafeClientId, unsafeRedirectUri, unsafeScope, unsafeSessionId)
+import Servant.OAuth2.IDP.Types (OAuthGrantType (..), mkRedirectUri, unsafeClientId, unsafeScope, unsafeSessionId)
 import Test.Hspec
 
 spec :: Spec
@@ -159,8 +158,8 @@ spec = do
 
         describe "OAuthTrace golden outputs (via renderOAuthTrace)" $ do
             it "TraceClientRegistration produces expected format" $ do
-                let uri = fromJust $ parseURI "http://localhost/callback"
-                    trace = TraceClientRegistration (unsafeClientId "client-xyz") (unsafeRedirectUri uri)
+                let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
+                    trace = TraceClientRegistration (unsafeClientId "client-xyz") redirectUri
                 renderOAuthTrace trace `shouldBe` "Client registered: client-xyz (http://localhost/callback)"
 
             it "TraceAuthorizationRequest with scopes produces expected format" $ do
@@ -212,9 +211,9 @@ spec = do
                 renderOAuthTrace trace `shouldBe` "Session expired: sess-expired"
 
             it "TraceValidationError produces expected format" $ do
-                let uri = fromJust $ parseURI "http://wrong.com/callback"
-                    trace = TraceValidationError (RedirectUriMismatch (unsafeClientId "client-1") (unsafeRedirectUri uri))
-                renderOAuthTrace trace `shouldBe` "Validation error: Redirect URI mismatch for client client-1: http://wrong.com/callback"
+                let redirectUri = fromJust $ mkRedirectUri "https://wrong.com/callback"
+                    trace = TraceValidationError (RedirectUriMismatch (unsafeClientId "client-1") redirectUri)
+                renderOAuthTrace trace `shouldBe` "Validation error: Redirect URI mismatch for client client-1: https://wrong.com/callback"
 
         describe "MCPTrace golden outputs (via renderMCPTrace delegation)" $ do
             it "MCPServer delegates to renderServerTrace" $ do
@@ -234,6 +233,6 @@ spec = do
                 renderMCPTrace trace `shouldBe` "[HTTP] Request received: POST /api/mcp (authenticated)"
 
             it "MCPHttp with nested OAuth delegates correctly" $ do
-                let uri = fromJust $ parseURI "http://localhost/callback"
-                    trace = MCPHttp $ HTTPOAuth $ TraceClientRegistration (unsafeClientId "client-golden") (unsafeRedirectUri uri)
+                let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
+                    trace = MCPHttp $ HTTPOAuth $ TraceClientRegistration (unsafeClientId "client-golden") redirectUri
                 renderMCPTrace trace `shouldBe` "[HTTP:OAuth] Client registered: client-golden (http://localhost/callback)"

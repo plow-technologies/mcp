@@ -20,9 +20,8 @@ import MCP.Trace.Protocol (ProtocolTrace (..), renderProtocolTrace)
 import MCP.Trace.Server (ServerTrace (..), renderServerTrace)
 import MCP.Trace.StdIO (StdIOTrace (..), renderStdIOTrace)
 import MCP.Trace.Types (MCPTrace (..), renderMCPTrace)
-import Network.URI (parseURI)
 import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
-import Servant.OAuth2.IDP.Types (unsafeClientId, unsafeRedirectUri)
+import Servant.OAuth2.IDP.Types (mkRedirectUri, unsafeClientId)
 import Test.Hspec
 
 spec :: Spec
@@ -254,8 +253,8 @@ spec = do
                 rendered `shouldSatisfy` T.isInfixOf "req-1"
 
             it "renders HTTPOAuth nested events" $ do
-                let uri = fromJust $ parseURI "http://localhost/callback"
-                    trace = HTTPOAuth (TraceClientRegistration (unsafeClientId "client-1") (unsafeRedirectUri uri))
+                let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
+                    trace = HTTPOAuth (TraceClientRegistration (unsafeClientId "client-1") redirectUri)
                     rendered = renderHTTPTrace trace
                 rendered `shouldSatisfy` (not . T.null)
                 rendered `shouldSatisfy` T.isInfixOf "client-1"
@@ -293,8 +292,8 @@ spec = do
                 rendered `shouldSatisfy` T.isInfixOf "/mcp"
 
             it "renders nested OAuth traces via MCPHttp" $ do
-                let uri = fromJust $ parseURI "http://localhost/callback"
-                    trace = MCPHttp $ HTTPOAuth $ TraceClientRegistration (unsafeClientId "client-1") (unsafeRedirectUri uri)
+                let redirectUri = fromJust $ mkRedirectUri "http://localhost/callback"
+                    trace = MCPHttp $ HTTPOAuth $ TraceClientRegistration (unsafeClientId "client-1") redirectUri
                     rendered = renderMCPTrace trace
                 rendered `shouldSatisfy` (not . T.null)
                 rendered `shouldSatisfy` T.isInfixOf "client-1"

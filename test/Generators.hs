@@ -46,7 +46,7 @@ import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Time.Calendar (addDays, fromGregorian)
 import Data.Time.Clock (UTCTime (..), secondsToDiffTime)
-import Network.URI (URI, parseURI)
+import Network.URI (URI)
 import Test.QuickCheck
 
 -- OAuth domain types
@@ -85,6 +85,7 @@ import Servant.OAuth2.IDP.Types (
     mkClientName,
     mkCodeChallenge,
     mkCodeVerifier,
+    mkRedirectUri,
     mkScope,
     unAccessTokenId,
     unAuthCodeId,
@@ -96,7 +97,6 @@ import Servant.OAuth2.IDP.Types (
     unsafeAccessTokenId,
     unsafeAuthCodeId,
     unsafeClientId,
-    unsafeRedirectUri,
     unsafeRefreshTokenId,
     unsafeSessionId,
     unsafeUserId,
@@ -167,10 +167,8 @@ instance Arbitrary RedirectUri where
                 else genHostname
         port <- chooseInt (1024, 65535)
         path <- genPath
-        let uriStr = scheme ++ "://" ++ host ++ ":" ++ show port ++ path
-        case parseURI uriStr of
-            Just uri -> pure (unsafeRedirectUri uri)
-            Nothing -> arbitrary -- Retry if URI parsing fails
+        let uriStr = T.pack $ scheme ++ "://" ++ host ++ ":" ++ show port ++ path
+        maybe arbitrary pure (mkRedirectUri uriStr) -- Retry if URI parsing fails
       where
         genHostname :: Gen String
         genHostname = do

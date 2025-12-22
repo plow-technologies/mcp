@@ -268,8 +268,10 @@ Uses 32 bytes (256 bits) of cryptographic randomness, base16-encoded.
 generateAuthCodeId :: Text -> IO AuthCodeId
 generateAuthCodeId prefix = do
     randomBytes <- getRandomBytes 32 :: IO ByteString
-    let randomHex = TE.decodeUtf8 $ convertToBase Base16 randomBytes
-        idText = prefix <> randomHex
+    randomHex <- case TE.decodeUtf8' $ convertToBase Base16 randomBytes of
+        Right t -> return t
+        Left err -> error $ "generateAuthCodeId: Base16 encoding produced invalid UTF-8 (impossible): " ++ show err
+    let idText = prefix <> randomHex
     case mkAuthCodeId idText of
         Just codeId -> return codeId
         Nothing -> error "generateAuthCodeId: crypto random generation produced empty text (impossible)"
@@ -280,8 +282,10 @@ Uses 32 bytes (256 bits) of cryptographic randomness, base16-encoded.
 generateClientId :: Text -> IO ClientId
 generateClientId prefix = do
     randomBytes <- getRandomBytes 32 :: IO ByteString
-    let randomHex = TE.decodeUtf8 $ convertToBase Base16 randomBytes
-        idText = prefix <> randomHex
+    randomHex <- case TE.decodeUtf8' $ convertToBase Base16 randomBytes of
+        Right t -> return t
+        Left err -> error $ "generateClientId: Base16 encoding produced invalid UTF-8 (impossible): " ++ show err
+    let idText = prefix <> randomHex
     case mkClientId idText of
         Just clientId -> return clientId
         Nothing -> error "generateClientId: crypto random generation produced empty text (impossible)"
@@ -293,7 +297,10 @@ Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx where y is [8-9a-b].
 generateSessionId :: IO SessionId
 generateSessionId = do
     randomBytes <- getRandomBytes 16 :: IO ByteString
-    let hex = TE.decodeUtf8 $ convertToBase Base16 randomBytes
+    hex <- case TE.decodeUtf8' $ convertToBase Base16 randomBytes of
+        Right t -> return t
+        Left err -> error $ "generateSessionId: Base16 encoding produced invalid UTF-8 (impossible): " ++ show err
+    let
         -- Format as UUID v4: 8-4-4-4-12
         part1 = T.take 8 hex
         part2 = T.take 4 $ T.drop 8 hex
@@ -302,7 +309,8 @@ generateSessionId = do
         -- Set variant bits (10xx in binary, so first hex digit is 8-b)
         variantByte = T.take 1 $ T.drop 16 hex
         part4Variant = case T.unpack variantByte of
-            [c] | c >= '0' && c <= '3' -> "8"
+            [c]
+                | c >= '0' && c <= '3' -> "8"
                 | c >= '4' && c <= '7' -> "9"
                 | c >= '8' && c <= 'b' -> "a"
                 | otherwise -> "b"
@@ -320,8 +328,10 @@ Uses 32 bytes (256 bits) of cryptographic randomness, base16-encoded.
 generateRefreshTokenId :: Text -> IO RefreshTokenId
 generateRefreshTokenId prefix = do
     randomBytes <- getRandomBytes 32 :: IO ByteString
-    let randomHex = TE.decodeUtf8 $ convertToBase Base16 randomBytes
-        idText = prefix <> randomHex
+    randomHex <- case TE.decodeUtf8' $ convertToBase Base16 randomBytes of
+        Right t -> return t
+        Left err -> error $ "generateRefreshTokenId: Base16 encoding produced invalid UTF-8 (impossible): " ++ show err
+    let idText = prefix <> randomHex
     case mkRefreshTokenId idText of
         Just tokenId -> return tokenId
         Nothing -> error "generateRefreshTokenId: crypto random generation produced empty text (impossible)"
@@ -1121,4 +1131,3 @@ instance ToJSON PendingAuthorization where
             , "pending_resource" .= fmap (T.pack . show) pendingResource
             , "pending_created_at" .= pendingCreatedAt
             ]
-

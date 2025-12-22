@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+{- HLINT ignore "Avoid partial function" -}
+
 {- |
 Module      : Laws.AuthCodeFunctorSpec
 Description : Property tests for AuthorizationCode Functor laws
@@ -11,9 +13,9 @@ Portability : GHC
 -}
 module Laws.AuthCodeFunctorSpec (spec) where
 
+import Data.Maybe (fromJust)
 import Data.Set qualified as Set
 import Data.Time.Format (defaultTimeLocale, parseTimeM)
-import Network.URI qualified
 import Test.Hspec
 import Test.Hspec.QuickCheck (prop)
 
@@ -23,9 +25,9 @@ import Servant.OAuth2.IDP.Types (
     CodeChallengeMethod (..),
     UserId,
     mkCodeChallenge,
+    mkRedirectUri,
     unsafeAuthCodeId,
     unsafeClientId,
-    unsafeRedirectUri,
     unsafeScope,
     unsafeUserId,
  )
@@ -67,9 +69,7 @@ mkTestAuthCode userId =
         , authExpiry = testTime
         }
   where
-    testRedirectUri = case Network.URI.parseURI "https://example.com/callback" of
-        Just uri -> unsafeRedirectUri uri
-        Nothing -> error "Invalid test URI"
+    testRedirectUri = fromJust $ mkRedirectUri "https://example.com/callback"
     testTime = case parseTimeM True defaultTimeLocale "%Y-%m-%d" "2025-01-01" of
         Just t -> t
         Nothing -> error "Invalid test time"
