@@ -16,11 +16,13 @@ Test suite for consolidated OAuth error types in Servant.OAuth2.IDP.Errors.
 -}
 module Servant.OAuth2.IDP.ErrorsSpec (spec) where
 
+import Control.Monad.Reader (ReaderT)
 import Data.Aeson (decode, encode)
 import Data.Maybe (fromJust)
 import Data.Text qualified as T
 import Network.HTTP.Types.Status (status400)
 import Servant.OAuth2.IDP.Errors
+import Servant.OAuth2.IDP.Store.InMemory (OAuthStoreError (..), OAuthTVarEnv)
 import Servant.OAuth2.IDP.Types (
     ClientId,
     CodeChallengeMethod (..),
@@ -514,3 +516,53 @@ spec = do
             show SessionCookieMismatch `shouldContain` "SessionCookieMismatch"
             show (SessionNotFound testSessionId) `shouldContain` "SessionNotFound"
             show (SessionExpired testSessionId) `shouldContain` "SessionExpired"
+
+    describe "OAuthError unified sum type (FR-004b)" $ do
+        -- For testing, we use ReaderT OAuthTVarEnv IO as the monad type parameter
+        -- This is the actual monad type used in production (in-memory store)
+        describe "construction and pattern matching" $ do
+            it "OAuthValidation constructor wraps ValidationError" $ do
+                let validationErr = ClientNotRegistered testClientId
+                    oauthErr = OAuthValidation validationErr :: OAuthError (ReaderT OAuthTVarEnv IO)
+                case oauthErr of
+                    OAuthValidation (ClientNotRegistered cid) -> cid `shouldBe` testClientId
+                    _ -> expectationFailure "Pattern match failed - expected OAuthValidation"
+
+            it "OAuthAuthorization constructor wraps AuthorizationError" $ do
+                let authErr = ExpiredCode
+                    oauthErr = OAuthAuthorization authErr :: OAuthError (ReaderT OAuthTVarEnv IO)
+                case oauthErr of
+                    OAuthAuthorization ExpiredCode -> return ()
+                    _ -> expectationFailure "Pattern match failed - expected OAuthAuthorization"
+
+            it "OAuthLoginFlow constructor wraps LoginFlowError" $ do
+                let loginErr = CookiesRequired
+                    oauthErr = OAuthLoginFlow loginErr :: OAuthError (ReaderT OAuthTVarEnv IO)
+                case oauthErr of
+                    OAuthLoginFlow CookiesRequired -> return ()
+                    _ -> expectationFailure "Pattern match failed - expected OAuthLoginFlow"
+
+            it "OAuthStore constructor wraps OAuthStateError" $ do
+                let storeErr = StoreUnavailable "Database connection failed"
+                    oauthErr = OAuthStore storeErr :: OAuthError (ReaderT OAuthTVarEnv IO)
+                case oauthErr of
+                    OAuthStore (StoreUnavailable msg) -> msg `shouldBe` "Database connection failed"
+                    _ -> expectationFailure "Pattern match failed - expected OAuthStore"
+
+        describe "exhaustive pattern matching" $ do
+            it "distinguishes between different error types" $ do
+                let validationErr = OAuthValidation EmptyRedirectUris :: OAuthError (ReaderT OAuthTVarEnv IO)
+                    authErr = OAuthAuthorization PKCEVerificationFailed :: OAuthError (ReaderT OAuthTVarEnv IO)
+                    loginErr = OAuthLoginFlow SessionCookieMismatch :: OAuthError (ReaderT OAuthTVarEnv IO)
+                    storeErr = OAuthStore (StoreInternalError "storage error") :: OAuthError (ReaderT OAuthTVarEnv IO)
+
+                let classify :: OAuthError (ReaderT OAuthTVarEnv IO) -> String
+                    classify (OAuthValidation _) = "validation"
+                    classify (OAuthAuthorization _) = "authorization"
+                    classify (OAuthLoginFlow _) = "login"
+                    classify (OAuthStore _) = "store"
+
+                classify validationErr `shouldBe` "validation"
+                classify authErr `shouldBe` "authorization"
+                classify loginErr `shouldBe` "login"
+                classify storeErr `shouldBe` "store"

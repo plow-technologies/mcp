@@ -52,6 +52,9 @@ module Servant.OAuth2.IDP.Errors (
     -- * Login Flow Errors
     LoginFlowError (..),
 
+    -- * Unified Error Type (FR-004b)
+    OAuthError (..),
+
     -- * Error Response
     OAuthErrorResponse (..),
 ) where
@@ -75,6 +78,7 @@ import Lucid (
     title_,
  )
 import Network.HTTP.Types.Status (Status, status400, status401, status403)
+import Servant.OAuth2.IDP.Store (OAuthStateError)
 import Servant.OAuth2.IDP.Types (
     AuthCodeId,
     ClientId (..),
@@ -500,3 +504,32 @@ errorMessage (SessionNotFound _) =
     "Session not found or has expired. Please restart the authorization flow."
 errorMessage (SessionExpired _) =
     "Your login session has expired. Please restart the authorization flow."
+
+-- -----------------------------------------------------------------------------
+-- Unified Error Type (FR-004b)
+-- -----------------------------------------------------------------------------
+
+{- | Unified error type for all OAuth operations.
+
+Consolidates:
+- ValidationError: semantic validation failures
+- AuthorizationError: OAuth protocol errors (RFC 6749)
+- LoginFlowError: login flow failures
+- OAuthStateError m: storage backend errors (associated type)
+
+Enables single point of error-to-ServerError conversion with exhaustive
+pattern matching per spec FR-004b.
+
+The type is parameterized by the monad 'm' to allow different storage backends
+to provide their own error types via the OAuthStateError associated type.
+-}
+data OAuthError m
+    = -- | Semantic validation error (400)
+      OAuthValidation ValidationError
+    | -- | OAuth protocol error (400/401/403)
+      OAuthAuthorization AuthorizationError
+    | -- | Login flow error (400)
+      OAuthLoginFlow LoginFlowError
+    | -- | Storage backend error (500)
+      OAuthStore (OAuthStateError m)
+    deriving stock (Generic)
