@@ -42,8 +42,8 @@ import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
 import Servant.OAuth2.IDP.Types (
     ClientInfo (..),
+    mkClientId,
     mkClientSecret,
-    unsafeClientId,
  )
 
 {- | Dynamic client registration endpoint (polymorphic).
@@ -100,7 +100,10 @@ handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqR
     let prefix = oauthClientIdPrefix oauthEnv
     uuid <- liftIO UUID.nextRandom
     let clientIdText = prefix <> UUID.toText uuid
-        clientId = unsafeClientId clientIdText
+        -- Safe because UUID.toText always produces non-empty text
+        clientId = case mkClientId clientIdText of
+            Just cid -> cid
+            Nothing -> error "mkClientId should never fail: UUID.toText always produces valid text"
 
     -- Convert NonEmpty to Set for ClientInfo
     -- Note: ClientInfo from OAuth.Types requires NonEmpty and Set

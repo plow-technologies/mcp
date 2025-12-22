@@ -114,7 +114,7 @@ import Servant.OAuth2.IDP.Server (LoginForm, OAuthAPI, oauthServer)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Store.InMemory (OAuthTVarEnv, defaultExpiryConfig, newOAuthTVarEnv)
 import Servant.OAuth2.IDP.Trace (OAuthTrace)
-import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthGrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), UserId (..), unUserId, unsafeScope)
+import Servant.OAuth2.IDP.Types (ClientAuthMethod (..), CodeChallengeMethod (..), GrantType (..), OAuthGrantType (..), PendingAuthorization (..), RedirectUri (..), ResponseType (..), Scope, UserId (..), mkScope, unUserId)
 
 -- | HTML content type for Servant
 data HTML
@@ -672,6 +672,14 @@ extractCapabilityNames (ServerCapabilities res prpts tls comps logCap _exp) =
         , maybe [] (const ["logging"]) logCap
         ]
 
+{- | Helper to create known-valid Scope from hardcoded strings.
+This is safe because the input strings are compile-time constants that we know are valid.
+-}
+mkKnownScope :: Text -> Scope
+mkKnownScope t = case mkScope t of
+    Just s -> s
+    Nothing -> Prelude.error $ "mkKnownScope: invalid hardcoded scope: " <> T.unpack t
+
 {- | Bundle of OAuth configuration for demo/testing
 Contains both protocol-level settings (OAuthEnv) and MCP-specific settings.
 -}
@@ -693,7 +701,7 @@ defaultDemoOAuthBundle =
         resourceMetadata = case mkProtectedResourceMetadata
             baseUrlText
             [baseUrlText]
-            (Just [unsafeScope "mcp:read", unsafeScope "mcp:write"])
+            (Just [mkKnownScope "mcp:read", mkKnownScope "mcp:write"])
             (Just ["header"])
             Nothing
             Nothing of
@@ -709,7 +717,7 @@ defaultDemoOAuthBundle =
                 , oauthAuthCodePrefix = "code_"
                 , oauthRefreshTokenPrefix = "rt_"
                 , oauthClientIdPrefix = "client_"
-                , oauthSupportedScopes = [unsafeScope "mcp:read", unsafeScope "mcp:write"]
+                , oauthSupportedScopes = [mkKnownScope "mcp:read", mkKnownScope "mcp:write"]
                 , oauthSupportedResponseTypes = ResponseCode :| []
                 , oauthSupportedGrantTypes = OAuthAuthorizationCode :| [OAuthClientCredentials]
                 , oauthSupportedAuthMethods = AuthNone :| []
@@ -719,9 +727,9 @@ defaultDemoOAuthBundle =
                 , oauthServerName = "MCP Server"
                 , oauthScopeDescriptions =
                     Map.fromList
-                        [ (unsafeScope "mcp:read", "Read MCP resources")
-                        , (unsafeScope "mcp:write", "Write MCP resources")
-                        , (unsafeScope "mcp:tools", "Execute MCP tools")
+                        [ (mkKnownScope "mcp:read", "Read MCP resources")
+                        , (mkKnownScope "mcp:write", "Write MCP resources")
+                        , (mkKnownScope "mcp:tools", "Execute MCP tools")
                         ]
                 }
      in DemoOAuthBundle
@@ -735,7 +743,7 @@ defaultProtectedResourceMetadata baseUrl =
     case mkProtectedResourceMetadata
         baseUrl
         [baseUrl]
-        (Just [unsafeScope "mcp:read", unsafeScope "mcp:write"])
+        (Just [mkKnownScope "mcp:read", mkKnownScope "mcp:write"])
         (Just ["header"])
         Nothing
         Nothing of

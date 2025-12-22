@@ -89,9 +89,7 @@ module Servant.OAuth2.IDP.Types (
     ClientInfo (..),
     PendingAuthorization (..),
 
-    -- * Unsafe constructors (INTERNAL USE ONLY)
-
-    -- | WARNING: These bypass all validation logic. Use ONLY at tests
+    -- * Unsafe Constructors (for tests and boundary modules only)
     unsafeAuthCodeId,
     unsafeClientId,
     unsafeSessionId,
