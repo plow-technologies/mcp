@@ -69,6 +69,7 @@ module MCP.Server.HTTP.AppEnv (
     -- * Error Translation
     toServerError,
     domainErrorToServerError,
+    appErrorToServerError,
 ) where
 
 import Control.Concurrent.STM (TVar, atomically, readTVar, writeTVar)
@@ -459,6 +460,21 @@ toServerError (AuthorizationErr authzErr) =
 toServerError (LoginFlowErr loginErr) =
     -- Render LoginFlowError as HTML using ToHtml instance
     err400{errBody = LBS.fromStrict . TE.encodeUtf8 . TL.toStrict . renderText . toHtml $ loginErr}
+
+{- | Translate AppError to Servant ServerError using oauthErrorToServerError.
+
+Maps AppError constructors to OAuthError and delegates to oauthErrorToServerError:
+
+* 'OAuthStoreErr': Maps to OAuthStore constructor → 500 Internal Server Error
+* 'ValidationErr': Maps to OAuthValidation constructor → 400 Bad Request
+* 'AuthorizationErr': Maps to OAuthAuthorization constructor → varies (400/401/403)
+* 'LoginFlowErr': Maps to OAuthLoginFlow constructor → 400 Bad Request
+* 'AuthBackendErr': Logs and returns generic 401 (credentials are sensitive)
+
+This function is used by runAppM to convert domain errors at the Servant boundary.
+-}
+appErrorToServerError :: AppError -> ServerError
+appErrorToServerError = error "appErrorToServerError: not implemented"
 
 -- -----------------------------------------------------------------------------
 -- Utilities
