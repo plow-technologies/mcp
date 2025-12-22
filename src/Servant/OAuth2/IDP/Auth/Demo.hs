@@ -4,6 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 {- |
 Module      : Servant.OAuth2.IDP.Auth.Demo
@@ -71,6 +72,7 @@ import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.:?), 
 import Data.ByteArray qualified as BA
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import GHC.Generics (Generic)
 import Servant.Auth.Server (FromJWT, ToJWT)
@@ -85,6 +87,7 @@ import Servant.OAuth2.IDP.Auth.Backend (
     usernameText,
  )
 import Servant.OAuth2.IDP.Types (UserId, mkUserId)
+import Test.QuickCheck (Arbitrary (..), Gen, elements, frequency, getNonEmpty, listOf1)
 
 -- -----------------------------------------------------------------------------
 -- User Types
@@ -226,3 +229,27 @@ defaultDemoCredentialStore =
                     ]
             , storeSalt = salt
             }
+
+-- ============================================================================
+-- QuickCheck Arbitrary Instances
+-- ============================================================================
+
+{- |
+These Arbitrary instances live in the type-defining module to:
+
+1. Have access to constructors for generation (required)
+2. Enable QuickCheck as library dependency (dead code elimination removes unused instances)
+3. Allow tests to be library consumers using smart constructors only
+-}
+instance Arbitrary AuthUser where
+    arbitrary = do
+        userUserId <- arbitrary
+        userUserEmail <- frequency [(1, pure Nothing), (3, Just <$> genEmail)]
+        userUserName <- frequency [(1, pure Nothing), (3, Just . T.pack . getNonEmpty <$> arbitrary)]
+        pure AuthUser{..}
+      where
+        genEmail :: Gen Text
+        genEmail = do
+            local <- listOf1 (elements (['a' .. 'z'] ++ ['0' .. '9'] ++ ['.', '_']))
+            domain <- elements ["example.com", "test.org", "mail.io"]
+            pure $ T.pack (local ++ "@" ++ domain)

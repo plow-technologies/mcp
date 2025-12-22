@@ -113,18 +113,19 @@ import Data.Aeson.Types (Parser)
 import Data.ByteArray.Encoding (Base (..), convertToBase)
 import Data.ByteString (ByteString)
 import Data.Char (isAsciiLower, isAsciiUpper, isDigit, isHexDigit, isSpace)
-import Data.List.NonEmpty (NonEmpty, nonEmpty)
-import Data.Maybe (isNothing)
+import Data.List.NonEmpty (NonEmpty ((:|)), nonEmpty)
+import Data.Maybe (fromJust, isNothing)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Data.Time.Clock (NominalDiffTime, UTCTime)
+import Data.Time.Calendar (addDays, fromGregorian)
+import Data.Time.Clock (NominalDiffTime, UTCTime (..), secondsToDiffTime)
 import Data.Word (Word8)
 import GHC.Generics (Generic)
 import Network.URI (URI, parseURI, uriAuthority, uriRegName, uriScheme, uriToString)
-import Test.QuickCheck (Arbitrary (..), chooseInt, elements, vectorOf)
+import Test.QuickCheck (Arbitrary (..), Gen, chooseInt, elements, frequency, getNonEmpty, listOf, listOf1, suchThat, vectorOf)
 import Web.HttpApiData (FromHttpApiData (..), ToHttpApiData (..))
 
 -- -----------------------------------------------------------------------------
@@ -1142,3 +1143,216 @@ instance ToJSON PendingAuthorization where
             , "pending_resource" .= fmap (T.pack . show) pendingResource
             , "pending_created_at" .= pendingCreatedAt
             ]
+
+-- ============================================================================
+-- QuickCheck Arbitrary Instances
+-- ============================================================================
+
+{- |
+These Arbitrary instances live in the type-defining module to:
+
+1. Have access to constructors for generation (required)
+2. Enable QuickCheck as library dependency (dead code elimination removes unused instances)
+3. Allow tests to be library consumers using smart constructors only
+-}
+
+-- | UTCTime instance (orphan but standard library type)
+instance Arbitrary UTCTime where
+    arbitrary = do
+        -- Generate times within 10 years from 2020-01-01
+        days <- chooseInt (0, 365 * 10)
+        secs <- chooseInt (0, 86400) -- Seconds in a day
+        let baseDay = fromGregorian 2020 1 1
+        pure $ UTCTime (addDays (fromIntegral days) baseDay) (secondsToDiffTime (fromIntegral secs))
+    shrink (UTCTime day time) =
+        [UTCTime day' time | day' <- take 5 [addDays (-1) day, addDays 1 day]]
+
+-- ============================================================================
+-- Identity Newtypes (non-empty text)
+-- ============================================================================
+
+{- HLINT ignore "Avoid partial function" -}
+instance Arbitrary AuthCodeId where
+    arbitrary = fromJust . mkAuthCodeId . T.pack . getNonEmpty <$> arbitrary
+    shrink ac =
+        [ fromJust (mkAuthCodeId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unAuthCodeId ac))
+        , not (null s)
+        ]
+
+instance Arbitrary ClientId where
+    arbitrary = fromJust . mkClientId . T.pack . getNonEmpty <$> arbitrary
+    shrink cid =
+        [ fromJust (mkClientId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unClientId cid))
+        , not (null s)
+        ]
+
+-- SessionId requires UUID format: 8-4-4-4-12 hex pattern
+instance Arbitrary SessionId where
+    arbitrary = fromJust . mkSessionId <$> genUUID
+      where
+        genUUID :: Gen Text
+        genUUID = do
+            p1 <- genHex 8
+            p2 <- genHex 4
+            p3 <- genHex 4
+            p4 <- genHex 4
+            p5 <- genHex 12
+            pure $ T.intercalate "-" [p1, p2, p3, p4, p5]
+
+        genHex :: Int -> Gen Text
+        genHex n = T.pack <$> vectorOf n (elements "0123456789abcdef")
+
+    shrink _ = [] -- Don't shrink UUIDs (they must maintain format)
+
+instance Arbitrary UserId where
+    arbitrary = fromJust . mkUserId . T.pack . getNonEmpty <$> arbitrary
+    shrink uid =
+        [ fromJust (mkUserId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unUserId uid))
+        , not (null s)
+        ]
+
+instance Arbitrary RefreshTokenId where
+    arbitrary = fromJust . mkRefreshTokenId . T.pack . getNonEmpty <$> arbitrary
+    shrink rt =
+        [ fromJust (mkRefreshTokenId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unRefreshTokenId rt))
+        , not (null s)
+        ]
+
+instance Arbitrary AccessTokenId where
+    arbitrary = fromJust . mkAccessTokenId . T.pack . getNonEmpty <$> arbitrary
+    shrink at =
+        [ fromJust (mkAccessTokenId (T.pack s)) -- Known-good: shrink preserves non-empty
+        | s <- shrink (T.unpack (unAccessTokenId at))
+        , not (null s)
+        ]
+
+-- ============================================================================
+-- Value Newtypes
+-- ============================================================================
+
+-- RedirectUri: generate valid URIs (https:// or http://localhost)
+instance Arbitrary RedirectUri where
+    arbitrary = do
+        scheme <- elements ["https", "http"]
+        host <-
+            if scheme == "http"
+                then elements ["localhost", "127.0.0.1"]
+                else genHostname
+        port <- chooseInt (1024, 65535)
+        path <- genPath
+        let uriStr = T.pack $ scheme ++ "://" ++ host ++ ":" ++ show port ++ path
+        maybe arbitrary pure (mkRedirectUri uriStr) -- Retry if URI parsing fails
+      where
+        genHostname :: Gen String
+        genHostname = do
+            subdomain <- listOf1 (elements (['a' .. 'z'] ++ ['0' .. '9']))
+            domain <- elements ["example.com", "test.org", "app.io"]
+            pure $ subdomain ++ "." ++ domain
+
+        genPath :: Gen String
+        genPath = do
+            segments <- listOf (listOf1 (elements (['a' .. 'z'] ++ ['0' .. '9'] ++ ['-', '_'])))
+            pure $ concatMap ("/" ++) segments
+
+    shrink _ = [] -- Don't shrink URIs (complex validation)
+
+-- CodeChallenge: base64url charset, 43-128 chars
+instance Arbitrary CodeChallenge where
+    arbitrary = do
+        len <- chooseInt (43, 128) -- PKCE spec: 43-128 characters
+        let base64urlChars = ['A' .. 'Z'] ++ ['a' .. 'z'] ++ ['0' .. '9'] ++ ['-', '_']
+        challengeText <- T.pack <$> vectorOf len (elements base64urlChars)
+        maybe arbitrary pure (mkCodeChallenge challengeText) -- Retry if validation fails
+    shrink _ = [] -- Don't shrink (must maintain length constraints)
+
+-- CodeVerifier: unreserved chars per RFC 7636, 43-128 chars
+instance Arbitrary CodeVerifier where
+    arbitrary = do
+        len <- chooseInt (43, 128) -- PKCE spec: 43-128 characters
+        -- RFC 7636: unreserved = ALPHA / DIGIT / "-" / "." / "_" / "~"
+        let unreservedChars = ['A' .. 'Z'] ++ ['a' .. 'z'] ++ ['0' .. '9'] ++ ['-', '.', '_', '~']
+        verifierText <- T.pack <$> vectorOf len (elements unreservedChars)
+        maybe arbitrary pure (mkCodeVerifier verifierText) -- Retry if validation fails
+    shrink _ = [] -- Don't shrink (must maintain length constraints)
+
+-- OAuthState: opaque CSRF protection token (any non-empty text)
+instance Arbitrary OAuthState where
+    arbitrary = OAuthState . T.pack . getNonEmpty <$> arbitrary
+    shrink (OAuthState t) = [OAuthState (T.pack s) | s <- shrink (T.unpack t), not (null s)]
+
+-- ResourceIndicator: RFC 8707 resource indicator (any non-empty text, typically a URI)
+instance Arbitrary ResourceIndicator where
+    arbitrary = ResourceIndicator . T.pack . getNonEmpty <$> arbitrary
+    shrink (ResourceIndicator t) = [ResourceIndicator (T.pack s) | s <- shrink (T.unpack t), not (null s)]
+
+-- ============================================================================
+-- ADTs (use arbitraryBoundedEnum)
+-- ============================================================================
+
+instance Arbitrary CodeChallengeMethod where
+    arbitrary = elements [S256, Plain]
+
+instance Arbitrary GrantType where
+    arbitrary = elements [GrantAuthorizationCode, GrantRefreshToken, GrantClientCredentials]
+
+instance Arbitrary ResponseType where
+    arbitrary = elements [ResponseCode, ResponseToken]
+
+instance Arbitrary ClientAuthMethod where
+    arbitrary = elements [AuthNone, AuthClientSecretPost, AuthClientSecretBasic]
+
+-- ============================================================================
+-- Domain Entities
+-- ============================================================================
+
+instance (Arbitrary userId) => Arbitrary (AuthorizationCode userId) where
+    arbitrary = do
+        authCodeId <- arbitrary
+        authClientId <- arbitrary
+        authRedirectUri <- arbitrary
+        authCodeChallenge <- arbitrary
+        authCodeChallengeMethod <- arbitrary
+        -- Scopes: generate 0-5 scopes
+        authScopes <- Set.fromList <$> listOf arbitrary `suchThat` (\xs -> length xs <= 5)
+        authUserId <- arbitrary
+        authExpiry <- arbitrary
+        pure AuthorizationCode{..}
+
+instance Arbitrary ClientInfo where
+    arbitrary = do
+        clientNameText <- T.pack . getNonEmpty <$> arbitrary
+        let clientName = case mkClientName clientNameText of
+                Just cn -> cn
+                Nothing -> error "Types.hs: generated invalid ClientName (should never happen)"
+        -- NonEmpty RedirectUris
+        headUri <- arbitrary
+        tailUris <- listOf arbitrary `suchThat` (\xs -> length xs <= 3)
+        let clientRedirectUris = headUri :| tailUris
+        -- Grant types: 1-3 grant types
+        clientGrantTypes <- Set.fromList <$> listOf1 arbitrary `suchThat` (\xs -> length xs <= 3)
+        -- Response types: 1-2 response types
+        clientResponseTypes <- Set.fromList <$> listOf1 arbitrary `suchThat` (\xs -> length xs <= 2)
+        clientAuthMethod <- arbitrary
+        pure ClientInfo{..}
+
+instance Arbitrary PendingAuthorization where
+    arbitrary = do
+        pendingClientId <- arbitrary
+        pendingRedirectUri <- arbitrary
+        pendingCodeChallenge <- arbitrary
+        pendingCodeChallengeMethod <- arbitrary
+        -- Optional scope
+        pendingScope <- frequency [(1, pure Nothing), (3, Just . Set.fromList <$> listOf arbitrary `suchThat` (\xs -> length xs <= 5))]
+        -- Optional state (OAuthState newtype)
+        pendingState <- frequency [(1, pure Nothing), (3, Just . OAuthState . T.pack . getNonEmpty <$> arbitrary)]
+        -- Optional resource URI
+        pendingResource <- frequency [(1, pure Nothing), (2, Just <$> genResourceURI)]
+        pendingCreatedAt <- arbitrary
+        pure PendingAuthorization{..}
+      where
+        genResourceURI :: Gen URI
+        genResourceURI = unRedirectUri <$> arbitrary
