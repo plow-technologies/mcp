@@ -93,18 +93,6 @@ module Servant.OAuth2.IDP.Types (
     ClientInfo (..),
     PendingAuthorization (..),
 
-    -- * Test Utilities (UNSAFE - bypass validation)
-    unsafeAuthCodeId,
-    unsafeClientId,
-    unsafeSessionId,
-    unsafeAccessTokenId,
-    unsafeRefreshTokenId,
-    unsafeUserId,
-    unsafeRedirectUri,
-    unsafeScope,
-    unsafeClientName,
-    unsafeClientSecret,
-
     -- * QuickCheck Helpers (monomorphic, no orphans)
     arbitraryUTCTime,
     shrinkUTCTime,
@@ -341,52 +329,6 @@ generateRefreshTokenId prefix = do
     case mkRefreshTokenId idText of
         Just tokenId -> return tokenId
         Nothing -> error "generateRefreshTokenId: crypto random generation produced empty text (impossible)"
-
--- -----------------------------------------------------------------------------
--- Test Utilities (UNSAFE - bypass validation)
--- -----------------------------------------------------------------------------
-
--- | UNSAFE: Create AuthCodeId bypassing validation (for tests only)
-unsafeAuthCodeId :: Text -> AuthCodeId
-unsafeAuthCodeId = AuthCodeId
-
--- | UNSAFE: Create ClientId bypassing validation (for tests only)
-unsafeClientId :: Text -> ClientId
-unsafeClientId = ClientId
-
--- | UNSAFE: Create SessionId bypassing validation (for tests only)
-unsafeSessionId :: Text -> SessionId
-unsafeSessionId = SessionId
-
--- | UNSAFE: Create AccessTokenId bypassing validation (for tests only)
-unsafeAccessTokenId :: Text -> AccessTokenId
-unsafeAccessTokenId = AccessTokenId
-
--- | UNSAFE: Create RefreshTokenId bypassing validation (for tests only)
-unsafeRefreshTokenId :: Text -> RefreshTokenId
-unsafeRefreshTokenId = RefreshTokenId
-
--- | UNSAFE: Create UserId bypassing validation (for tests only)
-unsafeUserId :: Text -> UserId
-unsafeUserId = UserId
-
--- | UNSAFE: Create Scope bypassing validation (for tests only)
-unsafeScope :: Text -> Scope
-unsafeScope = Scope
-
--- | UNSAFE: Create ClientName bypassing validation (for tests only)
-unsafeClientName :: Text -> ClientName
-unsafeClientName = ClientName
-
--- | UNSAFE: Create ClientSecret bypassing validation (for tests only)
-unsafeClientSecret :: Text -> ClientSecret
-unsafeClientSecret = ClientSecret
-
--- | UNSAFE: Create RedirectUri bypassing validation (for tests only)
-unsafeRedirectUri :: Text -> RedirectUri
-unsafeRedirectUri t = case parseURI (T.unpack t) of
-    Just uri -> RedirectUri uri
-    Nothing -> error $ "unsafeRedirectUri: invalid URI: " ++ T.unpack t
 
 -- -----------------------------------------------------------------------------
 -- Value Newtypes
