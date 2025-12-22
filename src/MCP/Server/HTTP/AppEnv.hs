@@ -1,8 +1,11 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
 {- |
@@ -65,6 +68,7 @@ module MCP.Server.HTTP.AppEnv (
 
     -- * Error Translation
     toServerError,
+    domainErrorToServerError,
 ) where
 
 import Control.Concurrent.STM (TVar, atomically, readTVar, writeTVar)
@@ -76,30 +80,34 @@ import Control.Monad.Time (MonadTime (..))
 import Crypto.JOSE (JWK)
 import Data.Aeson (encode)
 import Data.ByteString.Lazy qualified as LBS
+import Data.Functor.Const (Const (..))
+import Data.Generics.Sum (AsType (..))
 import Data.Map.Strict qualified as Map
+import Data.Monoid (First (..))
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Text.Lazy qualified as TL
 import Data.Time.Clock (UTCTime, addUTCTime)
 import GHC.Generics (Generic)
 import Lucid (renderText, toHtml)
-import Network.HTTP.Types.Status (statusCode)
+import Network.HTTP.Types.Status (Status, statusCode)
 import Network.Wai.Handler.Warp (Port)
 import Servant (Handler, ServerError (..), err400, err401, err500, errBody)
 import Servant.Auth.Server (JWTSettings)
 
 import MCP.Server (ServerState)
 import MCP.Server.Auth (MCPOAuthConfig, ProtectedResourceMetadata)
-import MCP.Trace.HTTP (HTTPTrace (..))
+import MCP.Trace.HTTP (HTTPTrace (..), OAuthBoundaryTrace (..))
 import MCP.Types (Implementation, ServerCapabilities)
-import Plow.Logging (IOTracer)
+import Plow.Logging (IOTracer, traceWith)
 import Servant.OAuth2.IDP.Auth.Backend (AuthBackend (..))
 import Servant.OAuth2.IDP.Auth.Demo (AuthUser, DemoAuthError (..), DemoCredentialEnv)
-import Servant.OAuth2.IDP.Boundary (domainErrorToServerError)
 import Servant.OAuth2.IDP.Config (OAuthEnv)
 import Servant.OAuth2.IDP.Errors (
     AuthorizationError (..),
     LoginFlowError,
+    OAuthErrorResponse (..),
     ValidationError (..),
     authorizationErrorToResponse,
     validationErrorToResponse,
@@ -281,6 +289,119 @@ data AppError
 -- -----------------------------------------------------------------------------
 -- Error Translation
 -- -----------------------------------------------------------------------------
+
+{- | Translate domain errors to Servant ServerError with security-conscious handling.
+
+This function uses generic-lens 'AsType' constraints to pattern match on
+different error types and translate them appropriately:
+
+* **OAuthStateError**: Logs details, returns generic 500 (no details exposed)
+* **AuthBackendError**: Logs details, returns generic 401 (no details exposed)
+* **ValidationError**: Returns descriptive 400 (safe to expose)
+* **AuthorizationError**: Returns OAuth error response (safe to expose)
+
+== Returns
+
+* @Just ServerError@: If the error matches one of the prisms
+* @Nothing@: If the error doesn't match any prism (caller handles it)
+-}
+domainErrorToServerError ::
+    forall m m' e trace.
+    ( MonadIO m
+    , AsType (OAuthStateError m') e
+    , AsType (AuthBackendError m') e
+    , AsType ValidationError e
+    , AsType AuthorizationError e
+    , AsType LoginFlowError e
+    , Show (OAuthStateError m')
+    , Show (AuthBackendError m')
+    ) =>
+    IOTracer trace ->
+    (OAuthBoundaryTrace -> trace) ->
+    e ->
+    m (Maybe ServerError)
+domainErrorToServerError tracer inject err =
+    -- Try each prism in order
+    case tryOAuthStateError err of
+        Just storeErr -> do
+            -- Log details but return generic 500
+            liftIO $ traceWith tracer $ inject $ BoundaryStoreError $ T.pack $ show storeErr
+            pure $ Just $ err500{errBody = "Internal server error"}
+        Nothing -> case tryAuthBackendError err of
+            Just authErr -> do
+                -- Log details but return generic 401
+                liftIO $ traceWith tracer $ inject $ BoundaryAuthError $ T.pack $ show authErr
+                pure $ Just $ err401{errBody = "Unauthorized"}
+            Nothing -> case tryValidationError err of
+                Just validationErr -> do
+                    -- Validation errors are safe to expose
+                    let (status, message) = validationErrorToResponse validationErr
+                    pure $ Just $ toServerErrorPlain status message
+                Nothing -> case tryLoginFlowError err of
+                    Just loginErr -> do
+                        -- Login flow errors are safe to expose, render as HTML via ToHtml instance
+                        liftIO $ traceWith tracer $ inject $ BoundaryLoginFlowError loginErr
+                        pure $ Just $ toServerErrorLoginFlow loginErr
+                    Nothing -> case tryAuthorizationError err of
+                        Just authzErr -> do
+                            -- Authorization errors use OAuth JSON format
+                            let (status, oauthResp) = authorizationErrorToResponse authzErr
+                            pure $ Just $ toServerErrorOAuth status oauthResp
+                        Nothing ->
+                            -- No prism matched
+                            pure Nothing
+  where
+    -- Try to extract OAuthStateError using AsType prism
+    -- Using Const (First a) to properly extract 'a' from sum type 'e'
+    tryOAuthStateError :: e -> Maybe (OAuthStateError m')
+    tryOAuthStateError = getFirst . getConst . (_Typed @(OAuthStateError m') @e) (Const . First . Just)
+
+    -- Try to extract AuthBackendError using AsType prism
+    tryAuthBackendError :: e -> Maybe (AuthBackendError m')
+    tryAuthBackendError = getFirst . getConst . (_Typed @(AuthBackendError m') @e) (Const . First . Just)
+
+    -- Try to extract ValidationError using AsType prism
+    tryValidationError :: e -> Maybe ValidationError
+    tryValidationError = getFirst . getConst . (_Typed @ValidationError @e) (Const . First . Just)
+
+    -- Try to extract LoginFlowError using AsType prism
+    tryLoginFlowError :: e -> Maybe LoginFlowError
+    tryLoginFlowError = getFirst . getConst . (_Typed @LoginFlowError @e) (Const . First . Just)
+
+    -- Try to extract AuthorizationError using AsType prism
+    tryAuthorizationError :: e -> Maybe AuthorizationError
+    tryAuthorizationError = getFirst . getConst . (_Typed @AuthorizationError @e) (Const . First . Just)
+
+    -- Convert Status + Text to ServerError
+    toServerErrorPlain :: Network.HTTP.Types.Status.Status -> Text -> ServerError
+    toServerErrorPlain status message =
+        ServerError
+            { errHTTPCode = fromIntegral $ statusCode status
+            , errReasonPhrase = ""
+            , errBody = LBS.fromStrict $ TE.encodeUtf8 message
+            , errHeaders = [("Content-Type", "text/plain; charset=utf-8")]
+            }
+
+    -- Convert Status + OAuthErrorResponse to ServerError
+    toServerErrorOAuth :: Network.HTTP.Types.Status.Status -> OAuthErrorResponse -> ServerError
+    toServerErrorOAuth status oauthResp =
+        ServerError
+            { errHTTPCode = fromIntegral $ statusCode status
+            , errReasonPhrase = ""
+            , errBody = encode oauthResp
+            , errHeaders = [("Content-Type", "application/json; charset=utf-8")]
+            }
+
+    -- Convert LoginFlowError to HTML ServerError using ToHtml instance
+    toServerErrorLoginFlow :: LoginFlowError -> ServerError
+    toServerErrorLoginFlow loginErr =
+        let htmlBytes = LBS.fromStrict $ TE.encodeUtf8 $ TL.toStrict $ renderText $ toHtml loginErr
+         in ServerError
+                { errHTTPCode = 400
+                , errReasonPhrase = ""
+                , errBody = htmlBytes
+                , errHeaders = [("Content-Type", "text/html; charset=utf-8")]
+                }
 
 {- | Translate application errors to Servant ServerError.
 

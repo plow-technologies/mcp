@@ -101,7 +101,6 @@ library
         Servant.OAuth2.IDP.PKCE
         Servant.OAuth2.IDP.Store
         Servant.OAuth2.IDP.Store.InMemory
-        Servant.OAuth2.IDP.Boundary
         Servant.OAuth2.IDP.Errors
         Servant.OAuth2.IDP.Trace
         Servant.OAuth2.IDP.Server

@@ -46,15 +46,11 @@ import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Text.Encoding.Error (lenientDecode)
-import MCP.Server.HTTP.AppEnv (AppError (..), AppM)
-import MCP.Trace.HTTP (HTTPTrace (..))
+import MCP.Server.HTTP.AppEnv (AppError (..), AppM, domainErrorToServerError)
+import MCP.Trace.HTTP (HTTPTrace (..), OAuthBoundaryTrace (..))
 import Plow.Logging (IOTracer (..), Tracer (..))
 import Servant.OAuth2.IDP.Auth.Backend (mkUsername)
 import Servant.OAuth2.IDP.Auth.Demo (DemoAuthError (..))
-import Servant.OAuth2.IDP.Boundary (
-    OAuthBoundaryTrace (..),
-    domainErrorToServerError,
- )
 import Servant.OAuth2.IDP.Errors (
     AccessDeniedReason (..),
     AuthorizationError (..),
