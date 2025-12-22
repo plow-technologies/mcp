@@ -23,18 +23,22 @@ module Servant.OAuth2.IDP.Types (
     -- * Identity Newtypes
     AuthCodeId,
     mkAuthCodeId,
+    generateAuthCodeId,
     unAuthCodeId,
     ClientId,
     mkClientId,
+    generateClientId,
     unClientId,
     SessionId,
     mkSessionId,
+    generateSessionId,
     unSessionId,
     AccessTokenId,
     mkAccessTokenId,
     unAccessTokenId,
     RefreshTokenId,
     mkRefreshTokenId,
+    generateRefreshTokenId,
     unRefreshTokenId,
     UserId,
     mkUserId,
@@ -88,11 +92,26 @@ module Servant.OAuth2.IDP.Types (
     AuthorizationCode (..),
     ClientInfo (..),
     PendingAuthorization (..),
+
+    -- * Test Utilities (UNSAFE - bypass validation)
+    unsafeAuthCodeId,
+    unsafeClientId,
+    unsafeSessionId,
+    unsafeAccessTokenId,
+    unsafeRefreshTokenId,
+    unsafeUserId,
+    unsafeRedirectUri,
+    unsafeScope,
+    unsafeClientName,
+    unsafeClientSecret,
 ) where
 
 import Control.Monad (forM_, guard, when)
+import Crypto.Random (MonadRandom (getRandomBytes))
 import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, withText, (.:), (.:?), (.=))
 import Data.Aeson.Types (Parser)
+import Data.ByteArray.Encoding (Base (..), convertToBase)
+import Data.ByteString (ByteString)
 import Data.Char (isAsciiLower, isAsciiUpper, isDigit, isHexDigit, isSpace)
 import Data.List.NonEmpty (NonEmpty, nonEmpty)
 import Data.Maybe (isNothing)
@@ -100,6 +119,7 @@ import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
 import Data.Time.Clock (NominalDiffTime, UTCTime)
 import Data.Word (Word8)
 import GHC.Generics (Generic)
@@ -237,6 +257,120 @@ instance FromHttpApiData UserId where
 
 instance ToHttpApiData UserId where
     toUrlPiece = unUserId
+
+-- -----------------------------------------------------------------------------
+-- Crypto-Random ID Generators
+-- -----------------------------------------------------------------------------
+
+{- | Generate a cryptographically secure AuthCodeId with prefix
+Uses 32 bytes (256 bits) of cryptographic randomness, base16-encoded.
+-}
+generateAuthCodeId :: Text -> IO AuthCodeId
+generateAuthCodeId prefix = do
+    randomBytes <- getRandomBytes 32 :: IO ByteString
+    let randomHex = TE.decodeUtf8 $ convertToBase Base16 randomBytes
+        idText = prefix <> randomHex
+    case mkAuthCodeId idText of
+        Just codeId -> return codeId
+        Nothing -> error "generateAuthCodeId: crypto random generation produced empty text (impossible)"
+
+{- | Generate a cryptographically secure ClientId with prefix
+Uses 32 bytes (256 bits) of cryptographic randomness, base16-encoded.
+-}
+generateClientId :: Text -> IO ClientId
+generateClientId prefix = do
+    randomBytes <- getRandomBytes 32 :: IO ByteString
+    let randomHex = TE.decodeUtf8 $ convertToBase Base16 randomBytes
+        idText = prefix <> randomHex
+    case mkClientId idText of
+        Just clientId -> return clientId
+        Nothing -> error "generateClientId: crypto random generation produced empty text (impossible)"
+
+{- | Generate a cryptographically secure SessionId (UUID format)
+Uses 16 bytes (128 bits) of cryptographic randomness, formatted as UUID v4.
+Format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx where y is [8-9a-b].
+-}
+generateSessionId :: IO SessionId
+generateSessionId = do
+    randomBytes <- getRandomBytes 16 :: IO ByteString
+    let hex = TE.decodeUtf8 $ convertToBase Base16 randomBytes
+        -- Format as UUID v4: 8-4-4-4-12
+        part1 = T.take 8 hex
+        part2 = T.take 4 $ T.drop 8 hex
+        -- Set version to 4 (UUID v4)
+        part3 = "4" <> T.take 3 (T.drop 13 hex)
+        -- Set variant bits (10xx in binary, so first hex digit is 8-b)
+        variantByte = T.take 1 $ T.drop 16 hex
+        part4Variant = case T.unpack variantByte of
+            [c] | c >= '0' && c <= '3' -> "8"
+                | c >= '4' && c <= '7' -> "9"
+                | c >= '8' && c <= 'b' -> "a"
+                | otherwise -> "b"
+            _ -> "8"
+        part4 = part4Variant <> T.take 3 (T.drop 17 hex)
+        part5 = T.take 12 $ T.drop 20 hex
+        uuidText = T.intercalate "-" [part1, part2, part3, part4, part5]
+    case mkSessionId uuidText of
+        Just sessionId -> return sessionId
+        Nothing -> error "generateSessionId: crypto random UUID generation produced invalid format (impossible)"
+
+{- | Generate a cryptographically secure RefreshTokenId with prefix
+Uses 32 bytes (256 bits) of cryptographic randomness, base16-encoded.
+-}
+generateRefreshTokenId :: Text -> IO RefreshTokenId
+generateRefreshTokenId prefix = do
+    randomBytes <- getRandomBytes 32 :: IO ByteString
+    let randomHex = TE.decodeUtf8 $ convertToBase Base16 randomBytes
+        idText = prefix <> randomHex
+    case mkRefreshTokenId idText of
+        Just tokenId -> return tokenId
+        Nothing -> error "generateRefreshTokenId: crypto random generation produced empty text (impossible)"
+
+-- -----------------------------------------------------------------------------
+-- Test Utilities (UNSAFE - bypass validation)
+-- -----------------------------------------------------------------------------
+
+-- | UNSAFE: Create AuthCodeId bypassing validation (for tests only)
+unsafeAuthCodeId :: Text -> AuthCodeId
+unsafeAuthCodeId = AuthCodeId
+
+-- | UNSAFE: Create ClientId bypassing validation (for tests only)
+unsafeClientId :: Text -> ClientId
+unsafeClientId = ClientId
+
+-- | UNSAFE: Create SessionId bypassing validation (for tests only)
+unsafeSessionId :: Text -> SessionId
+unsafeSessionId = SessionId
+
+-- | UNSAFE: Create AccessTokenId bypassing validation (for tests only)
+unsafeAccessTokenId :: Text -> AccessTokenId
+unsafeAccessTokenId = AccessTokenId
+
+-- | UNSAFE: Create RefreshTokenId bypassing validation (for tests only)
+unsafeRefreshTokenId :: Text -> RefreshTokenId
+unsafeRefreshTokenId = RefreshTokenId
+
+-- | UNSAFE: Create UserId bypassing validation (for tests only)
+unsafeUserId :: Text -> UserId
+unsafeUserId = UserId
+
+-- | UNSAFE: Create Scope bypassing validation (for tests only)
+unsafeScope :: Text -> Scope
+unsafeScope = Scope
+
+-- | UNSAFE: Create ClientName bypassing validation (for tests only)
+unsafeClientName :: Text -> ClientName
+unsafeClientName = ClientName
+
+-- | UNSAFE: Create ClientSecret bypassing validation (for tests only)
+unsafeClientSecret :: Text -> ClientSecret
+unsafeClientSecret = ClientSecret
+
+-- | UNSAFE: Create RedirectUri bypassing validation (for tests only)
+unsafeRedirectUri :: Text -> RedirectUri
+unsafeRedirectUri t = case parseURI (T.unpack t) of
+    Just uri -> RedirectUri uri
+    Nothing -> error $ "unsafeRedirectUri: invalid URI: " ++ T.unpack t
 
 -- -----------------------------------------------------------------------------
 -- Value Newtypes

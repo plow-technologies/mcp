@@ -28,7 +28,6 @@ import Data.Generics.Sum.Typed (AsType, injectTyped)
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as Set
 import Data.Text qualified as T
-import Data.UUID.V4 qualified as UUID
 import Network.URI (parseURI)
 import Servant (
     Header,
@@ -39,7 +38,6 @@ import Web.HttpApiData (ToHttpApiData (..), toUrlPiece)
 
 import Control.Monad.Time (MonadTime (..))
 import Data.Time.Clock (nominalDiffTimeToSeconds)
-import Data.UUID qualified as UUID
 import Plow.Logging (IOTracer, traceWith)
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Errors (
@@ -63,9 +61,10 @@ import Servant.OAuth2.IDP.Types (
     ResponseType (..),
     Scopes (..),
     SessionCookie (..),
-    mkSessionId,
+    generateSessionId,
     serializeScopeSet,
     unClientName,
+    unSessionId,
  )
 
 {- | Authorization endpoint handler (polymorphic).
@@ -155,10 +154,7 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
     liftIO $ traceWith tracer $ TraceAuthorizationRequest clientId scopeList Success
 
     -- Generate session ID
-    sessionIdText <- liftIO $ UUID.toText <$> UUID.nextRandom
-    let sessionId = case mkSessionId sessionIdText of
-            Just sid -> sid
-            Nothing -> error "Generated invalid session UUID"
+    sessionId <- liftIO generateSessionId
     now <- currentTime
 
     -- Extract Set Scope from Scopes (already parsed by Servant)
@@ -186,7 +182,8 @@ handleAuthorize responseType clientId redirectUri codeChallenge codeChallengeMet
     liftIO $ traceWith tracer $ TraceLoginPageServed sessionId
 
     -- Build session cookie
-    let sessionExpirySeconds :: Integer
+    let sessionIdText = unSessionId sessionId
+        sessionExpirySeconds :: Integer
         sessionExpirySeconds = truncate $ nominalDiffTimeToSeconds (oauthLoginSessionExpiry config)
         -- Add Secure flag if requireHTTPS is True in OAuth config
         secureFlag = if oauthRequireHTTPS config then "; Secure" else ""

@@ -26,9 +26,7 @@ import Data.Generics.Product.Typed (getTyped)
 import Data.Generics.Sum.Typed (AsType, injectTyped)
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as Set
-import Data.UUID.V4 qualified as UUID
 
-import Data.UUID qualified as UUID
 import Plow.Logging (IOTracer, traceWith)
 import Servant.OAuth2.IDP.API (
     ClientRegistrationRequest (..),
@@ -42,7 +40,7 @@ import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Trace (OAuthTrace (..))
 import Servant.OAuth2.IDP.Types (
     ClientInfo (..),
-    mkClientId,
+    generateClientId,
     mkClientSecret,
  )
 
@@ -98,12 +96,7 @@ handleRegister (ClientRegistrationRequest clientName reqRedirects reqGrants reqR
 
     -- Generate client ID
     let prefix = oauthClientIdPrefix oauthEnv
-    uuid <- liftIO UUID.nextRandom
-    let clientIdText = prefix <> UUID.toText uuid
-        -- Safe because UUID.toText always produces non-empty text
-        clientId = case mkClientId clientIdText of
-            Just cid -> cid
-            Nothing -> error "mkClientId should never fail: UUID.toText always produces valid text"
+    clientId <- liftIO $ generateClientId prefix
 
     -- Convert NonEmpty to Set for ClientInfo
     -- Note: ClientInfo from OAuth.Types requires NonEmpty and Set

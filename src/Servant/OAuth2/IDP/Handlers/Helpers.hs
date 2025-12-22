@@ -28,10 +28,8 @@ import Data.Generics.Sum.Typed (AsType, injectTyped)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
-import Data.UUID.V4 qualified as UUID
 import Servant.Auth.Server (JWTSettings, ToJWT, makeJWT)
 
-import Data.UUID qualified as UUID
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Errors (
     AuthorizationError (..),
@@ -44,9 +42,9 @@ import Servant.OAuth2.IDP.Types (
     AuthCodeId,
     RefreshTokenId,
     SessionId (..),
+    generateAuthCodeId,
+    generateRefreshTokenId,
     mkAccessTokenId,
-    mkAuthCodeId,
-    mkRefreshTokenId,
     mkSessionId,
  )
 
@@ -66,13 +64,8 @@ extractSessionFromCookie cookieHeader =
 -- | Generate authorization code with config prefix
 generateAuthCode :: OAuthEnv -> IO AuthCodeId
 generateAuthCode config = do
-    uuid <- UUID.nextRandom
     let prefix = oauthAuthCodePrefix config
-        codeText = prefix <> UUID.toText uuid
-    -- Use smart constructor; UUID generation ensures non-empty
-    case mkAuthCodeId codeText of
-        Just codeId -> return codeId
-        Nothing -> error "generateAuthCode: UUID generation produced empty text (impossible)"
+    generateAuthCodeId prefix
 
 {- | Generate JWT access token for user
 
@@ -93,10 +86,5 @@ generateJWTAccessToken user jwtSettings = do
 -- | Generate refresh token with configurable prefix
 generateRefreshTokenWithConfig :: OAuthEnv -> IO RefreshTokenId
 generateRefreshTokenWithConfig config = do
-    uuid <- UUID.nextRandom
     let prefix = oauthRefreshTokenPrefix config
-        tokenText = prefix <> UUID.toText uuid
-    -- Use smart constructor; UUID generation ensures non-empty
-    case mkRefreshTokenId tokenText of
-        Just tokenId -> return tokenId
-        Nothing -> error "generateRefreshTokenWithConfig: UUID generation produced empty text (impossible)"
+    generateRefreshTokenId prefix
