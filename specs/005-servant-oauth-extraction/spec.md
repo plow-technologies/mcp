@@ -39,6 +39,13 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 
 - Q: Should UnsupportedCodeChallengeMethod be ValidationError or InvalidRequestReason? → A: Keep in ValidationError (line 126 correct, line 139 was erroneous duplication). Semantically a validation failure (client sent unsupported method), not a protocol-level authorization error.
 
+### Session 2025-12-22
+
+- Q: Should unsafe* constructors be eliminated and how? → A: Delete Boundary module entirely; delete ALL unsafe* exports from Types. Typeclass instances (ToJSON, FromJSON, ToHttpApiData, FromHttpApiData) ARE the boundary and MUST live in type-defining modules. Arbitrary instances MUST also live in type-defining modules. Module cohesion follows from which types need to "see" each other's internals for instance definitions. Only export type names (not constructors) except for types structurally unable to encode invalid values (NonEmpty, Bool, etc.).
+- Q: Should QuickCheck be a library dependency for Arbitrary instances? → A: Yes. QuickCheck becomes library dependency. GHC dead code elimination removes unused Arbitrary instances from production binaries. QuickCheck is stable and reliable.
+- Q: How should test files construct values without unsafe* constructors? → A: Tests are library consumers - use smart constructors (handle Maybe/Either) and Arbitrary instances. No special test privileges; same API visibility as any other consumer code.
+- Q: Where should generator functions live for constructor access? → A: Move ALL generators to Types.hs. Delete Handlers/Helpers.hs entirely. GOLDEN RULE: The only code requiring audit to verify correct value construction lives in the type-defining module. Future refactoring may split into strongly-connected type modules, but consolidate in Types.hs for now.
+
 ## Goals
 
 1. **Package Independence**: `Servant.OAuth2.IDP.*` modules should have zero imports from `MCP.*` namespace
@@ -173,8 +180,15 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 **Smart Constructor Hygiene** (MUST enforce per Constitution Principle II):
 - Export pattern: `module Foo (FooType, mkFooType, unFooType, ...)` - export type name but NOT constructor
 - MUST NOT export: `FooType(..)` or `FooType(FooType)` - not even for tests
+- MUST NOT export `unsafe*` prefix functions - delete ALL such functions
 - If pattern matching is needed by consumers, export pattern synonyms instead of raw constructors
 - This allows proving types are correctly constructed by construction
+**Boundary = Typeclass Instances** (MUST enforce):
+- `ToJSON`, `FromJSON`, `ToHttpApiData`, `FromHttpApiData` instances ARE the system boundary
+- These instances MUST be defined in the same module as the type (need constructor access)
+- `Arbitrary` instances MUST also live in type-defining modules (need constructor access for generation)
+- Delete `Servant.OAuth2.IDP.Boundary` module entirely (no longer needed)
+- Module cohesion heuristic: types that need to see each other's internals for instance definitions belong in same module
 **Smart Constructor Export Fixes Required** (9 types currently violate hygiene):
 - **Critical (security bypass)**:
   - `RedirectUri (..)` → `RedirectUri` (bypasses SSRF protection in mkRedirectUri)
@@ -187,11 +201,14 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
   - `RefreshTokenId (..)` → `RefreshTokenId` (bypasses non-empty validation)
   - `UserId (..)` → `UserId` (bypasses non-empty validation)
   - `ClientName (..)` → `ClientName` (bypasses non-empty validation)
-- Internal module `Types/Internal.hs` may keep `(..)` exports for boundary translation (by design)
-**Generator Return Types** (Helpers.hs changes):
-- `generateAuthCode :: OAuthEnv -> IO AuthCodeId` (was `HTTPServerConfig -> IO Text`)
-- `generateJWTAccessToken :: OAuthUser m -> JWTSettings -> m AccessTokenId` (was `m Text`)
-- `generateRefreshTokenWithConfig :: OAuthEnv -> IO RefreshTokenId` (was `HTTPServerConfig -> IO Text`)
+- No internal modules with `(..)` exports needed - boundary instances live with types
+**Generator Functions** (move from Helpers.hs to Types.hs, then delete Helpers.hs):
+- `generateAuthCode :: OAuthEnv -> IO AuthCodeId` (was in Helpers.hs returning Text)
+- `generateJWTAccessToken :: OAuthUser m -> JWTSettings -> m AccessTokenId` (was in Helpers.hs returning Text)
+- `generateRefreshTokenWithConfig :: OAuthEnv -> IO RefreshTokenId` (was in Helpers.hs returning Text)
+- `generateClientId :: OAuthEnv -> IO ClientId` (was in Helpers.hs returning Text)
+- All other generator/constructor functions in Helpers.hs move to Types.hs
+- GOLDEN RULE: Only code in type-defining module needs audit for correct construction
 **Type Threading** (MUST NOT convert to Text mid-flow):
 - Domain types flow from generation to storage to response without unwrapping
 - Storage maps use domain types as keys: `Map AuthCodeId (AuthorizationCode user)` not `Map Text ...`
@@ -300,6 +317,7 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 - `monad-time` package (already a dependency via MCP.Server.Time)
 - `network-uri` package for URI type in OAuthEnv
 - `base` package for NonEmpty from Data.List.NonEmpty (used in OAuthEnv supported* fields)
+- `QuickCheck` package for Arbitrary instances in type-defining modules (GHC DCE removes from production)
 
 ## Files Created (WIP - already exist)
 
@@ -315,17 +333,16 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 
 | File | Changes |
 |------|---------|
-| `src/Servant/OAuth2/IDP/Types.hs` | Remove ValidationError, AuthorizationError (moved to Errors), add OAuthGrantType (from MCP.Server.Auth) |
+| `src/Servant/OAuth2/IDP/Types.hs` | Remove ValidationError, AuthorizationError (moved to Errors), add OAuthGrantType (from MCP.Server.Auth), add Arbitrary instances for all types, remove ALL unsafe* exports, absorb ALL generator functions from Helpers.hs |
 | `src/Servant/OAuth2/IDP/Store.hs` | MonadTime import, Errors import |
 | `src/Servant/OAuth2/IDP/Store/InMemory.hs` | MonadTime import |
 | `src/Servant/OAuth2/IDP/API.hs` | Metadata import |
 | `src/Servant/OAuth2/IDP/Server.hs` | Config/Trace types, Errors import |
-| `src/Servant/OAuth2/IDP/Handlers/Helpers.hs` | Config record, trace events, Errors import |
-| `src/Servant/OAuth2/IDP/Handlers/Metadata.hs` | Switch from HTTPServerConfig to OAuthEnv, simplify handleProtectedResourceMetadata to just return resourceServerMetadata field (no conditional/default logic), remove defaultProtectedResourceMetadata helper (or keep as internal/test utility) |
-| `src/Servant/OAuth2/IDP/Handlers/Registration.hs` | Config/Trace types, Errors import, switch OAuthTrace import to Servant.OAuth2.IDP.Trace |
-| `src/Servant/OAuth2/IDP/Handlers/Authorization.hs` | Config/Trace types, Errors import, MonadTime import |
-| `src/Servant/OAuth2/IDP/Handlers/Login.hs` | Config/Trace types, Errors import, MonadTime import, switch OAuthTrace import to Servant.OAuth2.IDP.Trace |
-| `src/Servant/OAuth2/IDP/Handlers/Token.hs` | Config/Trace types, PKCE import, Errors import, switch OAuthTrace import to Servant.OAuth2.IDP.Trace |
+| `src/Servant/OAuth2/IDP/Handlers/Metadata.hs` | Switch from HTTPServerConfig to OAuthEnv, simplify handleProtectedResourceMetadata to just return resourceServerMetadata field |
+| `src/Servant/OAuth2/IDP/Handlers/Registration.hs` | Config/Trace types, Errors import, generators from Types.hs (Helpers.hs deleted), switch OAuthTrace import |
+| `src/Servant/OAuth2/IDP/Handlers/Authorization.hs` | Config/Trace types, Errors import, MonadTime import, generators from Types.hs (Helpers.hs deleted) |
+| `src/Servant/OAuth2/IDP/Handlers/Login.hs` | Config/Trace types, Errors import, MonadTime import, switch OAuthTrace import |
+| `src/Servant/OAuth2/IDP/Handlers/Token.hs` | Config/Trace types, PKCE import, Errors import, generators from Types.hs (Helpers.hs deleted), switch OAuthTrace import |
 | `src/Servant/OAuth2/IDP/Handlers/HTML.hs` | Use `oauthServerName` from OAuthEnv for HTML titles, use `oauthScopeDescriptions` for scope text |
 | `src/Servant/OAuth2/IDP/Test/Internal.hs` | MonadTime import, fix doc comment typo |
 | `src/MCP/Server/Auth.hs` | Remove moved types (clean break), create MCPOAuthConfig |
@@ -336,7 +353,19 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 | `test/Trace/GoldenSpec.hs` | Import OAuthTrace and renderOAuthTrace from Servant.OAuth2.IDP.Trace |
 | `test/Trace/RenderSpec.hs` | Import OAuthTrace from Servant.OAuth2.IDP.Trace |
 | `test/Trace/OAuthSpec.hs` | Import OAuthTrace and renderOAuthTrace from Servant.OAuth2.IDP.Trace |
-| `mcp-haskell.cabal` | Add new modules, remove LoginFlowError module, remove MCP.Trace.OAuth module |
+| `test/TestMonad.hs` | Replace unsafeUserId with smart constructor |
+| `test/Laws/AuthCodeFunctorSpec.hs` | Replace unsafe* with smart constructors |
+| `test/Servant/OAuth2/IDP/MetadataSpec.hs` | Replace unsafeScope with mkScope |
+| `test/Servant/OAuth2/IDP/TraceSpec.hs` | Replace unsafe* with smart constructors |
+| `test/Servant/OAuth2/IDP/TypesSpec.hs` | Replace unsafe* with smart constructors |
+| `test/Servant/OAuth2/IDP/TokenRequestSpec.hs` | Replace unsafe* with smart constructors |
+| `test/Servant/OAuth2/IDP/LucidRenderingSpec.hs` | Replace unsafeSessionId with smart constructor |
+| `test/Servant/OAuth2/IDP/APISpec.hs` | Replace unsafeMk helper with smart constructors |
+| `test/Servant/OAuth2/IDP/ErrorsSpec.hs` | Replace unsafe* with smart constructors |
+| `test/MCP/Server/HTTP/McpAuthSpec.hs` | Replace unsafeUserId with smart constructor |
+| `src/Servant/OAuth2/IDP/Handlers/Registration.hs` | Use internal ClientId constructor (same module access) |
+| `src/MCP/Server/HTTP.hs` | Use mkScope smart constructor |
+| `mcp-haskell.cabal` | Add new modules, remove LoginFlowError module, remove MCP.Trace.OAuth module, remove Boundary module, add QuickCheck to library deps |
 
 ## Files to Delete
 
@@ -344,6 +373,9 @@ Prepare the `Servant.OAuth2.IDP.*` modules for extraction to a separate package 
 |------|--------|
 | `src/Servant/OAuth2/IDP/LoginFlowError.hs` | LoginFlowError moved to Errors module |
 | `src/MCP/Trace/OAuth.hs` | OAuthTrace moved to Servant.OAuth2.IDP.Trace; MCP.Trace.HTTP imports directly from Servant |
+| `src/Servant/OAuth2/IDP/Boundary.hs` | Boundary instances live in type-defining modules; unsafe constructors eliminated |
+| `src/Servant/OAuth2/IDP/Handlers/Helpers.hs` | All generators moved to Types.hs (GOLDEN RULE: constructors live with types) |
+| `test/Generators.hs` | Arbitrary instances moved to type-defining modules in src/ |
 
 ## Risks
 
