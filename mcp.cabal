@@ -106,7 +106,6 @@ library
         Servant.OAuth2.IDP.Server
         Servant.OAuth2.IDP.Handlers
         Servant.OAuth2.IDP.Handlers.HTML
-        Servant.OAuth2.IDP.Handlers.Helpers
         Servant.OAuth2.IDP.Handlers.Metadata
         Servant.OAuth2.IDP.Handlers.Registration
         Servant.OAuth2.IDP.Handlers.Authorization

@@ -29,6 +29,7 @@ import Data.Generics.Sum.Typed (AsType, injectTyped)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Set qualified as Set
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Time.Clock (addUTCTime)
 import Servant (
     Header,
@@ -48,7 +49,6 @@ import Servant.OAuth2.IDP.Errors (
     InvalidClientReason (..),
     LoginFlowError (..),
  )
-import Servant.OAuth2.IDP.Handlers.Helpers (extractSessionFromCookie, generateAuthCode)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Trace (DenialReason (..), OAuthTrace (..), OperationResult (..))
 import Servant.OAuth2.IDP.Types (
@@ -57,6 +57,8 @@ import Servant.OAuth2.IDP.Types (
     PendingAuthorization (..),
     RedirectTarget (..),
     SessionCookie (..),
+    generateAuthCodeId,
+    mkSessionId,
     pendingClientId,
     pendingCodeChallenge,
     pendingCodeChallengeMethod,
@@ -130,7 +132,15 @@ handleLogin mCookie loginForm = do
             throwError $ injectTyped @LoginFlowError CookiesRequired
         Just cookie ->
             -- Parse session cookie and verify it matches form session_id
-            let cookieSessionId = extractSessionFromCookie cookie
+            let cookies = T.splitOn ";" cookie
+                sessionCookies = filter (T.isInfixOf "mcp_session=") cookies
+                cookieSessionId = case sessionCookies of
+                    (sessionCookie : _) ->
+                        let parts = T.splitOn "=" sessionCookie
+                         in case parts of
+                                [_, value] -> mkSessionId (T.strip value)
+                                _ -> Nothing
+                    [] -> Nothing
              in unless (cookieSessionId == Just sessionId) $ do
                     -- Note: No specific ValidationError for cookie mismatch, LoginFlowError handles this
                     throwError $ injectTyped @LoginFlowError SessionCookieMismatch
@@ -185,7 +195,7 @@ handleLogin mCookie loginForm = do
                     liftIO $ traceWith tracer $ TraceAuthorizationGranted (pendingClientId pending) username
 
                     -- Generate authorization code
-                    code <- liftIO $ generateAuthCode config
+                    code <- liftIO $ generateAuthCodeId (oauthAuthCodePrefix config)
                     codeGenerationTime <- currentTime
                     let expirySeconds = oauthAuthCodeExpiry config
                         expiry = addUTCTime expirySeconds codeGenerationTime

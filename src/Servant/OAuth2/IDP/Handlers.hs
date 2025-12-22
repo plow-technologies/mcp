@@ -37,7 +37,6 @@ oauthServer =
 This module re-exports focused submodules:
 
 * "Servant.OAuth2.IDP.Handlers.HTML" - HTML rendering for login and error pages
-* "Servant.OAuth2.IDP.Handlers.Helpers" - Helper functions (session extraction, token generation)
 * "Servant.OAuth2.IDP.Handlers.Metadata" - OAuth metadata discovery endpoints
 * "Servant.OAuth2.IDP.Handlers.Registration" - Dynamic client registration
 * "Servant.OAuth2.IDP.Handlers.Authorization" - Authorization endpoint (login page display)
@@ -68,22 +67,13 @@ module Servant.OAuth2.IDP.Handlers (
     formatScopeDescriptions,
 
     -- * Helper Functions
-    extractSessionFromCookie,
-    generateAuthCode,
     generateJWTAccessToken,
-    generateRefreshTokenWithConfig,
 ) where
 
 import Servant.OAuth2.IDP.Handlers.Authorization (handleAuthorize)
 import Servant.OAuth2.IDP.Handlers.HTML (
     formatScopeDescriptions,
     scopeToDescription,
- )
-import Servant.OAuth2.IDP.Handlers.Helpers (
-    extractSessionFromCookie,
-    generateAuthCode,
-    generateJWTAccessToken,
-    generateRefreshTokenWithConfig,
  )
 import Servant.OAuth2.IDP.Handlers.Login (handleLogin)
 import Servant.OAuth2.IDP.Handlers.Metadata (
@@ -92,6 +82,7 @@ import Servant.OAuth2.IDP.Handlers.Metadata (
  )
 import Servant.OAuth2.IDP.Handlers.Registration (handleRegister)
 import Servant.OAuth2.IDP.Handlers.Token (
+    generateJWTAccessToken,
     handleAuthCodeGrant,
     handleRefreshTokenGrant,
     handleToken,

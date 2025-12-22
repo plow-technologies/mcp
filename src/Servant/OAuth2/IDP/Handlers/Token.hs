@@ -18,30 +18,36 @@ module Servant.OAuth2.IDP.Handlers.Token (
     handleToken,
     handleAuthCodeGrant,
     handleRefreshTokenGrant,
+    generateJWTAccessToken,
 ) where
 
 import Control.Monad (unless)
 import Control.Monad.Error.Class (MonadError, throwError)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (MonadReader, asks)
+import Data.ByteString.Lazy qualified as LBS
 import Data.Generics.Product (HasType)
 import Data.Generics.Product.Typed (getTyped)
 import Data.Generics.Sum.Typed (AsType, injectTyped)
 import Data.Set qualified as Set
+import Data.Text qualified as T
+import Data.Text.Encoding qualified as TE
 import Plow.Logging (IOTracer, traceWith)
-import Servant.Auth.Server (JWTSettings, ToJWT)
+import Servant.Auth.Server (JWTSettings, ToJWT, makeJWT)
 import Servant.OAuth2.IDP.API (TokenRequest (..), TokenResponse (..))
 import Servant.OAuth2.IDP.Config (OAuthEnv (..))
 import Servant.OAuth2.IDP.Errors (
     AuthorizationError (..),
     InvalidGrantReason (..),
+    InvalidRequestReason (..),
+    MalformedReason (..),
  )
-import Servant.OAuth2.IDP.Handlers.Helpers (generateJWTAccessToken, generateRefreshTokenWithConfig)
 import Servant.OAuth2.IDP.PKCE (validateCodeVerifier)
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
 import Servant.OAuth2.IDP.Trace (OAuthTrace (..), OperationResult (..))
 import Servant.OAuth2.IDP.Types (
     AccessToken (..),
+    AccessTokenId,
     AuthCodeId,
     AuthorizationCode (..),
     CodeVerifier,
@@ -55,10 +61,28 @@ import Servant.OAuth2.IDP.Types (
     authCodeChallenge,
     authScopes,
     authUserId,
+    generateRefreshTokenId,
+    mkAccessTokenId,
     mkTokenValidity,
     unAccessTokenId,
     unRefreshTokenId,
  )
+
+{- | Generate JWT access token for user
+
+Uses TypeApplications to specify the monad context (and thus the OAuthUser type).
+Call with: @generateJWTAccessToken \@m user jwtSettings@
+-}
+generateJWTAccessToken :: forall m e. (OAuthStateStore m, ToJWT (OAuthUser m), MonadIO m, MonadError e m, AsType AuthorizationError e) => OAuthUser m -> JWTSettings -> m AccessTokenId
+generateJWTAccessToken user jwtSettings = do
+    accessTokenResult <- liftIO $ makeJWT user jwtSettings Nothing
+    case accessTokenResult of
+        Left err -> throwError $ injectTyped @AuthorizationError $ InvalidRequest $ MalformedRequest $ UnparseableBody $ T.pack $ show err
+        Right accessToken -> case TE.decodeUtf8' $ LBS.toStrict accessToken of
+            Left decodeErr -> throwError $ injectTyped @AuthorizationError $ InvalidRequest $ MalformedRequest $ UnparseableBody $ T.pack $ show decodeErr
+            Right tokenText -> case mkAccessTokenId tokenText of
+                Just tokenId -> return tokenId
+                Nothing -> error "generateJWTAccessToken: JWT generation produced empty text (impossible)"
 
 {- | Token endpoint handler (polymorphic).
 
@@ -178,7 +202,7 @@ handleAuthCodeGrant code codeVerifier _mResource = do
 
     -- Generate tokens
     accessToken <- generateJWTAccessToken @m user jwtSettings
-    refreshToken <- liftIO $ generateRefreshTokenWithConfig config
+    refreshToken <- liftIO $ generateRefreshTokenId (oauthRefreshTokenPrefix config)
 
     -- Store tokens (code already deleted by consumeAuthCode)
     storeAccessToken accessToken user
