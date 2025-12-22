@@ -108,9 +108,11 @@ import Servant.OAuth2.IDP.Config (OAuthEnv)
 import Servant.OAuth2.IDP.Errors (
     AuthorizationError (..),
     LoginFlowError,
+    OAuthError (..),
     OAuthErrorResponse (..),
     ValidationError (..),
     authorizationErrorToResponse,
+    oauthErrorToServerError,
     validationErrorToResponse,
  )
 import Servant.OAuth2.IDP.Store (OAuthStateStore (..))
@@ -474,7 +476,29 @@ Maps AppError constructors to OAuthError and delegates to oauthErrorToServerErro
 This function is used by runAppM to convert domain errors at the Servant boundary.
 -}
 appErrorToServerError :: AppError -> ServerError
-appErrorToServerError = error "appErrorToServerError: not implemented"
+appErrorToServerError (OAuthStoreErr storeErr) =
+    -- Construct OAuthError AppM and delegate to oauthErrorToServerError
+    -- This maps to 500 with generic message (no backend leakage)
+    oauthErrorToServerError (OAuthStore storeErr :: OAuthError AppM)
+appErrorToServerError (ValidationErr validationErr) =
+    -- Construct OAuthError AppM and delegate to oauthErrorToServerError
+    -- This maps to 400 with descriptive plain text
+    oauthErrorToServerError (OAuthValidation validationErr :: OAuthError AppM)
+appErrorToServerError (AuthorizationErr authzErr) =
+    -- Construct OAuthError AppM and delegate to oauthErrorToServerError
+    -- This maps to appropriate status (400/401/403) with JSON
+    oauthErrorToServerError (OAuthAuthorization authzErr :: OAuthError AppM)
+appErrorToServerError (LoginFlowErr loginErr) =
+    -- Construct OAuthError AppM and delegate to oauthErrorToServerError
+    -- This maps to 400 with HTML error page
+    oauthErrorToServerError (OAuthLoginFlow loginErr :: OAuthError AppM)
+appErrorToServerError (AuthBackendErr _authErr) =
+    -- AuthBackendErr is MCP-specific, not OAuth protocol error
+    -- Return generic 401 without leaking credential details
+    err401
+        { errBody = "Unauthorized"
+        , errHeaders = [("Content-Type", "text/plain; charset=utf-8")]
+        }
 
 -- -----------------------------------------------------------------------------
 -- Utilities
